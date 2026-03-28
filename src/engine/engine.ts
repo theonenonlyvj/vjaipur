@@ -213,11 +213,14 @@ function sell(state: GameState, good: Good, quantity: number): Result<GameState>
   const newHand = player.hand.filter(c => !soldIds.has(c.id))
 
   // Take goods tokens (highest first)
-  const tokenPile = [...state.tokens[good]]
-  const awarded = tokenPile.splice(0, quantity)
+  const pile = state.tokens[good]
+  const awarded = pile.slice(0, quantity)
+  const tokenPile = pile.slice(quantity)
   const earnedTokens = awarded.map(value => ({ good, value }))
 
   // Take bonus token if selling 3+
+  // Selling 3, 4, or 5+ cards awards one bonus token from the matching tier pile.
+  // quantity >= 5 uses the five-pile (all sales of 5 or more get the same tier).
   let newBonusPiles = { ...state.bonusTokens }
   const earnedBonus: BonusToken[] = []
   if (quantity >= 5 && state.bonusTokens.five.length > 0) {
