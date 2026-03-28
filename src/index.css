@@ -1,0 +1,31 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1a0a00;
+  --text: #f0e8d8;
+  --surface: #2a1800;
+  --border: #5a3a20;
+
+  --diamond-bg: linear-gradient(135deg, #5a0010, #c0102a);
+  --diamond-accent: #ff4060;
+  --gold-bg: linear-gradient(135deg, #5a3a00, #c08010);
+  --gold-accent: #f0c030;
+  --silver-bg: linear-gradient(135deg, #2a3040, #6a7a90);
+  --silver-accent: #c0d0e0;
+  --cloth-bg: linear-gradient(135deg, #2a0040, #7a20a0);
+  --cloth-accent: #c060e0;
+  --spice-bg: linear-gradient(135deg, #0a2a00, #307820);
+  --spice-accent: #60c040;
+  --leather-bg: linear-gradient(135deg, #2a1400, #7a4018);
+  --leather-accent: #c08040;
+  --camel-bg: linear-gradient(135deg, #3a2a10, #907040);
+  --camel-accent: #d0a860;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
