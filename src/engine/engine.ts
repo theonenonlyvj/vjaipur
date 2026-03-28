@@ -115,6 +115,9 @@ function takeExchange(
       return { ok: false, error: Errors.EXCHANGE_CANNOT_TAKE_CAMEL }
     }
   }
+  if (new Set(marketIndices).size !== marketIndices.length) {
+    return { ok: false, error: Errors.MARKET_INDEX_OOB }
+  }
 
   const player = state.players[state.activePlayer]
   const camelsUsed = handIndices.filter(i => i === -1).length
@@ -134,7 +137,7 @@ function takeExchange(
   // Reject duplicate non-camel hand indices (would allow card duplication)
   const nonCamelHandIndices = handIndices.filter(i => i !== -1)
   if (new Set(nonCamelHandIndices).size !== nonCamelHandIndices.length) {
-    return { ok: false, error: Errors.HAND_INDEX_OOB }
+    return { ok: false, error: Errors.EXCHANGE_DUPLICATE_CARD }
   }
 
   const takenFromMarket = marketIndices.map(i => state.market[i])
@@ -170,6 +173,7 @@ function takeExchange(
   const allIds = [
     ...state.market.map(c => c.id),
     ...state.deck.map(c => c.id),
+    ...state.discard.map(c => c.id),
     ...state.players[0].hand.map(c => c.id),
     ...state.players[1].hand.map(c => c.id),
   ]

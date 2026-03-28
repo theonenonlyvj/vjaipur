@@ -16,6 +16,7 @@ export const Errors = {
   NO_CAMELS_IN_MARKET:      err('NO_CAMELS_IN_MARKET',      "There are no camels in the market to take"),
   MARKET_INDEX_OOB:         err('MARKET_INDEX_OOB',         "That market card doesn't exist"),
   HAND_INDEX_OOB:           err('HAND_INDEX_OOB',           "That hand card doesn't exist"),
+  EXCHANGE_DUPLICATE_CARD:  err('EXCHANGE_DUPLICATE_CARD',  "You can't use the same card twice in one exchange"),
   NOT_ENOUGH_CAMELS:        err('NOT_ENOUGH_CAMELS',        "You don't have enough camels in your herd for that exchange"),
   WRONG_PHASE:              err('WRONG_PHASE',              "You can't take an action right now"),
   CANNOT_TAKE_CAMEL:        err('CANNOT_TAKE_CAMEL',        "Use Take Camels to take camels — TAKE_SINGLE is for goods only"),
