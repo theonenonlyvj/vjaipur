@@ -94,8 +94,93 @@ function takeCamels(state: GameState): Result<GameState> {
   return { ok: true, value: checkRoundEnd(next) }
 }
 
-function takeExchange(_state: GameState, _marketIndices: number[], _handIndices: number[]): Result<GameState> {
-  return { ok: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not yet implemented' } }
+function takeExchange(
+  state: GameState,
+  marketIndices: number[],
+  handIndices: number[], // -1 means: give one camel from herd
+): Result<GameState> {
+  if (marketIndices.length < 2) {
+    return { ok: false, error: Errors.EXCHANGE_TOO_FEW }
+  }
+  if (marketIndices.length !== handIndices.length) {
+    return { ok: false, error: Errors.EXCHANGE_COUNT_MISMATCH }
+  }
+
+  // Validate market indices and reject camels
+  for (const i of marketIndices) {
+    if (i < 0 || i >= state.market.length) {
+      return { ok: false, error: Errors.MARKET_INDEX_OOB }
+    }
+    if (state.market[i].type === 'camel') {
+      return { ok: false, error: Errors.EXCHANGE_CANNOT_TAKE_CAMEL }
+    }
+  }
+
+  const player = state.players[state.activePlayer]
+  const camelsUsed = handIndices.filter(i => i === -1).length
+
+  // Validate herd has enough camels
+  if (camelsUsed > player.herd) {
+    return { ok: false, error: Errors.NOT_ENOUGH_CAMELS }
+  }
+
+  // Validate non-camel hand indices
+  for (const i of handIndices) {
+    if (i !== -1 && (i < 0 || i >= player.hand.length)) {
+      return { ok: false, error: Errors.HAND_INDEX_OOB }
+    }
+  }
+
+  const takenFromMarket = marketIndices.map(i => state.market[i])
+  const takenTypes = new Set(takenFromMarket.map(c => c.type))
+
+  const handCardsReturned = handIndices
+    .filter(i => i !== -1)
+    .map(i => player.hand[i])
+  const returnedGoodTypes = new Set(handCardsReturned.map(c => c.type))
+
+  // No same-type swap
+  for (const type of takenTypes) {
+    if (returnedGoodTypes.has(type as Good)) {
+      return { ok: false, error: Errors.EXCHANGE_SAME_TYPE }
+    }
+  }
+
+  // Remove returned hand cards, add taken cards
+  const returnedIds = new Set(handCardsReturned.map(c => c.id))
+  const handAfterRemoval = player.hand.filter(c => !returnedIds.has(c.id))
+  const newHandGoods = [...handAfterRemoval, ...takenFromMarket]
+
+  // Post-resolution hand limit check
+  if (newHandGoods.length > 7) {
+    return { ok: false, error: Errors.HAND_LIMIT }
+  }
+
+  // Build new market: replace taken slots with returned goods, then fill with camel placeholders
+  const newMarket = [...state.market]
+  const returnCards: Card[] = [...handCardsReturned]
+  // Add placeholder camel cards for each herd camel given (they go into market as camels)
+  for (let i = 0; i < camelsUsed; i++) {
+    // Use a stable id based on player herd index — safe since camels don't have ids tracked
+    returnCards.push({ id: -(i + 1), type: 'camel' })
+  }
+  for (let i = 0; i < marketIndices.length; i++) {
+    newMarket[marketIndices[i]] = returnCards[i]
+  }
+
+  const newPlayer = {
+    ...player,
+    hand: newHandGoods,
+    herd: player.herd - camelsUsed,
+  }
+
+  const next: GameState = {
+    ...state,
+    market: newMarket,
+    players: setPlayer(state, newPlayer),
+    activePlayer: nextPlayer(state),
+  }
+  return { ok: true, value: checkRoundEnd(next) }
 }
 
 function sell(_state: GameState, _good: Good, _quantity: number): Result<GameState> {
