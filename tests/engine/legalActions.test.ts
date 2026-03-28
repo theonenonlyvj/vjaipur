@@ -81,4 +81,28 @@ describe('getLegalActions', () => {
     const actions = getLegalActions(makeState(GOODS_MARKET, hand))
     expect(actions.some(a => a.type === 'SELL' && a.good === 'diamond')).toBe(false)
   })
+
+  it('does not include SELL gold with quantity 1', () => {
+    const hand: Card[] = [{ id: 1, type: 'gold' }, { id: 2, type: 'gold' }]
+    const actions = getLegalActions(makeState(GOODS_MARKET, hand))
+    expect(actions.find(a => a.type === 'SELL' && a.good === 'gold' && a.quantity === 1)).toBeUndefined()
+  })
+
+  it('does not include SELL silver with quantity 1', () => {
+    const hand: Card[] = [{ id: 1, type: 'silver' }, { id: 2, type: 'silver' }]
+    const actions = getLegalActions(makeState(GOODS_MARKET, hand))
+    expect(actions.find(a => a.type === 'SELL' && a.good === 'silver' && a.quantity === 1)).toBeUndefined()
+  })
+
+  it('TAKE_CAMELS is still included when hand is full (7 goods)', () => {
+    const fullHand: Card[] = [10,11,12,13,14,15,16].map(id => ({ id, type: 'cloth' as const }))
+    const marketWithCamel: Card[] = [
+      { id: 1, type: 'camel' }, { id: 2, type: 'cloth' },
+      { id: 3, type: 'leather' }, { id: 4, type: 'gold' }, { id: 5, type: 'silver' },
+    ]
+    const state = makeState(marketWithCamel, fullHand)
+    const actions = getLegalActions(state)
+    expect(actions.some(a => a.type === 'TAKE_CAMELS')).toBe(true)
+    expect(actions.filter(a => a.type === 'TAKE_SINGLE')).toHaveLength(0) // TAKE_SINGLE still suppressed
+  })
 })
