@@ -39,9 +39,13 @@ io.on('connection', (socket) => {
     const result = rm.quickMatch(socket.id)
     if (result.matched) {
       const { code, opponentId } = result
-      socket.join(code)
       const opponentSocket = io.sockets.sockets.get(opponentId)
-      opponentSocket?.join(code)
+      if (!opponentSocket) {
+        rm.removeRoom(code)
+        return
+      }
+      socket.join(code)
+      opponentSocket.join(code)
       const seed = (Math.random() * 2 ** 32) >>> 0
       io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed })
       socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed })
@@ -70,7 +74,6 @@ io.on('connection', (socket) => {
     socket.join(code)
     cb({ ok: true, playerIndex: data.playerIndex })
     socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
-    rm.cancelDisconnectTimer(code, data.playerIndex)
   })
 
   socket.on('disconnect', () => {
