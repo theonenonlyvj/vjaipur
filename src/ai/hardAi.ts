@@ -24,7 +24,7 @@ function ucb1(node: MCTSNode, myIndex: 0 | 1): number {
   if (node.visits === 0) return Infinity
   const parentVisits = node.parent?.visits ?? node.visits
   const exploitation =
-    node.state.activePlayer === myIndex
+    node.parent!.state.activePlayer === myIndex
       ? node.wins / node.visits
       : 1 - node.wins / node.visits
   return exploitation + C * Math.sqrt(Math.log(parentVisits) / node.visits)
