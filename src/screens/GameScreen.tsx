@@ -35,6 +35,7 @@ export function GameScreen() {
   }
 
   function handleTakeCamels() {
+    if (!isMyTurn) return
     dispatch({ type: 'TAKE_CAMELS' })
   }
 
