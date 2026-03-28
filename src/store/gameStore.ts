@@ -158,6 +158,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onOpponentDisconnected = null
     socketService.onOpponentReconnected = null
     socketService.onForfeit = null
-    set({ onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null })
+    set({ mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null })
   },
 }))
