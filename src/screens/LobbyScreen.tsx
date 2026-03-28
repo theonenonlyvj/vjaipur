@@ -22,7 +22,7 @@ export function LobbyScreen() {
       await joinOnline('create')
     } catch {
       setError('Failed to create room')
-      setOnlineStatus('idle')
+      disconnectOnline()
     }
   }
 
@@ -34,7 +34,7 @@ export function LobbyScreen() {
       await joinOnline('join', trimmed)
     } catch {
       setError('Room not found or full')
-      setOnlineStatus('idle')
+      disconnectOnline()
     }
   }
 
@@ -42,7 +42,7 @@ export function LobbyScreen() {
     setError(null)
     joinOnline('quick').catch(() => {
       setError('Connection failed')
-      setOnlineStatus('idle')
+      disconnectOnline()
     })
   }
 

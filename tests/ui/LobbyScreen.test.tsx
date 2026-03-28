@@ -56,4 +56,27 @@ describe('LobbyScreen', () => {
     )
     expect(container.textContent).toBe('')
   })
+
+  it('shows error message when join code is too short', () => {
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    const input = screen.getByPlaceholderText(/room code/i)
+    fireEvent.change(input, { target: { value: 'AB' } })
+    fireEvent.click(screen.getByRole('button', { name: /^join$/i }))
+    expect(screen.getByText(/6-character/i)).toBeInTheDocument()
+  })
+
+  it('Cancel button calls disconnectOnline', () => {
+    const disconnectOnlineMock = vi.fn()
+    useGameStore.setState({ onlineStatus: 'waiting', roomCode: 'TEST12' })
+    // Patch the store method
+    const original = useGameStore.getState().disconnectOnline
+    useGameStore.setState({ disconnectOnline: disconnectOnlineMock } as any)
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByText(/cancel/i))
+    expect(disconnectOnlineMock).toHaveBeenCalled()
+
+    // Restore
+    useGameStore.setState({ disconnectOnline: original } as any)
+  })
 })
