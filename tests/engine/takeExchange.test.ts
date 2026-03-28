@@ -139,7 +139,16 @@ describe('TAKE_EXCHANGE', () => {
     const result = applyAction(state, { type: 'TAKE_EXCHANGE', marketIndices: [0, 1], handIndices: [0, 0] })
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error.code).toBe('HAND_INDEX_OOB')
+    expect(result.error.code).toBe('EXCHANGE_DUPLICATE_CARD')
+  })
+
+  it('fails if the same market index is given twice', () => {
+    const hand: Card[] = [{ id: 20, type: 'cloth' }, { id: 21, type: 'spice' }]
+    const state = makeState(MARKET, hand)
+    const result = applyAction(state, { type: 'TAKE_EXCHANGE', marketIndices: [0, 0], handIndices: [0, 1] })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('MARKET_INDEX_OOB')
   })
 
   it('fails if resulting hand exceeds 7 goods', () => {
