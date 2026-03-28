@@ -116,7 +116,7 @@ function takeExchange(
     }
   }
   if (new Set(marketIndices).size !== marketIndices.length) {
-    return { ok: false, error: Errors.MARKET_INDEX_OOB }
+    return { ok: false, error: Errors.EXCHANGE_DUPLICATE_CARD }
   }
 
   const player = state.players[state.activePlayer]
