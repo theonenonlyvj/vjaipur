@@ -70,8 +70,28 @@ function takeSingle(state: GameState, marketIndex: number): Result<GameState> {
   return { ok: true, value: checkRoundEnd(next) }
 }
 
-function takeCamels(_state: GameState): Result<GameState> {
-  return { ok: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not yet implemented' } }
+function takeCamels(state: GameState): Result<GameState> {
+  const camelsInMarket = state.market.filter(c => c.type === 'camel')
+  if (camelsInMarket.length === 0) {
+    return { ok: false, error: Errors.NO_CAMELS_IN_MARKET }
+  }
+
+  const camelCount = camelsInMarket.length
+  const nonCamels = state.market.filter(c => c.type !== 'camel')
+  const newDeck = [...state.deck]
+  const refills = newDeck.splice(0, camelCount)
+  const newMarket = [...nonCamels, ...refills]
+
+  const player = state.players[state.activePlayer]
+  const newPlayer = { ...player, herd: player.herd + camelCount }
+  const next: GameState = {
+    ...state,
+    market: newMarket,
+    deck: newDeck,
+    players: setPlayer(state, newPlayer),
+    activePlayer: nextPlayer(state),
+  }
+  return { ok: true, value: checkRoundEnd(next) }
 }
 
 function takeExchange(_state: GameState, _marketIndices: number[], _handIndices: number[]): Result<GameState> {
