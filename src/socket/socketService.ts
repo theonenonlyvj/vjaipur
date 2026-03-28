@@ -8,6 +8,7 @@ export class SocketService {
 
   connect(url: string): void {
     if (this.socket?.connected) return
+    this.socket?.disconnect()
     this.socket = io(url, { autoConnect: true })
     this.socket.on(EVENTS.ROOM_READY, (data: RoomReadyPayload) => {
       this.onRoomReady?.(data.playerIndex, data.seed)
@@ -50,7 +51,8 @@ export class SocketService {
       if (!this.socket) return reject(new Error('Not connected'))
       this.socket.emit(EVENTS.JOIN_ROOM, code, (ack: JoinRoomAck) => {
         if (!ack.ok) reject(new Error(ack.error ?? 'Join failed'))
-        else resolve({ playerIndex: ack.playerIndex! })
+        else if (ack.playerIndex === undefined) reject(new Error('Server error: missing playerIndex'))
+        else resolve({ playerIndex: ack.playerIndex })
       })
     })
   }
