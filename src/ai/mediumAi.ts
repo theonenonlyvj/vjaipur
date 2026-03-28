@@ -43,6 +43,8 @@ function evalState(state: GameState, playerIndex: 0 | 1): number {
 export function getProfitableExchanges(state: GameState): Action[] {
   const player = state.players[state.activePlayer]
 
+  // Intentionally limited to 2-for-2 exchanges to bound combinatorial cost.
+  // Larger exchanges (3-for-3+) would increase branching significantly for marginal benefit.
   const mktGoods = state.market
     .map((c, i) => ({ good: c.type as Good, i }))
     .filter(x => (x.good as string) !== 'camel')
@@ -123,6 +125,8 @@ export function pickMediumAction(state: GameState): Action | null {
       bestAction = action
     }
   }
+
+  if (bestScore === -Infinity) return null
 
   return bestAction
 }
