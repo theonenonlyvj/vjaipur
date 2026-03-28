@@ -258,16 +258,20 @@ function sell(state: GameState, good: Good, quantity: number): Result<GameState>
 export function getLegalActions(state: GameState): Action[] {
   if (state.phase !== 'playing') return []
 
+  // NOTE: TAKE_EXCHANGE moves are not enumerated here — the combinatorial space
+  // (choose ≥2 from market × choose matching count from hand+herd) is too large.
+  // The AI and UI generate exchange candidates independently.
+
   const actions: Action[] = []
   const player = state.players[state.activePlayer]
 
   // TAKE_SINGLE: one per non-camel market card, only when hand < 7
   if (player.hand.length < 7) {
-    state.market.forEach((card, i) => {
+    for (const [i, card] of state.market.entries()) {
       if (card.type !== 'camel') {
         actions.push({ type: 'TAKE_SINGLE', marketIndex: i })
       }
-    })
+    }
   }
 
   // TAKE_CAMELS: if any camels in market
