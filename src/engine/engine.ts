@@ -131,6 +131,12 @@ function takeExchange(
     }
   }
 
+  // Reject duplicate non-camel hand indices (would allow card duplication)
+  const nonCamelHandIndices = handIndices.filter(i => i !== -1)
+  if (new Set(nonCamelHandIndices).size !== nonCamelHandIndices.length) {
+    return { ok: false, error: Errors.HAND_INDEX_OOB }
+  }
+
   const takenFromMarket = marketIndices.map(i => state.market[i])
   const takenTypes = new Set(takenFromMarket.map(c => c.type))
 
@@ -160,9 +166,16 @@ function takeExchange(
   const newMarket = [...state.market]
   const returnCards: Card[] = [...handCardsReturned]
   // Add placeholder camel cards for each herd camel given (they go into market as camels)
+  // Derive fresh IDs by scanning all cards in state to ensure uniqueness across exchanges
+  const allIds = [
+    ...state.market.map(c => c.id),
+    ...state.deck.map(c => c.id),
+    ...state.players[0].hand.map(c => c.id),
+    ...state.players[1].hand.map(c => c.id),
+  ]
+  let nextId = Math.max(0, ...allIds) + 1
   for (let i = 0; i < camelsUsed; i++) {
-    // Use a stable id based on player herd index — safe since camels don't have ids tracked
-    returnCards.push({ id: -(i + 1), type: 'camel' })
+    returnCards.push({ id: nextId++, type: 'camel' })
   }
   for (let i = 0; i < marketIndices.length; i++) {
     newMarket[marketIndices[i]] = returnCards[i]
