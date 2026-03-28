@@ -123,7 +123,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     } else if (variant === 'join') {
       if (!code) throw new Error('Code required for join')
       await socketService.joinRoom(code)
-      set({ onlineStatus: 'waiting' })
+      set({ roomCode: code.toUpperCase(), onlineStatus: 'waiting' })
     } else {
       socketService.quickMatch()
       set({ onlineStatus: 'waiting' })
