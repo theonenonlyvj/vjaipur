@@ -255,6 +255,38 @@ function sell(state: GameState, good: Good, quantity: number): Result<GameState>
   return { ok: true, value: checkRoundEnd(next) }
 }
 
-export function getLegalActions(_state: GameState): Action[] {
-  return []
+export function getLegalActions(state: GameState): Action[] {
+  if (state.phase !== 'playing') return []
+
+  const actions: Action[] = []
+  const player = state.players[state.activePlayer]
+
+  // TAKE_SINGLE: one per non-camel market card, only when hand < 7
+  if (player.hand.length < 7) {
+    state.market.forEach((card, i) => {
+      if (card.type !== 'camel') {
+        actions.push({ type: 'TAKE_SINGLE', marketIndex: i })
+      }
+    })
+  }
+
+  // TAKE_CAMELS: if any camels in market
+  if (state.market.some(c => c.type === 'camel')) {
+    actions.push({ type: 'TAKE_CAMELS' })
+  }
+
+  // SELL: one action per valid (good, quantity) combination
+  const goodCounts = new Map<Good, number>()
+  for (const card of player.hand) {
+    const count = goodCounts.get(card.type as Good) ?? 0
+    goodCounts.set(card.type as Good, count + 1)
+  }
+  for (const [good, count] of goodCounts) {
+    const minQty = PRECIOUS.has(good) ? 2 : 1
+    for (let qty = minQty; qty <= count; qty++) {
+      actions.push({ type: 'SELL', good, quantity: qty })
+    }
+  }
+
+  return actions
 }
