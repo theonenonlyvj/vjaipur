@@ -8,10 +8,11 @@ import { TokenRail } from '../components/TokenRail'
 import { StatusBar } from '../components/StatusBar'
 import { ActionBar } from '../components/ActionBar'
 import { Toast } from '../components/Toast'
+import { DisconnectBanner } from '../components/DisconnectBanner'
 import type { Good } from '../engine'
 
 export function GameScreen() {
-  const { state, mode, error, dispatch, clearError } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex } = useGameStore()
 
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -22,7 +23,7 @@ export function GameScreen() {
   if (state.phase === 'game-over') return <Navigate to="/game-over" replace />
 
   // In vs-ai mode human is always player 0; in local mode the active player is "you"
-  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : state.activePlayer
+  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : state.activePlayer
   const opponentIndex: 0 | 1 = myIndex === 0 ? 1 : 0
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
@@ -88,6 +89,7 @@ export function GameScreen() {
       padding: 16, maxWidth: 620, margin: '0 auto',
       height: '100%', overflowY: 'auto',
     }}>
+      <DisconnectBanner />
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', color: '#888', fontSize: 12 }}>
         <span>Round {state.round}</span>
