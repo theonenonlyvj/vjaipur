@@ -278,8 +278,9 @@ export function getLegalActions(state: GameState): Action[] {
   // SELL: one action per valid (good, quantity) combination
   const goodCounts = new Map<Good, number>()
   for (const card of player.hand) {
-    const count = goodCounts.get(card.type as Good) ?? 0
-    goodCounts.set(card.type as Good, count + 1)
+    if (card.type === 'camel') continue
+    const count = goodCounts.get(card.type) ?? 0
+    goodCounts.set(card.type, count + 1)
   }
   for (const [good, count] of goodCounts) {
     const minQty = PRECIOUS.has(good) ? 2 : 1
