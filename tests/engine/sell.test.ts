@@ -141,6 +141,51 @@ describe('SELL', () => {
     expect(result.error.code).toBe('SELL_TOO_FEW')
   })
 
+  it('fails if quantity is negative', () => {
+    const result = applyAction(makeState([{ id: 1, type: 'cloth' }]), { type: 'SELL', good: 'cloth', quantity: -1 })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('SELL_NONE')
+  })
+
+  it('awards only available tokens when pile has fewer than quantity sold', () => {
+    // cloth pile has [5, 3, 3, 2, 2, 1, 1] — sell 10 but only 7 tokens available
+    const hand: Card[] = [1,2,3,4,5,6,7,8,9,10].map(id => ({ id, type: 'cloth' as const }))
+    const result = applyAction(makeState(hand), { type: 'SELL', good: 'cloth', quantity: 10 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // Cloth pile has 7 tokens total; all 7 awarded
+    expect(result.value.players[0].tokens.filter(t => t.good === 'cloth')).toHaveLength(7)
+    expect(result.value.tokens.cloth).toHaveLength(0)
+  })
+
+  it('sale completes without error when bonus token pile for that tier is empty', () => {
+    // Sell exactly 3 cloth but the three-tier bonus pile is empty
+    const hand: Card[] = [1,2,3].map(id => ({ id, type: 'cloth' as const }))
+    const base = setupRound([0, 0], undefined, () => 0)
+    const state: GameState = {
+      ...base,
+      players: [{ ...base.players[0], hand }, base.players[1]],
+      bonusTokens: { ...base.bonusTokens, three: [] },
+    }
+    const result = applyAction(state, { type: 'SELL', good: 'cloth', quantity: 3 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.players[0].bonusTokens).toHaveLength(0)
+    expect(result.value.players[0].hand.filter(c => c.type === 'cloth')).toHaveLength(0) // sale completed
+  })
+
+  it('does NOT trigger round-end when only 2 goods piles are depleted', () => {
+    const hand: Card[] = [{ id: 1, type: 'cloth' }, { id: 2, type: 'cloth' }]
+    const result = applyAction(
+      makeState(hand, { diamond: [], gold: [] }), // 2 depleted before sale
+      { type: 'SELL', good: 'cloth', quantity: 2 }, // cloth not depleted after
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.phase).toBe('playing')
+  })
+
   it('fails if hand does not have enough of that good', () => {
     const result = applyAction(makeState([{ id: 1, type: 'cloth' }]), { type: 'SELL', good: 'cloth', quantity: 3 })
     expect(result.ok).toBe(false)
