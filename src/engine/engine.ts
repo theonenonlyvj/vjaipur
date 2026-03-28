@@ -200,8 +200,56 @@ function takeExchange(
   return { ok: true, value: checkRoundEnd(next) }
 }
 
-function sell(_state: GameState, _good: Good, _quantity: number): Result<GameState> {
-  return { ok: false, error: { code: 'NOT_IMPLEMENTED', message: 'Not yet implemented' } }
+function sell(state: GameState, good: Good, quantity: number): Result<GameState> {
+  if (quantity === 0) return { ok: false, error: Errors.SELL_NONE }
+  if (PRECIOUS.has(good) && quantity < 2) return { ok: false, error: Errors.SELL_TOO_FEW }
+
+  const player = state.players[state.activePlayer]
+  const inHand = player.hand.filter(c => c.type === good)
+  if (inHand.length < quantity) return { ok: false, error: Errors.SELL_NOT_IN_HAND }
+
+  const soldCards = inHand.slice(0, quantity)
+  const soldIds = new Set(soldCards.map(c => c.id))
+  const newHand = player.hand.filter(c => !soldIds.has(c.id))
+
+  // Take goods tokens (highest first)
+  const tokenPile = [...state.tokens[good]]
+  const awarded = tokenPile.splice(0, quantity)
+  const earnedTokens = awarded.map(value => ({ good, value }))
+
+  // Take bonus token if selling 3+
+  let newBonusPiles = { ...state.bonusTokens }
+  const earnedBonus: BonusToken[] = []
+  if (quantity >= 5 && state.bonusTokens.five.length > 0) {
+    const [bonus, ...rest] = state.bonusTokens.five
+    newBonusPiles = { ...newBonusPiles, five: rest }
+    earnedBonus.push(bonus)
+  } else if (quantity === 4 && state.bonusTokens.four.length > 0) {
+    const [bonus, ...rest] = state.bonusTokens.four
+    newBonusPiles = { ...newBonusPiles, four: rest }
+    earnedBonus.push(bonus)
+  } else if (quantity === 3 && state.bonusTokens.three.length > 0) {
+    const [bonus, ...rest] = state.bonusTokens.three
+    newBonusPiles = { ...newBonusPiles, three: rest }
+    earnedBonus.push(bonus)
+  }
+
+  const newPlayer = {
+    ...player,
+    hand: newHand,
+    tokens: [...player.tokens, ...earnedTokens],
+    bonusTokens: [...player.bonusTokens, ...earnedBonus],
+  }
+
+  const next: GameState = {
+    ...state,
+    discard: [...state.discard, ...soldCards],
+    players: setPlayer(state, newPlayer),
+    tokens: { ...state.tokens, [good]: tokenPile },
+    bonusTokens: newBonusPiles,
+    activePlayer: nextPlayer(state),
+  }
+  return { ok: true, value: checkRoundEnd(next) }
 }
 
 export function getLegalActions(_state: GameState): Action[] {
