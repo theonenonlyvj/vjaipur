@@ -64,12 +64,13 @@ io.on('connection', (socket) => {
   })
 
   socket.on(EVENTS.REJOIN, (data: RejoinPayload, cb: (ack: RejoinAck) => void) => {
-    const ok = rm.rejoinRoom(socket.id, data.code, data.playerIndex)
+    const code = data.code.toUpperCase()
+    const ok = rm.rejoinRoom(socket.id, code, data.playerIndex)
     if (!ok) { cb({ ok: false }); return }
-    socket.join(data.code.toUpperCase())
+    socket.join(code)
     cb({ ok: true, playerIndex: data.playerIndex })
-    socket.to(data.code.toUpperCase()).emit(EVENTS.OPPONENT_RECONNECTED)
-    rm.cancelDisconnectTimer(data.code.toUpperCase(), data.playerIndex)
+    socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
+    rm.cancelDisconnectTimer(code, data.playerIndex)
   })
 
   socket.on('disconnect', () => {
