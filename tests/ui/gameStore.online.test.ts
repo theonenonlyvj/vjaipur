@@ -6,6 +6,7 @@ vi.mock('../../src/socket/socketService', () => ({
     disconnect: vi.fn(),
     sendAction: vi.fn(),
     sendNextRound: vi.fn(),
+    rejoin: vi.fn().mockResolvedValue(undefined),
     createRoom: vi.fn().mockResolvedValue('CAML99'),
     joinRoom: vi.fn().mockResolvedValue({ playerIndex: 1 }),
     quickMatch: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock('../../src/socket/socketService', () => ({
     onOpponentDisconnected: null,
     onOpponentReconnected: null,
     onForfeit: null,
+    onConnect: null,
   },
 }))
 
@@ -109,6 +111,7 @@ describe('gameStore online mode', () => {
     expect(useGameStore.getState().onlineStatus).toBe('idle')
     expect(useGameStore.getState().onlinePlayerIndex).toBeNull()
     expect(useGameStore.getState().roomCode).toBeNull()
+    expect(useGameStore.getState().state).toBeNull()
   })
 
   it('onRoomReady callback sets mode, state, onlinePlayerIndex and onlineStatus', async () => {

@@ -3,13 +3,14 @@ import { useGameStore } from '../store/gameStore'
 
 export function GameOverScreen() {
   const navigate = useNavigate()
-  const { state } = useGameStore()
+  const { state, disconnectOnline } = useGameStore()
 
   if (!state || state.phase !== 'game-over') return <Navigate to="/" replace />
 
   const winner: 0 | 1 = state.seals[0] >= 2 ? 0 : 1
 
   function handlePlayAgain() {
+    disconnectOnline()
     navigate('/')
   }
 

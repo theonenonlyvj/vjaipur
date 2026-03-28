@@ -28,6 +28,9 @@ export class SocketService {
     this.socket.on(EVENTS.FORFEIT, () => {
       this.onForfeit?.()
     })
+    this.socket.on('connect', () => {
+      this.onConnect?.()
+    })
   }
 
   disconnect(): void {
@@ -87,6 +90,7 @@ export class SocketService {
   onOpponentDisconnected: (() => void) | null = null
   onOpponentReconnected: (() => void) | null = null
   onForfeit: (() => void) | null = null
+  onConnect: (() => void) | null = null
 }
 
 export const socketService = new SocketService()
