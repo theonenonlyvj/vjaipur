@@ -3,11 +3,13 @@ import { HomeScreen } from './screens/HomeScreen'
 import { GameScreen } from './screens/GameScreen'
 import { RoundEndScreen } from './screens/RoundEndScreen'
 import { GameOverScreen } from './screens/GameOverScreen'
+import { LobbyScreen } from './screens/LobbyScreen'
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomeScreen />} />
+      <Route path="/lobby" element={<LobbyScreen />} />
       <Route path="/game" element={<GameScreen />} />
       <Route path="/round-end" element={<RoundEndScreen />} />
       <Route path="/game-over" element={<GameOverScreen />} />

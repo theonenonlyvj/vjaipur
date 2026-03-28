@@ -22,6 +22,9 @@ export function HomeScreen() {
       <p style={{ color: '#888', fontSize: 14 }}>First to 2 Seals of Excellence wins</p>
       <button onClick={handleVsAi} style={btnStyle}>vs AI</button>
       <button onClick={handleLocal} style={btnStyle}>Local (Pass &amp; Play)</button>
+      <button onClick={() => navigate('/lobby')} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
+        Online
+      </button>
     </div>
   )
 }
