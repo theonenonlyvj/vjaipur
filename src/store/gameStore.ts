@@ -107,6 +107,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onOpponentDisconnected = () => set({ onlineStatus: 'opponent-disconnected' })
     socketService.onOpponentReconnected = () => set({ onlineStatus: 'playing' })
     socketService.onForfeit = () => set({ onlineStatus: 'forfeited' })
+    socketService.onConnect = () => {
+      const { mode, roomCode, onlinePlayerIndex } = get()
+      // Reconnect: only attempt rejoin when a game is active
+      if (mode === 'online' && roomCode !== null && onlinePlayerIndex !== null) {
+        socketService.rejoin(roomCode, onlinePlayerIndex).catch(() => {
+          set({ onlineStatus: 'forfeited' })
+        })
+      }
+    }
 
     if (variant === 'create') {
       const newCode = await socketService.createRoom()
@@ -158,6 +167,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onOpponentDisconnected = null
     socketService.onOpponentReconnected = null
     socketService.onForfeit = null
-    set({ mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null })
+    socketService.onConnect = null
+    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null })
   },
 }))

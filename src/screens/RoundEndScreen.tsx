@@ -1,10 +1,17 @@
+import { useEffect } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { scoreRound } from '../engine'
 
 export function RoundEndScreen() {
   const navigate = useNavigate()
-  const { state, nextRound } = useGameStore()
+  const { state, mode, nextRound } = useGameStore()
+
+  useEffect(() => {
+    if (!state) return
+    if (state.phase === 'playing') navigate('/game', { replace: true })
+    if (state.phase === 'game-over') navigate('/game-over', { replace: true })
+  }, [state?.phase, navigate])
 
   if (!state || state.phase !== 'round-end') return <Navigate to="/" replace />
 
@@ -13,12 +20,16 @@ export function RoundEndScreen() {
 
   function handleContinue() {
     nextRound()
-    const next = useGameStore.getState().state
-    if (next?.phase === 'game-over') {
-      navigate('/game-over', { replace: true })
-    } else {
-      navigate('/game', { replace: true })
+    if (mode !== 'online') {
+      const next = useGameStore.getState().state
+      if (next?.phase === 'game-over') {
+        navigate('/game-over', { replace: true })
+      } else {
+        navigate('/game', { replace: true })
+      }
     }
+    // In online mode, navigation is triggered by the useEffect above
+    // when startNextRound updates state.phase to 'playing' or 'game-over'
   }
 
   return (
