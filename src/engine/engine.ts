@@ -201,7 +201,7 @@ function takeExchange(
 }
 
 function sell(state: GameState, good: Good, quantity: number): Result<GameState> {
-  if (quantity === 0) return { ok: false, error: Errors.SELL_NONE }
+  if (quantity < 1) return { ok: false, error: Errors.SELL_NONE }
   if (PRECIOUS.has(good) && quantity < 2) return { ok: false, error: Errors.SELL_TOO_FEW }
 
   const player = state.players[state.activePlayer]
