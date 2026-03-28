@@ -1,6 +1,6 @@
-import type { Card } from '../engine'
+import type { Card, CardType } from '../engine'
 
-const BG: Record<string, string> = {
+const BG: Record<CardType, string> = {
   diamond: 'linear-gradient(135deg, #5a0010, #c0102a)',
   gold:    'linear-gradient(135deg, #5a3a00, #c08010)',
   silver:  'linear-gradient(135deg, #2a3040, #6a7a90)',
@@ -10,7 +10,7 @@ const BG: Record<string, string> = {
   camel:   'linear-gradient(135deg, #3a2a10, #907040)',
 }
 
-const ACCENT: Record<string, string> = {
+const ACCENT: Record<CardType, string> = {
   diamond: '#ff4060', gold: '#f0c030', silver: '#c0d0e0',
   cloth: '#c060e0', spice: '#60c040', leather: '#c08040', camel: '#d0a860',
 }
@@ -31,8 +31,8 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
       onClick={onClick}
       style={{
         width: w, height: h,
-        background: BG[card.type] ?? '#333',
-        border: `2px solid ${ACCENT[card.type] ?? '#888'}`,
+        background: BG[card.type],
+        border: `2px solid ${ACCENT[card.type]}`,
         borderRadius: 8,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: onClick ? 'pointer' : 'default',
@@ -47,7 +47,6 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
         fontSize: size === 'sm' ? 10 : 12,
         fontWeight: 700,
         textAlign: 'center',
-        textTransform: 'uppercase',
         letterSpacing: 1,
         pointerEvents: 'none',
       }}>
