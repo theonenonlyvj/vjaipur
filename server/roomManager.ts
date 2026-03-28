@@ -50,9 +50,7 @@ export class RoomManager {
       if ('error' in result) return { matched: false }
       return { matched: true, code, opponentId }
     }
-    if (!this.quickMatchQueue.includes(socketId)) {
-      this.quickMatchQueue.push(socketId)
-    }
+    this.quickMatchQueue.push(socketId)
     return { matched: false }
   }
 
@@ -71,8 +69,9 @@ export class RoomManager {
     if (!code) return null
     const room = this.rooms.get(code)
     if (!room) return null
-    const myIdx = room.players[0] === socketId ? 0 : 1
-    return room.players[myIdx === 0 ? 1 : 0]
+    if (room.players[0] === socketId) return room.players[1]
+    if (room.players[1] === socketId) return room.players[0]
+    return null
   }
 
   getRoomCode(socketId: string): string | null {
@@ -103,7 +102,10 @@ export class RoomManager {
     const room = this.rooms.get(code)
     if (!room) return
     if (room.disconnectTimers[playerIndex]) clearTimeout(room.disconnectTimers[playerIndex]!)
-    room.disconnectTimers[playerIndex] = setTimeout(onForfeit, 60_000)
+    room.disconnectTimers[playerIndex] = setTimeout(() => {
+      room.disconnectTimers[playerIndex] = null
+      onForfeit()
+    }, 60_000)
   }
 
   cancelDisconnectTimer(code: string, playerIndex: 0 | 1): void {
@@ -118,6 +120,8 @@ export class RoomManager {
   rejoinRoom(socketId: string, code: string, playerIndex: 0 | 1): boolean {
     const room = this.rooms.get(code.toUpperCase())
     if (!room) return false
+    const existingId = room.players[playerIndex]
+    if (existingId !== null && this.socketToRoom.has(existingId)) return false
     room.players[playerIndex] = socketId
     this.socketToRoom.set(socketId, code.toUpperCase())
     this.cancelDisconnectTimer(code.toUpperCase(), playerIndex)
