@@ -1,0 +1,82 @@
+<h2>Architecture Overview</h2>
+<p class="subtitle">Approach A — SPA + Socket.io Server</p>
+
+<div class="mockup">
+  <div class="mockup-header">System Diagram</div>
+  <div class="mockup-body" style="background:#1a0a00;padding:24px;font-family:system-ui;font-size:12px;color:#d4a030;">
+
+    <!-- Browser box -->
+    <div style="border:2px solid #d4a030;border-radius:10px;padding:16px;margin-bottom:20px;">
+      <div style="color:#ffe080;font-weight:700;font-size:13px;margin-bottom:12px;letter-spacing:1px;">BROWSER (React SPA)</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+
+        <div style="flex:1;min-width:140px;border:1px solid #6a3a10;border-radius:8px;padding:10px;background:#2a1000;">
+          <div style="color:#f0c030;font-weight:700;margin-bottom:6px;">🎮 Game Engine</div>
+          <div style="color:#a07040;font-size:11px;line-height:1.6;">Pure TypeScript module<br>No side effects<br>state + action → state<br>Fully unit-testable</div>
+        </div>
+
+        <div style="flex:1;min-width:140px;border:1px solid #6a3a10;border-radius:8px;padding:10px;background:#2a1000;">
+          <div style="color:#f0c030;font-weight:700;margin-bottom:6px;">🧠 AI Worker</div>
+          <div style="color:#a07040;font-size:11px;line-height:1.6;">Web Worker thread<br>Easy: heuristics<br>Medium: eval + depth<br>Hard: MCTS</div>
+        </div>
+
+        <div style="flex:1;min-width:140px;border:1px solid #6a3a10;border-radius:8px;padding:10px;background:#2a1000;">
+          <div style="color:#f0c030;font-weight:700;margin-bottom:6px;">🖼 React UI</div>
+          <div style="color:#a07040;font-size:11px;line-height:1.6;">Zustand game store<br>Framer Motion anims<br>Howler.js sounds<br>React Router screens</div>
+        </div>
+
+        <div style="flex:1;min-width:140px;border:1px solid #6a3a10;border-radius:8px;padding:10px;background:#2a1000;">
+          <div style="color:#f0c030;font-weight:700;margin-bottom:6px;">🔌 Socket Client</div>
+          <div style="color:#a07040;font-size:11px;line-height:1.6;">Online mode only<br>Sends local actions<br>Receives opp. actions<br>Room join/leave</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div style="text-align:center;color:#6a3a10;font-size:18px;margin-bottom:12px;">↕ Socket.io (online mode only)</div>
+
+    <!-- Server box -->
+    <div style="border:2px solid #6a3a10;border-radius:10px;padding:16px;">
+      <div style="color:#c08040;font-weight:700;font-size:13px;margin-bottom:12px;letter-spacing:1px;">NODE SERVER (Express + Socket.io)</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+
+        <div style="flex:1;min-width:140px;border:1px solid #3a2000;border-radius:8px;padding:10px;background:#1a0a00;">
+          <div style="color:#c08040;font-weight:700;margin-bottom:6px;">🏠 Room Manager</div>
+          <div style="color:#6a4020;font-size:11px;line-height:1.6;">In-memory rooms<br>Create / join by code<br>Quick match queue<br>Disconnect handling</div>
+        </div>
+
+        <div style="flex:1;min-width:140px;border:1px solid #3a2000;border-radius:8px;padding:10px;background:#1a0a00;">
+          <div style="color:#c08040;font-weight:700;margin-bottom:6px;">📡 Move Relay</div>
+          <div style="color:#6a4020;font-size:11px;line-height:1.6;">Broadcasts moves only<br>No game logic<br>Stateless relay<br>~50 lines of code</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Mode labels -->
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+      <div style="background:#2a1000;border:1px solid #307820;border-radius:20px;padding:6px 14px;color:#60c040;font-size:11px;">🤖 vs AI — engine + worker only, no server</div>
+      <div style="background:#2a1000;border:1px solid #6a3a10;border-radius:20px;padding:6px 14px;color:#c08040;font-size:11px;">👥 Local — engine only, no server</div>
+      <div style="background:#2a1000;border:1px solid #d4a030;border-radius:20px;padding:6px 14px;color:#d4a030;font-size:11px;">🌐 Online — engine + socket relay</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="options" style="margin-top:20px;">
+  <div class="option" data-choice="yes" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Architecture looks right</h3>
+      <p>Move on to the game engine design</p>
+    </div>
+  </div>
+  <div class="option" data-choice="question" onclick="toggleSelect(this)">
+    <div class="letter">?</div>
+    <div class="content">
+      <h3>I have a question / change</h3>
+      <p>Tell me in the terminal</p>
+    </div>
+  </div>
+</div>
