@@ -133,6 +133,15 @@ describe('TAKE_EXCHANGE', () => {
     expect(result.error.code).toBe('NOT_ENOUGH_CAMELS')
   })
 
+  it('fails if the same hand index is given twice', () => {
+    const hand: Card[] = [{ id: 20, type: 'cloth' }, { id: 21, type: 'spice' }]
+    const state = makeState(MARKET, hand)
+    const result = applyAction(state, { type: 'TAKE_EXCHANGE', marketIndices: [0, 1], handIndices: [0, 0] })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('HAND_INDEX_OOB')
+  })
+
   it('fails if resulting hand exceeds 7 goods', () => {
     // Hand has 7 goods; taking 2 and giving 1 good + 1 camel = net +1 good = 8 goods → over limit
     const fullHand: Card[] = [20,21,22,23,24,25,26].map(id => ({ id, type: 'cloth' as const }))
