@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useGameStore } from '../../src/store/gameStore'
+import { getLegalActions } from '../../src/engine'
+import type { Action } from '../../src/engine'
+import { setWorkerBridge, WorkerBridge } from '../../src/ai/workerBridge'
 
 beforeEach(() => {
   useGameStore.setState({ state: null, mode: null, error: null })
@@ -81,5 +84,58 @@ describe('clearError', () => {
     useGameStore.setState({ error: { code: 'X', message: 'test' } })
     useGameStore.getState().clearError()
     expect(useGameStore.getState().error).toBeNull()
+  })
+})
+
+describe('difficulty', () => {
+  it('defaults to easy', () => {
+    expect(useGameStore.getState().difficulty).toBe('easy')
+  })
+
+  it('setDifficulty updates the difficulty field', () => {
+    useGameStore.getState().setDifficulty('medium')
+    expect(useGameStore.getState().difficulty).toBe('medium')
+    useGameStore.getState().setDifficulty('easy')
+  })
+})
+
+describe('aiThinking', () => {
+  beforeEach(() => {
+    useGameStore.setState({ difficulty: 'easy', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+  })
+
+  it('is false by default', () => {
+    expect(useGameStore.getState().aiThinking).toBe(false)
+  })
+
+  it('stays false after a player action in easy mode', () => {
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    expect(useGameStore.getState().aiThinking).toBe(false)
+  })
+
+  it('becomes true then resolves false when hard AI processes a turn', async () => {
+    useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    let resolveWorker!: (action: Action | null) => void
+    const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+    mockBridge.getAction = (_state) =>
+      new Promise<Action | null>(res => { resolveWorker = res })
+    setWorkerBridge(mockBridge)
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+
+    expect(useGameStore.getState().aiThinking).toBe(true)
+
+    resolveWorker({ type: 'TAKE_CAMELS' })
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(useGameStore.getState().aiThinking).toBe(false)
+    setWorkerBridge(null)
   })
 })
