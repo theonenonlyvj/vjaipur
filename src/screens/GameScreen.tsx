@@ -9,6 +9,7 @@ import { StatusBar } from '../components/StatusBar'
 import { ActionBar } from '../components/ActionBar'
 import { Toast } from '../components/Toast'
 import { DisconnectBanner } from '../components/DisconnectBanner'
+import { MuteButton } from '../components/MuteButton'
 import type { Good } from '../engine'
 
 export function GameScreen() {
@@ -99,6 +100,7 @@ export function GameScreen() {
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat(2 - state.seals[1])}
         </span>
         <span>Deck: {state.deck.length}</span>
+        <MuteButton />
       </div>
 
       <OpponentStrip

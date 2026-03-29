@@ -11,7 +11,14 @@ const sounds = {
 
 type SoundName = keyof typeof sounds
 
-let _muted = localStorage.getItem('vjaipur-muted') === 'true'
+function safeGetItem(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+function safeSetItem(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* noop */ }
+}
+
+let _muted = safeGetItem('vjaipur-muted') === 'true'
 
 export const soundService = {
   play(name: SoundName) {
@@ -19,7 +26,7 @@ export const soundService = {
   },
   setMuted(muted: boolean) {
     _muted = muted
-    localStorage.setItem('vjaipur-muted', String(muted))
+    safeSetItem('vjaipur-muted', String(muted))
   },
   get muted(): boolean { return _muted },
 }
