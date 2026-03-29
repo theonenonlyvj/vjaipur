@@ -9,7 +9,9 @@ import { StatusBar } from '../components/StatusBar'
 import { ActionBar } from '../components/ActionBar'
 import { Toast } from '../components/Toast'
 import { DisconnectBanner } from '../components/DisconnectBanner'
+import { MuteButton } from '../components/MuteButton'
 import { BonusReveal } from '../components/BonusReveal'
+import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
 export function GameScreen() {
@@ -18,24 +20,25 @@ export function GameScreen() {
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
+  const [showBonusReveal, setShowBonusReveal] = useState(false)
+  const prevBonusCountRef = useRef(0)
+
+  // myIndex must be stable before guards (needed by hooks below)
+  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : (state?.activePlayer ?? 0)
+
+  useSoundEffects(myIndex)
+
+  useEffect(() => {
+    if (!state) return
+    const count = state.players[myIndex].bonusTokens.length
+    if (count > prevBonusCountRef.current) setShowBonusReveal(true)
+    prevBonusCountRef.current = count
+  }, [state?.players[myIndex]?.bonusTokens.length, myIndex])
 
   if (!state) return <Navigate to="/" replace />
   if (state.phase === 'round-end') return <Navigate to="/round-end" replace />
   if (state.phase === 'game-over') return <Navigate to="/game-over" replace />
 
-  // In vs-ai mode human is always player 0; in local mode the active player is "you"
-  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : state.activePlayer
-
-  const [showBonusReveal, setShowBonusReveal] = useState(false)
-  const prevBonusCountRef = useRef(state.players[myIndex].bonusTokens.length)
-
-  useEffect(() => {
-    const currentCount = state.players[myIndex].bonusTokens.length
-    if (currentCount > prevBonusCountRef.current) {
-      setShowBonusReveal(true)
-    }
-    prevBonusCountRef.current = currentCount
-  }, [state.players[myIndex].bonusTokens.length, myIndex])
   const opponentIndex: 0 | 1 = myIndex === 0 ? 1 : 0
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
@@ -111,6 +114,7 @@ export function GameScreen() {
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat(2 - state.seals[1])}
         </span>
         <span>Deck: {state.deck.length}</span>
+        <MuteButton />
       </div>
 
       <OpponentStrip
@@ -118,22 +122,6 @@ export function GameScreen() {
         playerIndex={opponentIndex}
         isActive={state.activePlayer === opponentIndex}
       />
-
-      {lastMoveDescription && (
-        <div style={{
-          background: 'rgba(255,200,60,0.08)',
-          border: '1px solid rgba(255,200,60,0.25)',
-          borderRadius: 6,
-          padding: '5px 12px',
-          fontSize: 13,
-          color: '#d4a820',
-          textAlign: 'center',
-        }}>
-          {mode === 'online' ? 'Opponent' : mode === 'vs-ai' ? 'AI' : `Player ${opponentIndex + 1}`}
-          {': '}
-          {lastMoveDescription}
-        </div>
-      )}
 
       <TokenRail tokens={state.tokens} bonusTokens={state.bonusTokens} />
 
@@ -192,7 +180,6 @@ export function GameScreen() {
       />
 
       <Toast message={error?.message ?? null} onDismiss={clearError} />
-      <BonusReveal show={showBonusReveal} onDone={() => setShowBonusReveal(false)} />
     </div>
   )
 }
