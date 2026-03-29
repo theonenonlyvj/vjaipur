@@ -22,6 +22,7 @@ export interface GameStore {
   difficulty: Difficulty
   aiThinking: boolean
   muted: boolean
+  lastMoveDescription: string | null
   toggleMute: () => void
 
   startGame: (mode: Mode) => void
@@ -36,6 +37,12 @@ export interface GameStore {
   setDifficulty: (d: Difficulty) => void
 }
 
+function describeAction(action: Action): string {
+  if (action.type === 'TAKE_CAMELS') return 'took camels'
+  if (action.type === 'SELL') return `sold ${action.quantity} ${action.good}`
+  return 'took card'
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   state: null,
   mode: null,
@@ -46,6 +53,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   difficulty: 'easy',
   aiThinking: false,
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
+  lastMoveDescription: null,
 
   startGame: (mode) => {
     set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false })
@@ -82,7 +90,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             set({ aiThinking: false }); return
           }
           const aiResult = applyAction(cur, aiAction)
-          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null })
+          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction(aiAction) })
           else set({ aiThinking: false })
         })
       return
@@ -93,7 +101,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       : pickEasyAction(next)
     if (aiAction) {
       const aiResult = applyAction(next, aiAction)
-      if (aiResult.ok) { set({ state: aiResult.value, error: null }); return }
+      if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction(aiAction) }); return }
     }
     set({ state: next, error: null })
   },
@@ -172,7 +180,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { state } = get()
     if (!state) return
     const result = applyAction(state, action)
-    if (result.ok) set({ state: result.value, error: null })
+    if (result.ok) set({ state: result.value, error: null, lastMoveDescription: describeAction(action) })
   },
 
   startNextRound: (seed) => {

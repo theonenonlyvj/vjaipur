@@ -10,6 +10,7 @@ import { ActionBar } from '../components/ActionBar'
 import { Toast } from '../components/Toast'
 import { DisconnectBanner } from '../components/DisconnectBanner'
 import { MuteButton } from '../components/MuteButton'
+import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
 export function GameScreen() {
@@ -19,12 +20,14 @@ export function GameScreen() {
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
 
+  // In vs-ai mode human is always player 0; in local mode the active player is "you"
+  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : (state?.activePlayer ?? 0)
+  useSoundEffects(myIndex)
+
   if (!state) return <Navigate to="/" replace />
   if (state.phase === 'round-end') return <Navigate to="/round-end" replace />
   if (state.phase === 'game-over') return <Navigate to="/game-over" replace />
 
-  // In vs-ai mode human is always player 0; in local mode the active player is "you"
-  const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : state.activePlayer
   const opponentIndex: 0 | 1 = myIndex === 0 ? 1 : 0
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
