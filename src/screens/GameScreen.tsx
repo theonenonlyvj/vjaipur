@@ -12,7 +12,7 @@ import { DisconnectBanner } from '../components/DisconnectBanner'
 import type { Good } from '../engine'
 
 export function GameScreen() {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription } = useGameStore()
 
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -106,6 +106,22 @@ export function GameScreen() {
         playerIndex={opponentIndex}
         isActive={state.activePlayer === opponentIndex}
       />
+
+      {lastMoveDescription && (
+        <div style={{
+          background: 'rgba(255,200,60,0.08)',
+          border: '1px solid rgba(255,200,60,0.25)',
+          borderRadius: 6,
+          padding: '5px 12px',
+          fontSize: 13,
+          color: '#d4a820',
+          textAlign: 'center',
+        }}>
+          {mode === 'online' ? 'Opponent' : mode === 'vs-ai' ? 'AI' : `Player ${opponentIndex + 1}`}
+          {': '}
+          {lastMoveDescription}
+        </div>
+      )}
 
       <TokenRail tokens={state.tokens} bonusTokens={state.bonusTokens} />
 
