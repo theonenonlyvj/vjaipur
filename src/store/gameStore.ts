@@ -6,6 +6,7 @@ import { pickMediumAction } from '../ai/mediumAi'
 import { getWorkerBridge } from '../ai/workerBridge'
 import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
+import { soundService } from '../audio/soundService'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
@@ -20,6 +21,8 @@ export interface GameStore {
   onlineStatus: OnlineStatus
   difficulty: Difficulty
   aiThinking: boolean
+  muted: boolean
+  toggleMute: () => void
 
   startGame: (mode: Mode) => void
   dispatch: (action: Action) => void
@@ -42,6 +45,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onlineStatus: 'idle',
   difficulty: 'easy',
   aiThinking: false,
+  muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
 
   startGame: (mode) => {
     set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false })
@@ -194,6 +198,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setOnlineStatus: (status) => set({ onlineStatus: status }),
 
   setDifficulty: (d) => set({ difficulty: d }),
+
+  toggleMute: () => {
+    const muted = !get().muted
+    soundService.setMuted(muted)
+    set({ muted })
+  },
 
   disconnectOnline: () => {
     socketService.disconnect()
