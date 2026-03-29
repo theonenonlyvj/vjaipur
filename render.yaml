@@ -8,6 +8,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: CLIENT_ORIGIN
+        sync: false
 
   - type: static
     name: vjaipur-client

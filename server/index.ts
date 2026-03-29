@@ -6,12 +6,14 @@ import { RoomManager } from './roomManager.js'
 import { EVENTS } from '../src/shared/protocol.js'
 import type { RejoinPayload, JoinRoomAck, RejoinAck } from '../src/shared/protocol.js'
 
+const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
+
 const app = express()
-app.use(cors())
+app.use(cors({ origin: ALLOWED_ORIGIN }))
 app.get('/health', (_req, res) => { res.json({ ok: true }) })
 
 const httpServer = createServer(app)
-const io = new Server(httpServer, { cors: { origin: '*' } })
+const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN } })
 const rm = new RoomManager()
 
 io.on('connection', (socket) => {
