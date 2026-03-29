@@ -20,6 +20,7 @@ export interface GameStore {
   onlineStatus: OnlineStatus
   difficulty: Difficulty
   aiThinking: boolean
+  lastMoveDescription: string | null
 
   startGame: (mode: Mode) => void
   dispatch: (action: Action) => void
@@ -33,6 +34,23 @@ export interface GameStore {
   setDifficulty: (d: Difficulty) => void
 }
 
+function describeAction(state: GameState, action: Action): string {
+  switch (action.type) {
+    case 'TAKE_SINGLE': {
+      const type = state.market[action.marketIndex]?.type ?? 'card'
+      return `took a ${type}`
+    }
+    case 'TAKE_CAMELS': {
+      const count = state.market.filter(c => c.type === 'camel').length
+      return `took ${count} camel${count === 1 ? '' : 's'}`
+    }
+    case 'TAKE_EXCHANGE':
+      return `made an exchange`
+    case 'SELL':
+      return `sold ${action.quantity} ${action.good}`
+  }
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   state: null,
   mode: null,
@@ -42,15 +60,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onlineStatus: 'idle',
   difficulty: 'easy',
   aiThinking: false,
+  lastMoveDescription: null,
 
   startGame: (mode) => {
-    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false })
+    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null })
   },
 
   dispatch: (action) => {
     const { state, mode, onlinePlayerIndex, difficulty } = get()
     if (!state) return
     if (mode === 'online' && state.activePlayer !== onlinePlayerIndex) return
+
+    const playerDesc = describeAction(state, action)
 
     const result = applyAction(state, action)
     if (!result.ok) { set({ error: result.error }); return }
@@ -60,7 +81,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const next = result.value
 
     if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
-      set({ state: next, error: null })
+      // local: show the just-moved player's action to the next player
+      set({ state: next, error: null, lastMoveDescription: mode === 'local' ? playerDesc : null })
       return
     }
 
@@ -77,8 +99,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
           if (!cur || cur.phase !== 'playing' || cur.activePlayer !== 1) {
             set({ aiThinking: false }); return
           }
+          const aiDesc = describeAction(cur, aiAction)
           const aiResult = applyAction(cur, aiAction)
-          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null })
+          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: aiDesc })
           else set({ aiThinking: false })
         })
       return
@@ -88,8 +111,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ? pickMediumAction(next)
       : pickEasyAction(next)
     if (aiAction) {
+      const aiDesc = describeAction(next, aiAction)
       const aiResult = applyAction(next, aiAction)
-      if (aiResult.ok) { set({ state: aiResult.value, error: null }); return }
+      if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: aiDesc }); return }
     }
     set({ state: next, error: null })
   },
@@ -167,8 +191,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   receiveOpponentAction: (action) => {
     const { state } = get()
     if (!state) return
+    const desc = describeAction(state, action)
     const result = applyAction(state, action)
-    if (result.ok) set({ state: result.value, error: null })
+    if (result.ok) set({ state: result.value, error: null, lastMoveDescription: desc })
   },
 
   startNextRound: (seed) => {
