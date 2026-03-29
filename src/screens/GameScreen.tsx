@@ -12,7 +12,7 @@ import { DisconnectBanner } from '../components/DisconnectBanner'
 import type { Good } from '../engine'
 
 export function GameScreen() {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking } = useGameStore()
 
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -134,6 +134,12 @@ export function GameScreen() {
         onCancelExchange={handleCancelExchange}
         onSell={handleSell}
       />
+
+      {aiThinking && (
+        <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic' }}>
+          AI is thinking…
+        </div>
+      )}
 
       <div>
         <div style={{ fontSize: 11, color: '#888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
