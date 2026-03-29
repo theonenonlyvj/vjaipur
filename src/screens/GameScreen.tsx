@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { MarketRow } from '../components/MarketRow'
@@ -9,6 +9,7 @@ import { StatusBar } from '../components/StatusBar'
 import { ActionBar } from '../components/ActionBar'
 import { Toast } from '../components/Toast'
 import { DisconnectBanner } from '../components/DisconnectBanner'
+import { BonusReveal } from '../components/BonusReveal'
 import type { Good } from '../engine'
 
 export function GameScreen() {
@@ -24,6 +25,17 @@ export function GameScreen() {
 
   // In vs-ai mode human is always player 0; in local mode the active player is "you"
   const myIndex: 0 | 1 = mode === 'vs-ai' ? 0 : mode === 'online' ? (onlinePlayerIndex ?? 0) : state.activePlayer
+
+  const [showBonusReveal, setShowBonusReveal] = useState(false)
+  const prevBonusCountRef = useRef(state.players[myIndex].bonusTokens.length)
+
+  useEffect(() => {
+    const currentCount = state.players[myIndex].bonusTokens.length
+    if (currentCount > prevBonusCountRef.current) {
+      setShowBonusReveal(true)
+    }
+    prevBonusCountRef.current = currentCount
+  }, [state.players[myIndex].bonusTokens.length, myIndex])
   const opponentIndex: 0 | 1 = myIndex === 0 ? 1 : 0
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
@@ -180,6 +192,7 @@ export function GameScreen() {
       />
 
       <Toast message={error?.message ?? null} onDismiss={clearError} />
+      <BonusReveal show={showBonusReveal} onDone={() => setShowBonusReveal(false)} />
     </div>
   )
 }
