@@ -1,4 +1,24 @@
+import { AnimatePresence, motion } from 'framer-motion'
 import type { TokenPiles, BonusPiles, Good } from '../engine'
+
+function AnimatedTokenValue({ value }: { value: number | undefined }) {
+  return (
+    <span style={{ display: 'inline-block', overflow: 'hidden', minWidth: 16 }}>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={value ?? 'empty'}
+          initial={{ y: -10, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 10, opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          style={{ display: 'inline-block' }}
+        >
+          {value ?? '—'}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  )
+}
 
 const GOODS: Good[] = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
 
@@ -27,10 +47,9 @@ export function TokenRail({ tokens, bonusTokens }: Props) {
             <span style={{ fontSize: 10, color: ACCENT[good], textTransform: 'uppercase', letterSpacing: 1 }}>
               {good}
             </span>
-            {top !== undefined
-              ? <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', lineHeight: 1 }}>{top}</span>
-              : <span style={{ fontSize: 12, color: '#555' }}>—</span>
-            }
+            <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+              <AnimatedTokenValue value={top} />
+            </span>
             <span style={{ fontSize: 10, color: '#888' }}>×{pile.length}</span>
           </div>
         )
