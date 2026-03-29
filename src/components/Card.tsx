@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import type { Card, CardType } from '../engine'
 
 const BG: Record<CardType, string> = {
@@ -27,7 +28,13 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
   const w = size === 'sm' ? 56 : 72
   const h = size === 'sm' ? 80 : 100
   return (
-    <div
+    <motion.div
+      layoutId={`card-${card.id}`}
+      layout
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.8 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
       onClick={onClick}
       style={{
         width: w, height: h,
@@ -52,6 +59,6 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
       }}>
         {label}
       </span>
-    </div>
+    </motion.div>
   )
 }

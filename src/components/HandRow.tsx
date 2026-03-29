@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import type { Card } from '../engine'
 import { CardView } from './Card'
 
@@ -26,19 +27,21 @@ export function HandRow({ hand, exchangeMode, selectedIndices, camelsUsed, herd,
 
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 0', minHeight: 116, alignItems: 'center' }}>
-      {hand.map((card, i) => {
-        const selected = selectedIndices.includes(i)
-        const handleClick = exchangeMode ? () => onToggleSelect(i) : undefined
-        return (
-          <CardView
-            key={card.id}
-            card={card}
-            selected={selected}
-            onClick={handleClick}
-            size="md"
-          />
-        )
-      })}
+      <AnimatePresence mode="popLayout">
+        {hand.map((card, i) => {
+          const selected = selectedIndices.includes(i)
+          const handleClick = exchangeMode ? () => onToggleSelect(i) : undefined
+          return (
+            <CardView
+              key={card.id}
+              card={card}
+              selected={selected}
+              onClick={handleClick}
+              size="md"
+            />
+          )
+        })}
+      </AnimatePresence>
       {exchangeMode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'center', marginLeft: 8 }}>
           <button
