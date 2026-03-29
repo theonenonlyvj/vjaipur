@@ -11,11 +11,12 @@ import { Toast } from '../components/Toast'
 import { DisconnectBanner } from '../components/DisconnectBanner'
 import { MuteButton } from '../components/MuteButton'
 import { BonusReveal } from '../components/BonusReveal'
+import { TutorialOverlay } from '../components/TutorialOverlay'
 import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
 export function GameScreen() {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial } = useGameStore()
 
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -180,6 +181,8 @@ export function GameScreen() {
       />
 
       <Toast message={error?.message ?? null} onDismiss={clearError} />
+
+      {tutorial && <TutorialOverlay onDone={endTutorial} />}
     </div>
   )
 }

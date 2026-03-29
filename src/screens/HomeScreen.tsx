@@ -5,11 +5,18 @@ import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
   const navigate = useNavigate()
-  const { startGame, setDifficulty } = useGameStore()
+  const { startGame, setDifficulty, startTutorial } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
 
   function handleDifficulty(d: Difficulty) {
     setDifficulty(d)
+    startGame('vs-ai')
+    navigate('/game')
+  }
+
+  function handleTutorial() {
+    setDifficulty('easy')
+    startTutorial()
     startGame('vs-ai')
     navigate('/game')
   }
@@ -42,6 +49,9 @@ export function HomeScreen() {
           <button onClick={handleLocal} style={btnStyle}>Local (Pass &amp; Play)</button>
           <button onClick={() => navigate('/lobby')} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
             Online
+          </button>
+          <button onClick={handleTutorial} style={{ ...btnStyle, background: 'none', border: '1.5px solid #888', color: '#aaa', fontSize: 15 }}>
+            How to Play
           </button>
         </>
       )}
