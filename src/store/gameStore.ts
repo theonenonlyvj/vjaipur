@@ -2,11 +2,14 @@ import { create } from 'zustand'
 import type { GameState, Action, EngineError } from '../engine'
 import { applyAction, setupRound, scoreRound } from '../engine'
 import { pickEasyAction } from '../ai/easyAi'
+import { pickMediumAction } from '../ai/mediumAi'
+import { getWorkerBridge } from '../ai/workerBridge'
 import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
+export type Difficulty = 'easy' | 'medium' | 'hard'
 
 export interface GameStore {
   state: GameState | null
@@ -15,6 +18,8 @@ export interface GameStore {
   onlinePlayerIndex: 0 | 1 | null
   roomCode: string | null
   onlineStatus: OnlineStatus
+  difficulty: Difficulty
+  aiThinking: boolean
 
   startGame: (mode: Mode) => void
   dispatch: (action: Action) => void
@@ -25,6 +30,7 @@ export interface GameStore {
   startNextRound: (seed: number) => void
   setOnlineStatus: (status: OnlineStatus) => void
   disconnectOnline: () => void
+  setDifficulty: (d: Difficulty) => void
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -34,13 +40,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onlinePlayerIndex: null,
   roomCode: null,
   onlineStatus: 'idle',
+  difficulty: 'easy',
+  aiThinking: false,
 
   startGame: (mode) => {
-    set({ state: setupRound([0, 0]), mode, error: null })
+    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false })
   },
 
   dispatch: (action) => {
-    const { state, mode, onlinePlayerIndex } = get()
+    const { state, mode, onlinePlayerIndex, difficulty } = get()
     if (!state) return
     if (mode === 'online' && state.activePlayer !== onlinePlayerIndex) return
 
@@ -49,13 +57,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (mode === 'online') socketService.sendAction(action)
 
-    let next = result.value
-    if (mode === 'vs-ai' && next.phase === 'playing' && next.activePlayer === 1) {
-      const aiAction = pickEasyAction(next)
-      if (aiAction) {
-        const aiResult = applyAction(next, aiAction)
-        if (aiResult.ok) next = aiResult.value
-      }
+    const next = result.value
+
+    if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
+      set({ state: next, error: null })
+      return
+    }
+
+    // vs-ai: AI must move (player 1)
+    if (difficulty === 'hard') {
+      set({ state: next, error: null, aiThinking: true })
+      getWorkerBridge()
+        .getAction(next)
+        .then(aiAction => aiAction ?? pickMediumAction(next))
+        .catch(() => pickMediumAction(next))
+        .then(aiAction => {
+          if (!aiAction) { set({ aiThinking: false }); return }
+          const cur = get().state
+          if (!cur || cur.phase !== 'playing' || cur.activePlayer !== 1) {
+            set({ aiThinking: false }); return
+          }
+          const aiResult = applyAction(cur, aiAction)
+          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null })
+          else set({ aiThinking: false })
+        })
+      return
+    }
+
+    const aiAction = difficulty === 'medium'
+      ? pickMediumAction(next)
+      : pickEasyAction(next)
+    if (aiAction) {
+      const aiResult = applyAction(next, aiAction)
+      if (aiResult.ok) { set({ state: aiResult.value, error: null }); return }
     }
     set({ state: next, error: null })
   },
@@ -158,6 +192,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   setOnlineStatus: (status) => set({ onlineStatus: status }),
+
+  setDifficulty: (d) => set({ difficulty: d }),
 
   disconnectOnline: () => {
     socketService.disconnect()
