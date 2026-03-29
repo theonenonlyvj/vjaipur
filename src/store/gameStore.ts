@@ -23,6 +23,7 @@ export interface GameStore {
   aiThinking: boolean
   muted: boolean
   lastMoveDescription: string | null
+  tutorial: boolean
   toggleMute: () => void
 
   startGame: (mode: Mode) => void
@@ -35,6 +36,8 @@ export interface GameStore {
   setOnlineStatus: (status: OnlineStatus) => void
   disconnectOnline: () => void
   setDifficulty: (d: Difficulty) => void
+  startTutorial: () => void
+  endTutorial: () => void
 }
 
 function describeAction(action: Action, state?: GameState): string {
@@ -65,6 +68,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   aiThinking: false,
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
   lastMoveDescription: null,
+  tutorial: false,
 
   startGame: (mode) => {
     set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null })
@@ -219,6 +223,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setOnlineStatus: (status) => set({ onlineStatus: status }),
 
   setDifficulty: (d) => set({ difficulty: d }),
+
+  startTutorial: () => set({ tutorial: true }),
+  endTutorial: () => set({ tutorial: false }),
 
   toggleMute: () => {
     const muted = !get().muted
