@@ -8,6 +8,7 @@ export const EVENTS = {
   ACTION:       'action',
   NEXT_ROUND:   'next_round',
   REJOIN:       'rejoin',
+  SET_NAME:     'set_name',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -15,6 +16,7 @@ export const EVENTS = {
   OPPONENT_DISCONNECTED: 'opponent_disconnected',
   OPPONENT_RECONNECTED:  'opponent_reconnected',
   FORFEIT:               'forfeit',
+  OPPONENT_NAME:         'opponent_name',
 } as const
 
 export type EventName = typeof EVENTS[keyof typeof EVENTS]
@@ -25,3 +27,5 @@ export interface RoundStartPayload   { seed: number }
 export interface JoinRoomAck         { ok: boolean; error?: string; playerIndex?: 0 | 1 }
 export interface RejoinPayload       { code: string; playerIndex: 0 | 1 }
 export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1 }
+export interface SetNamePayload      { name: string }
+export interface OpponentNamePayload { name: string }

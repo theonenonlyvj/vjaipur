@@ -4,7 +4,7 @@ import { useGameStore } from '../store/gameStore'
 
 export function LobbyScreen() {
   const navigate = useNavigate()
-  const { onlineStatus, roomCode, joinOnline, setOnlineStatus, disconnectOnline } = useGameStore()
+  const { onlineStatus, roomCode, joinOnline, setOnlineStatus, disconnectOnline, playerName, setPlayerName } = useGameStore()
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -73,6 +73,19 @@ export function LobbyScreen() {
   return (
     <div style={centerStyle}>
       <h2 style={{ fontSize: 32, fontWeight: 900, color: '#f0c030' }}>Online</h2>
+
+      <input
+        value={playerName}
+        onChange={e => setPlayerName(e.target.value)}
+        placeholder="Your name (optional)"
+        maxLength={24}
+        style={{
+          padding: '12px 16px', fontSize: 16,
+          background: '#1a0a00', color: '#f0e8d8',
+          border: '2px solid #5a3a20', borderRadius: 8,
+          width: '100%', maxWidth: 260, textAlign: 'center',
+        }}
+      />
 
       {error && <div style={{ color: '#ff4060', fontSize: 14 }}>{error}</div>}
 

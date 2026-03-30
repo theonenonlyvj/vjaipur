@@ -4,7 +4,7 @@ import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
 import { EVENTS } from '../src/shared/protocol.js'
-import type { RejoinPayload, JoinRoomAck, RejoinAck } from '../src/shared/protocol.js'
+import type { RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
 
@@ -33,8 +33,14 @@ io.on('connection', (socket) => {
     const seed = (Math.random() * 2 ** 32) >>> 0
     const room = rm.getRoomBySocket(socket.id)!
     const player0Id = room.players[0]!
+    const player0Socket = io.sockets.sockets.get(player0Id)
     io.to(player0Id).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed })
     socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed })
+    // Exchange names if already set
+    const name0 = (player0Socket as any)?._playerName as string | undefined
+    const name1 = (socket as any)._playerName as string | undefined
+    if (name0) socket.emit(EVENTS.OPPONENT_NAME, { name: name0 })
+    if (name1) io.to(player0Id).emit(EVENTS.OPPONENT_NAME, { name: name1 })
   })
 
   socket.on(EVENTS.QUICK_MATCH, () => {
@@ -51,6 +57,11 @@ io.on('connection', (socket) => {
       const seed = (Math.random() * 2 ** 32) >>> 0
       io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed })
       socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed })
+      // Exchange names if already set
+      const nameOpp = (opponentSocket as any)._playerName as string | undefined
+      const nameMe = (socket as any)._playerName as string | undefined
+      if (nameOpp) socket.emit(EVENTS.OPPONENT_NAME, { name: nameOpp })
+      if (nameMe) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name: nameMe })
     }
   })
 
@@ -76,6 +87,14 @@ io.on('connection', (socket) => {
     socket.join(code)
     cb({ ok: true, playerIndex: data.playerIndex })
     socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
+  })
+
+  socket.on(EVENTS.SET_NAME, (data: SetNamePayload) => {
+    const name = String(data?.name ?? '').trim().slice(0, 24)
+    if (!name) return
+    ;(socket as any)._playerName = name
+    const opponentId = rm.getOpponentId(socket.id)
+    if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name })
   })
 
   socket.on('disconnect', () => {

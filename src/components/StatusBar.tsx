@@ -4,9 +4,10 @@ interface Props {
   player: PlayerState
   playerIndex: 0 | 1
   isActive: boolean
+  name?: string | null
 }
 
-export function StatusBar({ player, playerIndex, isActive }: Props) {
+export function StatusBar({ player, playerIndex, isActive, name }: Props) {
   const goodsTotal = player.tokens.reduce((s, t) => s + t.value, 0)
   const bonusCount = player.bonusTokens.length
   return (
@@ -17,7 +18,7 @@ export function StatusBar({ player, playerIndex, isActive }: Props) {
       borderRadius: 8,
       border: isActive ? '2px solid #f0c030' : '1px solid #3a2a10',
     }}>
-      <span style={{ fontWeight: 700, color: '#f0c030' }}>P{playerIndex + 1} (You)</span>
+      <span style={{ fontWeight: 700, color: '#f0c030' }}>{name ? `${name} (You)` : `P${playerIndex + 1} (You)`}</span>
       <span style={{ color: '#d0a860' }}>Camels: {player.herd}</span>
       <span style={{ color: '#f0e8d8', fontWeight: 700 }}>{goodsTotal} pts</span>
       <span style={{ color: '#c060e0' }}>+{bonusCount} bonus</span>
