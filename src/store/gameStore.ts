@@ -57,6 +57,43 @@ function describeAction(action: Action, state?: GameState): string {
   }
 }
 
+// Trigger the AI to move given a state where activePlayer === 1 in vs-ai mode.
+// Handles all difficulty levels and always calls set() to settle the store.
+function runAi(
+  next: GameState,
+  difficulty: Difficulty,
+  set: (partial: Partial<GameStore>) => void,
+  get: () => GameStore,
+) {
+  if (difficulty === 'hard') {
+    set({ state: next, error: null, aiThinking: true })
+    getWorkerBridge()
+      .getAction(next)
+      .then(aiAction => aiAction ?? pickMediumAction(next))
+      .catch(() => pickMediumAction(next))
+      .then(aiAction => {
+        if (!aiAction) { set({ aiThinking: false }); return }
+        const cur = get().state
+        if (!cur || cur.phase !== 'playing' || cur.activePlayer !== 1) {
+          set({ aiThinking: false }); return
+        }
+        const aiResult = applyAction(cur, aiAction)
+        if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction(aiAction, cur) })
+        else set({ aiThinking: false })
+      })
+    return
+  }
+
+  const aiAction = difficulty === 'medium'
+    ? pickMediumAction(next)
+    : pickEasyAction(next)
+  if (aiAction) {
+    const aiResult = applyAction(next, aiAction)
+    if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction(aiAction, next) }); return }
+  }
+  set({ state: next, error: null })
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   state: null,
   mode: null,
@@ -94,33 +131,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     // vs-ai: AI must move (player 1)
-    if (difficulty === 'hard') {
-      set({ state: next, error: null, aiThinking: true })
-      getWorkerBridge()
-        .getAction(next)
-        .then(aiAction => aiAction ?? pickMediumAction(next))
-        .catch(() => pickMediumAction(next))
-        .then(aiAction => {
-          if (!aiAction) { set({ aiThinking: false }); return }
-          const cur = get().state
-          if (!cur || cur.phase !== 'playing' || cur.activePlayer !== 1) {
-            set({ aiThinking: false }); return
-          }
-          const aiResult = applyAction(cur, aiAction)
-          if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction(aiAction, cur) })
-          else set({ aiThinking: false })
-        })
-      return
-    }
-
-    const aiAction = difficulty === 'medium'
-      ? pickMediumAction(next)
-      : pickEasyAction(next)
-    if (aiAction) {
-      const aiResult = applyAction(next, aiAction)
-      if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction(aiAction, next) }); return }
-    }
-    set({ state: next, error: null })
+    runAi(next, difficulty, set, get)
   },
 
   nextRound: () => {
@@ -144,7 +155,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         result.sealAwardedTo === 0 ? 1 :
         result.sealAwardedTo === 1 ? 0 :
         undefined
-      set({ state: setupRound(newSeals, loser), error: null })
+      const newRoundState = setupRound(newSeals, loser)
+      const { mode, difficulty } = get()
+      if (mode === 'vs-ai' && newRoundState.activePlayer === 1) {
+        runAi(newRoundState, difficulty, set, get)
+      } else {
+        set({ state: newRoundState, error: null })
+      }
     }
   },
 
