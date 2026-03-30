@@ -83,6 +83,39 @@ export function TutorialOverlay({ onDone }: Props) {
     setStep(s => s + 1)
   }
 
+  // Waiting for a player action — show a compact top hint so the full game is accessible
+  if (current.trigger !== 'button') {
+    return (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000,
+        display: 'flex', justifyContent: 'center',
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          background: '#1a120a',
+          border: '1.5px solid #f0c030',
+          borderRadius: '0 0 12px 12px',
+          padding: '10px 16px',
+          maxWidth: 620, width: '100%',
+          pointerEvents: 'all',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#f0c030' }}>{current.title}: </span>
+            <span style={{ fontSize: 13, color: '#e8dcc8' }}>{current.body}</span>
+          </div>
+          <button
+            onClick={onDone}
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
@@ -120,22 +153,16 @@ export function TutorialOverlay({ onDone }: Props) {
           >
             Skip Tutorial
           </button>
-          {current.trigger === 'button' ? (
-            <button
-              onClick={advance}
-              style={{
-                background: '#5a3a00', border: '1.5px solid #f0c030',
-                color: '#f0e8d8', fontSize: 15, fontWeight: 700,
-                borderRadius: 8, padding: '10px 28px', cursor: 'pointer',
-              }}
-            >
-              {isLast ? 'Play!' : 'Next →'}
-            </button>
-          ) : (
-            <span style={{ color: '#888', fontSize: 13, fontStyle: 'italic' }}>
-              Waiting for your move…
-            </span>
-          )}
+          <button
+            onClick={advance}
+            style={{
+              background: '#5a3a00', border: '1.5px solid #f0c030',
+              color: '#f0e8d8', fontSize: 15, fontWeight: 700,
+              borderRadius: 8, padding: '10px 28px', cursor: 'pointer',
+            }}
+          >
+            {isLast ? 'Play!' : 'Next →'}
+          </button>
         </div>
       </div>
     </div>
