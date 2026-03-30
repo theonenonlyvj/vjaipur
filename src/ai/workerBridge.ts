@@ -35,9 +35,10 @@ export class WorkerBridge {
   }
 }
 
-// Module-level singleton — default uses Vite's URL-based worker (browser only).
-// Tests replace this via setWorkerBridge().
+// Module-level singletons — default uses Vite's URL-based workers (browser only).
+// Tests replace these via setWorkerBridge() / setWorkerBridge2().
 let _bridge: WorkerBridge | null = null
+let _bridge2: WorkerBridge | null = null
 
 export function getWorkerBridge(): WorkerBridge {
   if (!_bridge) {
@@ -51,4 +52,18 @@ export function getWorkerBridge(): WorkerBridge {
 
 export function setWorkerBridge(bridge: WorkerBridge | null): void {
   _bridge = bridge
+}
+
+export function getWorkerBridge2(): WorkerBridge {
+  if (!_bridge2) {
+    _bridge2 = new WorkerBridge(
+      // @ts-ignore
+      () => new Worker(new URL('./aiWorker2.ts', import.meta.url), { type: 'module' })
+    )
+  }
+  return _bridge2
+}
+
+export function setWorkerBridge2(bridge: WorkerBridge | null): void {
+  _bridge2 = bridge
 }

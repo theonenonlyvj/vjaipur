@@ -3,14 +3,14 @@ import type { GameState, Action, EngineError } from '../engine'
 import { applyAction, setupRound, scoreRound } from '../engine'
 import { pickEasyAction } from '../ai/easyAi'
 import { pickMediumAction } from '../ai/mediumAi'
-import { getWorkerBridge } from '../ai/workerBridge'
+import { getWorkerBridge, getWorkerBridge2 } from '../ai/workerBridge'
 import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
 import { soundService } from '../audio/soundService'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
-export type Difficulty = 'easy' | 'medium' | 'hard'
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2'
 
 export interface GameStore {
   state: GameState | null
@@ -65,9 +65,10 @@ function runAi(
   set: (partial: Partial<GameStore>) => void,
   get: () => GameStore,
 ) {
-  if (difficulty === 'hard') {
+  if (difficulty === 'hard' || difficulty === 'hard2') {
+    const bridge = difficulty === 'hard2' ? getWorkerBridge2() : getWorkerBridge()
     set({ state: next, error: null, aiThinking: true })
-    getWorkerBridge()
+    bridge
       .getAction(next)
       .then(aiAction => aiAction ?? pickMediumAction(next))
       .catch(() => pickMediumAction(next))
