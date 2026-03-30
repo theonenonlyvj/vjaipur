@@ -16,9 +16,7 @@ describe('MarketRow', () => {
     const { unmount } = render(
       <MarketRow
         market={market}
-        exchangeMode={false}
         selectedIndices={[]}
-        onTakeSingle={vi.fn()}
         onToggleSelect={vi.fn()}
       />
     )
@@ -30,53 +28,45 @@ describe('MarketRow', () => {
     unmount()
   })
 
-  it('calls onTakeSingle with correct index in normal mode', () => {
-    const onTakeSingle = vi.fn()
-    const { unmount } = render(
-      <MarketRow
-        market={market}
-        exchangeMode={false}
-        selectedIndices={[]}
-        onTakeSingle={onTakeSingle}
-        onToggleSelect={vi.fn()}
-      />
-    )
-    fireEvent.click(screen.getAllByText('Gold')[0])
-    expect(onTakeSingle).toHaveBeenCalledWith(0)
-    unmount()
-  })
-
-  it('does not call onTakeSingle for camels in normal mode', () => {
-    const onTakeSingle = vi.fn()
-    const { unmount } = render(
-      <MarketRow
-        market={market}
-        exchangeMode={false}
-        selectedIndices={[]}
-        onTakeSingle={onTakeSingle}
-        onToggleSelect={vi.fn()}
-      />
-    )
-    fireEvent.click(screen.getAllByText('Camel')[0])
-    expect(onTakeSingle).not.toHaveBeenCalled()
-    unmount()
-  })
-
-  it('calls onToggleSelect in exchange mode (not onTakeSingle)', () => {
-    const onTakeSingle = vi.fn()
+  it('calls onToggleSelect with correct index when clicking a non-camel card', () => {
     const onToggle = vi.fn()
     const { unmount } = render(
       <MarketRow
         market={market}
-        exchangeMode={true}
         selectedIndices={[]}
-        onTakeSingle={onTakeSingle}
+        onToggleSelect={onToggle}
+      />
+    )
+    fireEvent.click(screen.getAllByText('Gold')[0])
+    expect(onToggle).toHaveBeenCalledWith(0)
+    unmount()
+  })
+
+  it('does not call onToggleSelect for camels', () => {
+    const onToggle = vi.fn()
+    const { unmount } = render(
+      <MarketRow
+        market={market}
+        selectedIndices={[]}
+        onToggleSelect={onToggle}
+      />
+    )
+    fireEvent.click(screen.getAllByText('Camel')[0])
+    expect(onToggle).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('calls onToggleSelect for any non-camel card (no separate exchange mode)', () => {
+    const onToggle = vi.fn()
+    const { unmount } = render(
+      <MarketRow
+        market={market}
+        selectedIndices={[]}
         onToggleSelect={onToggle}
       />
     )
     fireEvent.click(screen.getAllByText('Spice')[0])
     expect(onToggle).toHaveBeenCalledWith(2)
-    expect(onTakeSingle).not.toHaveBeenCalled()
     unmount()
   })
 })

@@ -18,7 +18,6 @@ import type { Good } from '../engine'
 export function GameScreen() {
   const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName } = useGameStore()
 
-  const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
   const [showBonusReveal, setShowBonusReveal] = useState(false)
@@ -45,10 +44,11 @@ export function GameScreen() {
   const opponentPlayer = state.players[opponentIndex]
   const isMyTurn = state.activePlayer === myIndex
   const camelsUsed = selHand.filter(i => i === -1).length
+  const inExchange = selMarket.length >= 2
 
-  function handleTakeSingle(marketIndex: number) {
-    if (!isMyTurn) return
-    dispatch({ type: 'TAKE_SINGLE', marketIndex })
+  function clearSelection() {
+    setSelMarket([])
+    setSelHand([])
   }
 
   function handleTakeCamels() {
@@ -56,8 +56,19 @@ export function GameScreen() {
     dispatch({ type: 'TAKE_CAMELS' })
   }
 
+  function handleTake() {
+    if (!isMyTurn || selMarket.length !== 1) return
+    dispatch({ type: 'TAKE_SINGLE', marketIndex: selMarket[0] })
+    clearSelection()
+  }
+
   function handleToggleMarket(i: number) {
-    setSelMarket(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])
+    // Deselecting clears hand selection too if it would no longer be needed
+    setSelMarket(prev => {
+      const next = prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]
+      if (next.length < 2) setSelHand([])
+      return next
+    })
   }
 
   function handleToggleHand(i: number) {
@@ -76,23 +87,9 @@ export function GameScreen() {
     })
   }
 
-  function handleStartExchange() {
-    setExchangeMode(true)
-    setSelMarket([])
-    setSelHand([])
-  }
-
-  function handleCancelExchange() {
-    setExchangeMode(false)
-    setSelMarket([])
-    setSelHand([])
-  }
-
   function handleConfirmExchange() {
     dispatch({ type: 'TAKE_EXCHANGE', marketIndices: selMarket, handIndices: selHand })
-    setExchangeMode(false)
-    setSelMarket([])
-    setSelHand([])
+    clearSelection()
   }
 
   function handleSell(good: Good, quantity: number) {
@@ -133,9 +130,7 @@ export function GameScreen() {
         </div>
         <MarketRow
           market={state.market}
-          exchangeMode={exchangeMode}
           selectedIndices={selMarket}
-          onTakeSingle={handleTakeSingle}
           onToggleSelect={handleToggleMarket}
         />
       </div>
@@ -143,13 +138,12 @@ export function GameScreen() {
       <ActionBar
         state={state}
         playerIndex={myIndex}
-        exchangeMode={exchangeMode}
-        selMarketCount={selMarket.length}
+        selMarketIndices={selMarket}
         selHandCount={selHand.length}
         onTakeCamels={handleTakeCamels}
-        onStartExchange={handleStartExchange}
+        onTake={handleTake}
         onConfirmExchange={handleConfirmExchange}
-        onCancelExchange={handleCancelExchange}
+        onClearSelection={clearSelection}
         onSell={handleSell}
       />
 
@@ -168,7 +162,7 @@ export function GameScreen() {
         </div>
         <HandRow
           hand={myPlayer.hand}
-          exchangeMode={exchangeMode}
+          inExchange={inExchange}
           selectedIndices={selHand}
           camelsUsed={camelsUsed}
           herd={myPlayer.herd}
