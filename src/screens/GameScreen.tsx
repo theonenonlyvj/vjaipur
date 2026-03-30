@@ -152,9 +152,12 @@ export function GameScreen() {
         onSell={handleSell}
       />
 
-      {aiThinking && (
+      {(aiThinking || lastMoveDescription) && (
         <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic' }}>
-          AI is thinking…
+          {aiThinking
+            ? 'AI is thinking…'
+            : `${mode === 'vs-ai' ? 'AI' : mode === 'online' ? 'Opponent' : `Player ${opponentIndex + 1}`}: ${lastMoveDescription}`
+          }
         </div>
       )}
 
