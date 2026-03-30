@@ -36,7 +36,9 @@ function selectChild(node: MCTSNode, myIndex: 0 | 1): MCTSNode {
   )
 }
 
-function expand(node: MCTSNode): MCTSNode | null {
+type ActionGenerator = (s: GameState) => Action[]
+
+function expand(node: MCTSNode, actionGenerator: ActionGenerator): MCTSNode | null {
   if (node.untriedActions.length === 0) return null
   const idx = Math.floor(Math.random() * node.untriedActions.length)
   const action = node.untriedActions.splice(idx, 1)[0]
@@ -49,7 +51,7 @@ function expand(node: MCTSNode): MCTSNode | null {
     children: [],
     wins: 0,
     visits: 0,
-    untriedActions: result.value.phase === 'playing' ? getActions(result.value) : [],
+    untriedActions: result.value.phase === 'playing' ? actionGenerator(result.value) : [],
   }
   node.children.push(child)
   return child
@@ -88,11 +90,12 @@ export function mcts(
   state: GameState,
   timeLimitMs: number,
   rolloutPolicy: RolloutPolicy = pickEasyAction,
+  actionGenerator: ActionGenerator = getActions,
 ): Action | null {
   if (state.phase !== 'playing') return null
   const myIndex = state.activePlayer
 
-  const initialActions = getActions(state)
+  const initialActions = actionGenerator(state)
   if (initialActions.length === 0) return null
   if (initialActions.length === 1) return initialActions[0]
 
@@ -121,7 +124,7 @@ export function mcts(
 
     // Expansion
     if (node.state.phase === 'playing' && node.untriedActions.length > 0) {
-      const child = expand(node)
+      const child = expand(node, actionGenerator)
       if (child) node = child
     }
 

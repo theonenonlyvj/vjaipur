@@ -4,9 +4,11 @@ export type WorkerFactory = () => Worker
 
 export class WorkerBridge {
   private factory: WorkerFactory
+  private timeoutMs: number
 
-  constructor(factory: WorkerFactory) {
+  constructor(factory: WorkerFactory, timeoutMs = 5000) {
     this.factory = factory
+    this.timeoutMs = timeoutMs
   }
 
   getAction(state: GameState): Promise<Action | null> {
@@ -16,7 +18,7 @@ export class WorkerBridge {
       const timeout = setTimeout(() => {
         worker.terminate()
         reject(new Error('Worker timeout'))
-      }, 3500)
+      }, this.timeoutMs)
 
       worker.onmessage = (e: MessageEvent<Action | null>) => {
         clearTimeout(timeout)
@@ -66,4 +68,21 @@ export function getWorkerBridge2(): WorkerBridge {
 
 export function setWorkerBridge2(bridge: WorkerBridge | null): void {
   _bridge2 = bridge
+}
+
+let _bridge3: WorkerBridge | null = null
+
+export function getWorkerBridge3(): WorkerBridge {
+  if (!_bridge3) {
+    _bridge3 = new WorkerBridge(
+      // @ts-ignore
+      () => new Worker(new URL('./aiWorker3.ts', import.meta.url), { type: 'module' }),
+      11000,  // 8s think time + 3s buffer
+    )
+  }
+  return _bridge3
+}
+
+export function setWorkerBridge3(bridge: WorkerBridge | null): void {
+  _bridge3 = bridge
 }
