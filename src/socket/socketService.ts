@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -27,6 +27,9 @@ export class SocketService {
     })
     this.socket.on(EVENTS.FORFEIT, () => {
       this.onForfeit?.()
+    })
+    this.socket.on(EVENTS.OPPONENT_NAME, (data: OpponentNamePayload) => {
+      this.onOpponentName?.(data.name)
     })
     this.socket.on('connect', () => {
       this.onConnect?.()
@@ -72,6 +75,10 @@ export class SocketService {
     this.socket?.emit(EVENTS.NEXT_ROUND, round)
   }
 
+  sendName(name: string): void {
+    this.socket?.emit(EVENTS.SET_NAME, { name })
+  }
+
   rejoin(code: string, playerIndex: 0 | 1): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error('Not connected'))
@@ -91,6 +98,7 @@ export class SocketService {
   onOpponentReconnected: (() => void) | null = null
   onForfeit: (() => void) | null = null
   onConnect: (() => void) | null = null
+  onOpponentName: ((name: string) => void) | null = null
 }
 
 export const socketService = new SocketService()

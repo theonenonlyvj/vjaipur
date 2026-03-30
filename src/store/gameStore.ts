@@ -24,6 +24,9 @@ export interface GameStore {
   muted: boolean
   lastMoveDescription: string | null
   tutorial: boolean
+  playerName: string
+  opponentName: string | null
+  setPlayerName: (name: string) => void
   toggleMute: () => void
 
   startGame: (mode: Mode) => void
@@ -110,6 +113,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
   lastMoveDescription: null,
   tutorial: false,
+  playerName: '',
+  opponentName: null,
 
   startGame: (mode) => {
     set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null })
@@ -184,8 +189,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         onlinePlayerIndex: playerIndex,
         onlineStatus: 'playing',
         error: null,
+        opponentName: null,
       })
+      const { playerName } = get()
+      if (playerName) socketService.sendName(playerName)
     }
+    socketService.onOpponentName = (name) => set({ opponentName: name })
     socketService.onOpponentAction = (action) => get().receiveOpponentAction(action)
     socketService.onRoundStart = (seed) => get().startNextRound(seed)
     socketService.onOpponentDisconnected = () => set({ onlineStatus: 'opponent-disconnected' })
@@ -248,6 +257,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   startTutorial: () => set({ tutorial: true }),
   endTutorial: () => set({ tutorial: false }),
 
+  setPlayerName: (name) => set({ playerName: name.trim().slice(0, 24) }),
+
   toggleMute: () => {
     const muted = !get().muted
     soundService.setMuted(muted)
@@ -263,6 +274,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onOpponentReconnected = null
     socketService.onForfeit = null
     socketService.onConnect = null
-    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null })
+    socketService.onOpponentName = null
+    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null })
   },
 }))

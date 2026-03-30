@@ -16,7 +16,7 @@ import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
 export function GameScreen() {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName } = useGameStore()
 
   const [exchangeMode, setExchangeMode] = useState(false)
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -122,6 +122,7 @@ export function GameScreen() {
         player={opponentPlayer}
         playerIndex={opponentIndex}
         isActive={state.activePlayer === opponentIndex}
+        name={mode === 'online' ? opponentName : null}
       />
 
       <TokenRail tokens={state.tokens} bonusTokens={state.bonusTokens} />
@@ -156,7 +157,7 @@ export function GameScreen() {
         <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic' }}>
           {aiThinking
             ? 'AI is thinking…'
-            : `${mode === 'vs-ai' ? 'AI' : mode === 'online' ? 'Opponent' : `Player ${opponentIndex + 1}`}: ${lastMoveDescription}`
+            : `${mode === 'vs-ai' ? 'AI' : mode === 'online' ? (opponentName || 'Opponent') : `Player ${opponentIndex + 1}`}: ${lastMoveDescription}`
           }
         </div>
       )}
@@ -181,6 +182,7 @@ export function GameScreen() {
         player={myPlayer}
         playerIndex={myIndex}
         isActive={isMyTurn}
+        name={mode === 'online' ? playerName || null : null}
       />
 
       <Toast message={error?.message ?? null} onDismiss={clearError} />
