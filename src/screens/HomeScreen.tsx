@@ -36,6 +36,7 @@ export function HomeScreen() {
           <button onClick={() => handleDifficulty('easy')} style={btnStyle}>Easy</button>
           <button onClick={() => handleDifficulty('medium')} style={btnStyle}>Medium</button>
           <button onClick={() => handleDifficulty('hard')} style={btnStyle}>Hard</button>
+          <button onClick={() => handleDifficulty('hard2')} style={{ ...btnStyle, borderColor: '#e06060', background: '#3a0000' }}>Hard II</button>
           <button
             onClick={() => setShowDifficulty(false)}
             style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14 }}

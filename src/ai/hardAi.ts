@@ -55,11 +55,13 @@ function expand(node: MCTSNode): MCTSNode | null {
   return child
 }
 
-function rollout(state: GameState, myIndex: 0 | 1): number {
+type RolloutPolicy = (state: GameState) => Action | null
+
+function rollout(state: GameState, myIndex: 0 | 1, policy: RolloutPolicy): number {
   let s = state
   let depth = 0
   while (s.phase === 'playing' && depth < MAX_ROLLOUT_DEPTH) {
-    const action = pickEasyAction(s)
+    const action = policy(s)
     if (!action) break
     const result = applyAction(s, action)
     if (!result.ok) break
@@ -82,7 +84,11 @@ function backpropagate(node: MCTSNode, score: number): void {
   }
 }
 
-export function mcts(state: GameState, timeLimitMs: number): Action | null {
+export function mcts(
+  state: GameState,
+  timeLimitMs: number,
+  rolloutPolicy: RolloutPolicy = pickEasyAction,
+): Action | null {
   if (state.phase !== 'playing') return null
   const myIndex = state.activePlayer
 
@@ -120,7 +126,7 @@ export function mcts(state: GameState, timeLimitMs: number): Action | null {
     }
 
     // Simulation
-    const score = rollout(node.state, myIndex)
+    const score = rollout(node.state, myIndex, rolloutPolicy)
 
     // Backpropagation
     backpropagate(node, score)
