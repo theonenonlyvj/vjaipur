@@ -53,8 +53,22 @@ function describeAction(action: Action, state?: GameState): string {
       const count = state ? state.market.filter(c => c.type === 'camel').length : 1
       return `took ${count} camel${count === 1 ? '' : 's'}`
     }
-    case 'TAKE_EXCHANGE':
-      return 'made an exchange'
+    case 'TAKE_EXCHANGE': {
+      if (!state) return 'made an exchange'
+      const player = state.players[state.activePlayer]
+      const taken = action.marketIndices
+        .map(i => state.market[i]?.type ?? '?')
+        .join(' and ')
+      const givenGoods = action.handIndices
+        .filter(i => i !== -1)
+        .map(i => player.hand[i]?.type ?? '?')
+      const camelsGiven = action.handIndices.filter(i => i === -1).length
+      const givenParts = [
+        ...givenGoods,
+        ...(camelsGiven > 0 ? [`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`] : []),
+      ]
+      return `traded ${givenParts.join(' and ')} for ${taken}`
+    }
     case 'SELL':
       return `sold ${action.quantity} ${action.good}`
   }
