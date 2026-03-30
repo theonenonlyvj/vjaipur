@@ -40,6 +40,70 @@ function evalState(state: GameState, playerIndex: 0 | 1): number {
   return score
 }
 
+function combinations<T>(arr: T[], k: number): T[][] {
+  if (k === 0) return [[]]
+  if (arr.length === 0) return []
+  const [head, ...tail] = arr
+  return [
+    ...combinations(tail, k - 1).map(c => [head, ...c]),
+    ...combinations(tail, k),
+  ]
+}
+
+// Considers all profitable exchange sizes (2-for-2, 3-for-3, up to 5-for-5).
+// Used by Hard III's MCTS action generator to find large multi-card swaps that
+// the 2-for-2-limited getProfitableExchanges would miss.
+export function getAllProfitableExchanges(state: GameState): Action[] {
+  const player = state.players[state.activePlayer]
+
+  const mktGoods = state.market
+    .map((c, i) => ({ type: c.type as Good, i }))
+    .filter(x => (x.type as string) !== 'camel')
+
+  if (mktGoods.length < 2) return []
+
+  const handGoods = player.hand.map((c, i) => ({ type: c.type as Good, i }))
+  const result: Action[] = []
+  const seen = new Set<string>()
+
+  for (let takeSize = 2; takeSize <= mktGoods.length; takeSize++) {
+    for (const takeCombo of combinations(mktGoods, takeSize)) {
+      const takeTypes = takeCombo.map(x => x.type)
+      const mktIdx = takeCombo.map(x => x.i)
+      const takeValue = takeTypes.reduce((s, g) => s + topValue(state, g), 0)
+
+      const giveableHand = handGoods.filter(hg => !takeTypes.includes(hg.type))
+      const maxCamels = Math.min(player.herd, takeSize)
+
+      for (let numCamels = 0; numCamels <= maxCamels; numCamels++) {
+        const numHandGoods = takeSize - numCamels
+        if (numHandGoods > giveableHand.length) continue
+        // New hand size after exchange must stay ≤ 7
+        if (player.hand.length - numHandGoods + takeSize > 7) continue
+
+        const handCombos: { type: Good; i: number }[][] =
+          numHandGoods === 0 ? [[]] : combinations(giveableHand, numHandGoods)
+
+        for (const handCombo of handCombos) {
+          const giveValue = handCombo.reduce((s, hg) => s + topValue(state, hg.type), 0)
+          if (takeValue <= giveValue) continue
+
+          const handIndices = [...handCombo.map(hg => hg.i), ...Array<number>(numCamels).fill(-1)]
+
+          // Deduplicate: same set of positions regardless of iteration order
+          const key = [...mktIdx].sort().join(',') + '|' + [...handIndices].sort().join(',')
+          if (seen.has(key)) continue
+          seen.add(key)
+
+          result.push({ type: 'TAKE_EXCHANGE', marketIndices: mktIdx, handIndices })
+        }
+      }
+    }
+  }
+
+  return result
+}
+
 export function getProfitableExchanges(state: GameState): Action[] {
   const player = state.players[state.activePlayer]
 
