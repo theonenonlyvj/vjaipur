@@ -20,11 +20,11 @@ describe('MarketRow', () => {
         onToggleSelect={vi.fn()}
       />
     )
-    expect(screen.getByText('Gold')).toBeInTheDocument()
-    expect(screen.getByText('Camel')).toBeInTheDocument()
-    expect(screen.getByText('Spice')).toBeInTheDocument()
-    expect(screen.getByText('Leather')).toBeInTheDocument()
-    expect(screen.getByText('Diamond')).toBeInTheDocument()
+    expect(screen.getByText('GOLD')).toBeInTheDocument()
+    expect(screen.getByText('CAMEL')).toBeInTheDocument()
+    expect(screen.getByText('SPICE')).toBeInTheDocument()
+    expect(screen.getByText('LEATHER')).toBeInTheDocument()
+    expect(screen.getByText('DIAMOND')).toBeInTheDocument()
     unmount()
   })
 
@@ -37,7 +37,7 @@ describe('MarketRow', () => {
         onToggleSelect={onToggle}
       />
     )
-    fireEvent.click(screen.getAllByText('Gold')[0])
+    fireEvent.click(screen.getAllByText('GOLD')[0])
     expect(onToggle).toHaveBeenCalledWith(0)
     unmount()
   })
@@ -51,7 +51,7 @@ describe('MarketRow', () => {
         onToggleSelect={onToggle}
       />
     )
-    fireEvent.click(screen.getAllByText('Camel')[0])
+    fireEvent.click(screen.getAllByText('CAMEL')[0])
     expect(onToggle).toHaveBeenCalledWith(1)
     unmount()
   })
@@ -65,7 +65,7 @@ describe('MarketRow', () => {
         onToggleSelect={onToggle}
       />
     )
-    fireEvent.click(screen.getAllByText('Spice')[0])
+    fireEvent.click(screen.getAllByText('SPICE')[0])
     expect(onToggle).toHaveBeenCalledWith(2)
     unmount()
   })
