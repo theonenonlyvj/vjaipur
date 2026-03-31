@@ -96,17 +96,30 @@ export function GameScreen() {
   }
 
   function handleToggleHand(i: number) {
+    if (!state) return
+    const myPlayer = state.players[myIndex]
+    const card = myPlayer.hand[i]
+    if (!card) return
+
     setSelHand(prev => {
       const isAlreadySelected = prev.includes(i)
-      const next = isAlreadySelected ? prev.filter(x => x !== i) : [...prev, i]
 
-      // If we're not currently in an exchange (market selection < 2),
-      // then clicking hand cards should clear any market selection (preparing to sell)
-      if (selMarket.length < 2) {
-        setSelMarket([])
+      if (isAlreadySelected) {
+        return prev.filter(x => x !== i)
+      } else {
+        // If we're not currently in an exchange (market selection < 2),
+        // then clicking hand cards should clear any market selection and select all of this type
+        if (selMarket.length < 2) {
+          setSelMarket([])
+          const sameTypeIndices = myPlayer.hand
+            .map((c, idx) => (c.type === card.type ? idx : -1))
+            .filter(idx => idx !== -1)
+          return sameTypeIndices
+        } else {
+          // Exchange mode: just toggle this one
+          return [...prev, i]
+        }
       }
-
-      return next
     })
   }
 
@@ -180,6 +193,7 @@ export function GameScreen() {
         onConfirmExchange={handleConfirmExchange}
         onClearSelection={clearSelection}
         onSell={handleSell}
+        onUpdateHandSelection={setSelHand}
       />
 
       {(aiThinking || lastMoveDescription) && (

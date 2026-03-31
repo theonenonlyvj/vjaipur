@@ -13,12 +13,13 @@ interface Props {
   onConfirmExchange: () => void
   onClearSelection: () => void
   onSell: (good: Good, qty: number) => void
+  onUpdateHandSelection: (indices: number[]) => void
 }
 
 export function ActionBar({
   state, playerIndex,
   selMarketIndices, selHandIndices,
-  onTakeCamels, onTake, onConfirmExchange, onClearSelection, onSell,
+  onTakeCamels, onTake, onConfirmExchange, onClearSelection, onSell, onUpdateHandSelection,
 }: Props) {
   const player = state.players[playerIndex]
   const isMyTurn = state.activePlayer === playerIndex
@@ -51,20 +52,44 @@ export function ActionBar({
     if (onlyOneGoodSelected && selGoodToSell) {
       const min = PRECIOUS.has(selGoodToSell) ? 2 : 1
       const isValidQty = selHandCount >= min
+      
+      const allMatchingIndices = player.hand
+        .map((c, idx) => c.type === selGoodToSell ? idx : -1)
+        .filter(idx => idx !== -1)
+      
+      const handleMinus = () => {
+        if (selHandCount > 1) {
+          onUpdateHandSelection(selHandIndices.slice(0, -1))
+        }
+      }
+      const handlePlus = () => {
+        if (selHandCount < allMatchingIndices.length) {
+          // Find an index of this type that isn't selected yet
+          const nextIdx = allMatchingIndices.find(idx => !selHandIndices.includes(idx))
+          if (nextIdx !== undefined) {
+            onUpdateHandSelection([...selHandIndices, nextIdx])
+          }
+        }
+      }
+
       contextBtn = (
-        <button
-          onClick={() => { onSell(selGoodToSell, selHandCount); onClearSelection() }}
-          disabled={!isValidQty}
-          style={{
-            ...actionBtn,
-            flex: 1,
-            background: isValidQty ? '#306010' : '#2a2a2a',
-            borderColor: isValidQty ? '#60c040' : '#444',
-            opacity: isValidQty ? 1 : 0.6,
-          }}
-        >
-          {isValidQty ? `Sell ${selHandCount} ${selGoodToSell}` : `Need ${min} ${selGoodToSell}`}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flex: 1, alignItems: 'center' }}>
+          <button onClick={handleMinus} disabled={selHandCount <= 1} style={smallBtn}>−</button>
+          <button
+            onClick={() => { onSell(selGoodToSell, selHandCount); onClearSelection() }}
+            disabled={!isValidQty}
+            style={{
+              ...actionBtn,
+              flex: 1,
+              background: isValidQty ? '#306010' : '#2a2a2a',
+              borderColor: isValidQty ? '#60c040' : '#444',
+              opacity: isValidQty ? 1 : 0.6,
+            }}
+          >
+            {isValidQty ? `Sell ${selHandCount} ${selGoodToSell}` : `Need ${min} ${selGoodToSell}`}
+          </button>
+          <button onClick={handlePlus} disabled={selHandCount >= allMatchingIndices.length} style={smallBtn}>+</button>
+        </div>
       )
     } else {
       contextBtn = (
@@ -159,6 +184,11 @@ const actionBtn: CSSProperties = {
   padding: '8px 14px', background: '#3a2010', color: '#f0e8d8',
   border: '1px solid #f0c030', borderRadius: 6, cursor: 'pointer',
   fontSize: 13, fontWeight: 600,
+}
+
+const smallBtn: CSSProperties = {
+  padding: '4px 12px', background: '#2a1800', color: '#f0e8d8',
+  border: '1px solid #5a3a20', borderRadius: 4, cursor: 'pointer', fontSize: 18,
 }
 
 const cancelBtn: CSSProperties = {
