@@ -177,7 +177,12 @@ export function ActionBar({
 
 const barStyle: CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 8,
-  padding: '10px 12px', background: '#1f1000', borderRadius: 8,
+  padding: '10px 12px',
+  background: 'rgba(0, 0, 0, 0.4)',
+  backdropFilter: 'blur(10px)',
+  WebkitBackdropFilter: 'blur(10px)',
+  borderRadius: 8,
+  border: '1px solid rgba(255, 255, 255, 0.1)',
 }
 
 const actionBtn: CSSProperties = {
