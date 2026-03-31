@@ -8,8 +8,19 @@ export class SocketService {
 
   connect(url: string): void {
     if (this.socket?.connected) return
-    this.socket?.disconnect()
-    this.socket = io(url, { autoConnect: true })
+    if (this.socket && !this.socket.disconnected) return // Already connecting
+    
+    console.log('Connecting to socket server at:', url)
+    this.socket = io(url, { 
+      autoConnect: true,
+      reconnectionAttempts: 5,
+      timeout: 10000,
+    })
+
+    this.socket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err.message)
+    })
+
     this.socket.on(EVENTS.ROOM_READY, (data: RoomReadyPayload) => {
       this.onRoomReady?.(data.playerIndex, data.seed)
     })

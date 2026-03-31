@@ -42,6 +42,28 @@ function generateSecretKey(): string {
   ).join('')
 }
 
+async function waitForConnection(): Promise<void> {
+  if (socketService.connected) return
+  
+  // Try to trigger a connection if it's not even started
+  const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
+  socketService.connect(url)
+
+  return new Promise((resolve, reject) => {
+    let attempts = 0
+    const interval = setInterval(() => {
+      attempts++
+      if (socketService.connected) {
+        clearInterval(interval)
+        resolve()
+      } else if (attempts > 100) { // 10 seconds
+        clearInterval(interval)
+        reject(new Error('Connection timeout'))
+      }
+    }, 100)
+  })
+}
+
 export const useStatsStore = create<StatsStore>()(
   persist(
     (set, get) => ({
@@ -101,34 +123,49 @@ export const useStatsStore = create<StatsStore>()(
       },
 
       restoreAccount: async (username, password) => {
-        const ack = await socketService.restoreAccount({ username, password })
-        if (ack.ok && ack.friendCode && ack.secretKey) {
-          set({
-            matches: ack.matches || [],
-            friendCode: ack.friendCode,
-            secretKey: ack.secretKey,
-            displayName: ack.displayName || null,
-          })
+        try {
+          await waitForConnection()
+          const ack = await socketService.restoreAccount({ username, password })
+          if (ack.ok && ack.friendCode && ack.secretKey) {
+            set({
+              matches: ack.matches || [],
+              friendCode: ack.friendCode,
+              secretKey: ack.secretKey,
+              displayName: ack.displayName || null,
+            })
+          }
+          return ack
+        } catch (e) {
+          return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
         }
-        return ack
       },
 
       secureAccount: async (username, password) => {
-        const { friendCode } = get().ensureAccount()
-        const ack = await socketService.secureAccount({ friendCode, username, password })
-        if (ack.ok) {
-          set({
-            displayName: username,
-            secretKey: password,
-          })
+        try {
+          await waitForConnection()
+          const { friendCode } = get().ensureAccount()
+          const ack = await socketService.secureAccount({ friendCode, username, password })
+          if (ack.ok) {
+            set({
+              displayName: username,
+              secretKey: password,
+            })
+          }
+          return ack
+        } catch (e) {
+          return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
         }
-        return ack
       },
 
-      setDisplayName: (name) => {
+      setDisplayName: async (name) => {
         set({ displayName: name })
         const { friendCode, secretKey } = get().ensureAccount()
-        socketService.updateProfile({ friendCode, secretKey, displayName: name })
+        try {
+          await waitForConnection()
+          socketService.updateProfile({ friendCode, secretKey, displayName: name })
+        } catch (e) {
+          console.warn('Could not sync profile name: connection timeout')
+        }
       },
 
       clearHistory: () => {
