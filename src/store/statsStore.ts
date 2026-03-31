@@ -24,6 +24,7 @@ interface StatsActions {
   addMatch: (match: Omit<MatchRecord, 'timestamp'>) => void
   restoreAccount: (matches: MatchRecord[], friendCode: string, secretKey: string, displayName?: string | null) => void
   setDisplayName: (name: string) => void
+  clearHistory: () => void
   clearStats: () => void
 }
 
@@ -103,6 +104,10 @@ export const useStatsStore = create<StatsStore>()(
 
       setDisplayName: (name) => {
         set({ displayName: name })
+      },
+
+      clearHistory: () => {
+        set({ matches: [] })
       },
 
       clearStats: () => {

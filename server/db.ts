@@ -62,3 +62,18 @@ export async function updatePlayerName(playerId: string, displayName: string) {
     .eq('id', playerId)
   if (error) throw error
 }
+
+export async function isUsernameAvailable(name: string, excludePlayerId?: string) {
+  let query = supabase
+    .from('players')
+    .select('id', { count: 'exact', head: true })
+    .ilike('display_name', name)
+  
+  if (excludePlayerId) {
+    query = query.neq('id', excludePlayerId)
+  }
+
+  const { count, error } = await query
+  if (error) throw error
+  return count === 0
+}

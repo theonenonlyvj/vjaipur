@@ -3,7 +3,7 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
-import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches, updatePlayerName } from './db.js'
+import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches, updatePlayerName, isUsernameAvailable } from './db.js'
 import { EVENTS } from '../src/shared/protocol.js'
 import type { 
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
@@ -140,6 +140,16 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('RESTORE_ACCOUNT error:', error)
       cb({ ok: false, error: 'Internal server error' })
+    }
+  })
+
+  socket.on(EVENTS.CHECK_USERNAME, async (data: { name: string }, cb: (ack: { available: boolean }) => void) => {
+    try {
+      const available = await isUsernameAvailable(data.name)
+      cb({ available })
+    } catch (error) {
+      console.error('CHECK_USERNAME error:', error)
+      cb({ available: false })
     }
   })
 

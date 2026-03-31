@@ -11,6 +11,7 @@ export const EVENTS = {
   SET_NAME:     'set_name',
   SYNC_MATCH:   'sync_match',
   RESTORE_ACCOUNT: 'restore_account',
+  CHECK_USERNAME: 'check_username',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
