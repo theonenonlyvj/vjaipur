@@ -35,6 +35,7 @@ export interface OpponentNamePayload { name: string; friendCode: string }
 export interface SyncMatchPayload {
   friendCode: string
   secretKey: string
+  displayName?: string
   match: {
     opponent_type: string
     opponent_id?: string | null
@@ -52,5 +53,6 @@ export interface RestoreAccountPayload {
 export interface RestoreAccountAck {
   ok: boolean
   matches?: any[]
+  displayName?: string | null
   error?: string
 }

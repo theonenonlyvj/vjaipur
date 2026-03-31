@@ -3,7 +3,7 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
-import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches } from './db.js'
+import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches, updatePlayerName } from './db.js'
 import { EVENTS } from '../src/shared/protocol.js'
 import type { 
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
@@ -105,10 +105,15 @@ io.on('connection', (socket) => {
     try {
       let player = await getPlayerByCode(data.friendCode)
       if (!player) {
-        player = await createPlayer(data.friendCode, data.secretKey)
-      } else if (player.secret_key !== data.secretKey) {
-        console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
-        return
+        player = await createPlayer(data.friendCode, data.secretKey, data.displayName)
+      } else {
+        if (player.secret_key !== data.secretKey) {
+          console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
+          return
+        }
+        if (data.displayName && player.display_name !== data.displayName) {
+          await updatePlayerName(player.id, data.displayName)
+        }
       }
       await recordMatch({
         player_id: player.id,
@@ -131,7 +136,7 @@ io.on('connection', (socket) => {
         return
       }
       const matches = await getPlayerMatches(player.id)
-      cb({ ok: true, matches })
+      cb({ ok: true, matches, displayName: player.display_name })
     } catch (error) {
       console.error('RESTORE_ACCOUNT error:', error)
       cb({ ok: false, error: 'Internal server error' })
