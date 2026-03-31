@@ -27,6 +27,8 @@ import { socketService } from '../../src/socket/socketService'
 
 vi.mock('../../src/socket/socketService', () => ({
   socketService: {
+    connected: true,
+    connect: vi.fn(),
     syncMatch: vi.fn(),
     restoreAccount: vi.fn(),
     secureAccount: vi.fn(),

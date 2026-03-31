@@ -5,6 +5,7 @@ import { useStatsStore } from '../../src/store/statsStore'
 
 vi.mock('../../src/socket/socketService', () => ({
   socketService: {
+    connect: vi.fn(),
     secureAccount: vi.fn(),
     restoreAccount: vi.fn(),
   },
