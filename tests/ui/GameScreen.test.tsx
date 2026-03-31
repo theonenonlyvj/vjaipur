@@ -12,7 +12,7 @@ describe('GameScreen', () => {
   it('renders without crashing with an active game', () => {
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
     // Market always has 5 cards — at least one should be a known good or camel
-    const goodLabels = ['Diamond', 'Gold', 'Silver', 'Cloth', 'Spice', 'Leather', 'Camel']
+    const goodLabels = ['DIAMOND', 'GOLD', 'SILVER', 'CLOTH', 'SPICE', 'LEATHER', 'CAMEL']
     const found = goodLabels.filter(l => screen.queryAllByText(l).length > 0)
     expect(found.length).toBeGreaterThan(0)
   })
