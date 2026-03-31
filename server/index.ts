@@ -153,6 +153,19 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on(EVENTS.UPDATE_PROFILE, async (data: { friendCode: string, secretKey: string, displayName: string }) => {
+    try {
+      let player = await getPlayerByCode(data.friendCode)
+      if (!player) {
+        await createPlayer(data.friendCode, data.secretKey, data.displayName)
+      } else if (player.secret_key === data.secretKey) {
+        await updatePlayerName(player.id, data.displayName)
+      }
+    } catch (error) {
+      console.error('UPDATE_PROFILE error:', error)
+    }
+  })
+
   socket.on('disconnect', () => {
     const room = rm.getRoomBySocket(socket.id)
     if (!room) return

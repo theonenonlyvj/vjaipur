@@ -104,6 +104,8 @@ export const useStatsStore = create<StatsStore>()(
 
       setDisplayName: (name) => {
         set({ displayName: name })
+        const { friendCode, secretKey } = get().ensureAccount()
+        socketService.updateProfile({ friendCode, secretKey, displayName: name })
       },
 
       clearHistory: () => {
