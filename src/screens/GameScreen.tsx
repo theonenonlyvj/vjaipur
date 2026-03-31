@@ -44,7 +44,7 @@ export function GameScreen() {
   const opponentPlayer = state.players[opponentIndex]
   const isMyTurn = state.activePlayer === myIndex
   const camelsUsed = selHand.filter(i => i === -1).length
-  const inExchange = selMarket.length >= 2
+  const inExchange = selMarket.filter(i => state.market[i]?.type !== 'camel').length >= 2
 
   function clearSelection() {
     setSelMarket([])
