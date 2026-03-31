@@ -22,7 +22,8 @@ interface StatsState {
 interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
   addMatch: (match: Omit<MatchRecord, 'timestamp'>) => void
-  restoreAccount: (matches: MatchRecord[], friendCode: string, secretKey: string, displayName?: string | null) => void
+  restoreAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
+  secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
   clearHistory: () => void
   clearStats: () => void
@@ -52,18 +53,24 @@ export const useStatsStore = create<StatsStore>()(
       ensureAccount: () => {
         const { friendCode, secretKey, displayName } = get()
         if (friendCode && secretKey) {
-          return { friendCode, secretKey, displayName }
+          const effectiveDisplayName = displayName || `Guest_${friendCode.slice(-4)}`
+          if (!displayName) {
+            set({ displayName: effectiveDisplayName })
+          }
+          return { friendCode, secretKey, displayName: effectiveDisplayName }
         }
 
         const newFriendCode = generateFriendCode()
         const newSecretKey = generateSecretKey()
+        const guestName = `Guest_${newFriendCode.slice(-4)}`
 
         set({
           friendCode: newFriendCode,
           secretKey: newSecretKey,
+          displayName: guestName,
         })
 
-        return { friendCode: newFriendCode, secretKey: newSecretKey, displayName: null }
+        return { friendCode: newFriendCode, secretKey: newSecretKey, displayName: guestName }
       },
 
       addMatch: (matchData) => {
@@ -93,13 +100,29 @@ export const useStatsStore = create<StatsStore>()(
         socketService.syncMatch(payload)
       },
 
-      restoreAccount: (matches, friendCode, secretKey, displayName) => {
-        set({
-          matches,
-          friendCode,
-          secretKey,
-          displayName: displayName || null,
-        })
+      restoreAccount: async (username, password) => {
+        const ack = await socketService.restoreAccount({ username, password })
+        if (ack.ok && ack.friendCode && ack.secretKey) {
+          set({
+            matches: ack.matches || [],
+            friendCode: ack.friendCode,
+            secretKey: ack.secretKey,
+            displayName: ack.displayName || null,
+          })
+        }
+        return ack
+      },
+
+      secureAccount: async (username, password) => {
+        const { friendCode } = get().ensureAccount()
+        const ack = await socketService.secureAccount({ friendCode, username, password })
+        if (ack.ok) {
+          set({
+            displayName: username,
+            secretKey: password,
+          })
+        }
+        return ack
       },
 
       setDisplayName: (name) => {

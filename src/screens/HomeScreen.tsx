@@ -11,41 +11,10 @@ import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
   const navigate = useNavigate()
-  const { playerName, setPlayerName, startGame, setDifficulty, startTutorial } = useGameStore()
+  const { startGame, setDifficulty, startTutorial } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
-  const [inputName, setInputName] = useState(playerName)
-  const [isChecking, setIsChecking] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    setInputName(playerName)
-  }, [playerName])
-
-  async function handleClaimName() {
-    const name = inputName.trim()
-    if (!name) return
-    
-    setIsChecking(true)
-    setError('')
-
-    const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url)
-
-    try {
-      const { available } = await socketService.checkUsername(name)
-      if (available) {
-        setPlayerName(name)
-      } else {
-        setError('Username already taken')
-      }
-    } catch (e) {
-      setError('Connection error')
-    } finally {
-      setIsChecking(false)
-    }
-  }
 
   function handleDifficulty(d: Difficulty) {
     setDifficulty(d)
@@ -65,47 +34,12 @@ export function HomeScreen() {
     navigate('/game')
   }
 
-  const hasName = !!playerName
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 24, padding: 20 }}>
       <ProfileIcon onClick={() => setShowProfile(true)} />
 
       <h1 style={{ fontSize: 40, fontWeight: 900, letterSpacing: 2, color: '#f0c030', marginTop: 20 }}>VJAIPUR</h1>
       
-      {!hasName ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 260 }}>
-          <div style={{ color: '#eee', fontSize: 14, textAlign: 'center' }}>Choose a unique username to play:</div>
-          <input
-            value={inputName}
-            onChange={e => setInputName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleClaimName()}
-            placeholder="Username"
-            maxLength={24}
-            style={inputStyle}
-          />
-          {error && <div style={{ color: '#ff4060', fontSize: 12, textAlign: 'center' }}>{error}</div>}
-          <button 
-            onClick={handleClaimName} 
-            disabled={isChecking || !inputName.trim()}
-            style={{ ...btnStyle, fontSize: 16, padding: '10px' }}
-          >
-            {isChecking ? 'Checking...' : 'Claim Username'}
-          </button>
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ color: '#888', fontSize: 14 }}>Welcome back,</div>
-          <div style={{ fontSize: 24, fontWeight: 900, color: '#fff' }}>{playerName}</div>
-          <button 
-            onClick={() => setPlayerName('')} 
-            style={{ background: 'none', border: 'none', color: '#666', textDecoration: 'underline', fontSize: 11, cursor: 'pointer', marginTop: 4 }}
-          >
-            Change Name
-          </button>
-        </div>
-      )}
-
       {showDifficulty ? (
         <>
           <button onClick={() => handleDifficulty('easy')} style={btnStyle}>Easy</button>
@@ -122,9 +56,9 @@ export function HomeScreen() {
         </>
       ) : (
         <>
-          <button onClick={() => setShowDifficulty(true)} disabled={!hasName} style={{ ...btnStyle, opacity: hasName ? 1 : 0.5, cursor: hasName ? 'pointer' : 'not-allowed' }}>vs AI</button>
+          <button onClick={() => setShowDifficulty(true)} style={btnStyle}>vs AI</button>
           <button onClick={handleLocal} style={btnStyle}>Local (Pass &amp; Play)</button>
-          <button onClick={() => navigate('/lobby')} disabled={!hasName} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040', opacity: hasName ? 1 : 0.5, cursor: hasName ? 'pointer' : 'not-allowed' }}>
+          <button onClick={() => navigate('/lobby')} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
             Online
           </button>
           

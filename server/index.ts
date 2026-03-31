@@ -3,11 +3,16 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
-import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches, updatePlayerName, isUsernameAvailable } from './db.js'
+import { 
+  getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch, 
+  getPlayerMatches, updatePlayerName, isUsernameAvailable, Player,
+  updatePlayerToSecured
+} from './db.js'
 import { EVENTS } from '../src/shared/protocol.js'
 import type { 
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
-  SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck 
+  SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
+  SecureAccountPayload, SecureAccountAck
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
@@ -103,18 +108,37 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.SYNC_MATCH, async (data: SyncMatchPayload) => {
     try {
-      let player = await getPlayerByCode(data.friendCode)
-      if (!player) {
-        player = await createPlayer(data.friendCode, data.secretKey, data.displayName)
-      } else {
-        if (player.secret_key !== data.secretKey) {
+      let player: Player | null = null
+      
+      // Try username first if provided
+      if (data.username && data.password) {
+        player = await getPlayerByUsername(data.username)
+        if (player && player.secret_key !== data.password) {
+          console.warn('SYNC_MATCH: Password mismatch for username:', data.username)
+          return
+        }
+      }
+
+      // Fallback to friendCode for guest or if username lookup didn't yield a player
+      if (!player && data.friendCode && data.secretKey) {
+        player = await getPlayerByCode(data.friendCode)
+        if (!player) {
+          player = await createPlayer(data.friendCode, data.secretKey, data.displayName)
+        } else if (player.secret_key !== data.secretKey) {
           console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
           return
         }
-        if (data.displayName && player.display_name !== data.displayName) {
-          await updatePlayerName(player.id, data.displayName)
-        }
       }
+
+      if (!player) {
+        console.warn('SYNC_MATCH: No player found/created for identifying data')
+        return
+      }
+
+      if (data.displayName && player.display_name !== data.displayName) {
+        await updatePlayerName(player.id, data.displayName)
+      }
+
       await recordMatch({
         player_id: player.id,
         opponent_type: data.match.opponent_type,
@@ -130,15 +154,37 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
     try {
-      const player = await getPlayerByCode(data.friendCode)
-      if (!player || player.secret_key !== data.secretKey) {
-        cb({ ok: false, error: 'Invalid friend code or secret key' })
+      const player = await getPlayerByUsername(data.username)
+      if (!player || player.secret_key !== data.password) {
+        cb({ ok: false, error: 'Invalid username or password' })
         return
       }
       const matches = await getPlayerMatches(player.id)
-      cb({ ok: true, matches, displayName: player.display_name })
+      cb({ 
+        ok: true, 
+        matches, 
+        displayName: player.display_name,
+        friendCode: player.friend_code,
+        secretKey: player.secret_key
+      })
     } catch (error) {
       console.error('RESTORE_ACCOUNT error:', error)
+      cb({ ok: false, error: 'Internal server error' })
+    }
+  })
+
+  socket.on(EVENTS.SECURE_ACCOUNT, async (data: SecureAccountPayload, cb: (ack: SecureAccountAck) => void) => {
+    try {
+      const available = await isUsernameAvailable(data.username)
+      if (!available) {
+        cb({ ok: false, error: 'Username already taken' })
+        return
+      }
+
+      await updatePlayerToSecured(data.friendCode, data.username, data.password)
+      cb({ ok: true })
+    } catch (error) {
+      console.error('SECURE_ACCOUNT error:', error)
       cb({ ok: false, error: 'Internal server error' })
     }
   })

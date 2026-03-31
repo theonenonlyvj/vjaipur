@@ -13,6 +13,7 @@ export const EVENTS = {
   RESTORE_ACCOUNT: 'restore_account',
   CHECK_USERNAME: 'check_username',
   UPDATE_PROFILE: 'update_profile',
+  SECURE_ACCOUNT: 'secure_account',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -35,8 +36,10 @@ export interface SetNamePayload      { name: string; friendCode: string }
 export interface OpponentNamePayload { name: string; friendCode: string }
 
 export interface SyncMatchPayload {
-  friendCode: string
-  secretKey: string
+  friendCode?: string
+  secretKey?: string
+  username?: string
+  password?: string
   displayName?: string
   match: {
     opponent_type: string
@@ -48,13 +51,26 @@ export interface SyncMatchPayload {
 }
 
 export interface RestoreAccountPayload {
-  friendCode: string
-  secretKey: string
+  username: string
+  password: string
 }
 
 export interface RestoreAccountAck {
   ok: boolean
+  friendCode?: string
+  secretKey?: string
   matches?: any[]
   displayName?: string | null
+  error?: string
+}
+
+export interface SecureAccountPayload {
+  friendCode: string
+  username: string
+  password: string
+}
+
+export interface SecureAccountAck {
+  ok: boolean
   error?: string
 }

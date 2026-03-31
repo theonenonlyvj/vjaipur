@@ -28,6 +28,8 @@ import { socketService } from '../../src/socket/socketService'
 vi.mock('../../src/socket/socketService', () => ({
   socketService: {
     syncMatch: vi.fn(),
+    restoreAccount: vi.fn(),
+    secureAccount: vi.fn(),
   },
 }))
 
@@ -38,14 +40,17 @@ describe('statsStore', () => {
     localStorageMock.clear()
   })
 
-  it('generates an account when ensureAccount is called', () => {
-    const { friendCode, secretKey } = useStatsStore.getState().ensureAccount()
+  it('generates an account when ensureAccount is called with Guest name', () => {
+    const { friendCode, secretKey, displayName } = useStatsStore.getState().ensureAccount()
     expect(friendCode).toMatch(/^VJ-\d{4}$/)
     expect(secretKey).toHaveLength(32)
+    const expectedName = `Guest_${friendCode.slice(-4)}`
+    expect(displayName).toBe(expectedName)
     
     const state = useStatsStore.getState()
     expect(state.friendCode).toBe(friendCode)
     expect(state.secretKey).toBe(secretKey)
+    expect(state.displayName).toBe(expectedName)
   })
 
   it('reuses the same account once generated', () => {
@@ -77,7 +82,7 @@ describe('statsStore', () => {
     }))
   })
 
-  it('restores an account', () => {
+  it('restores an account via server', async () => {
     const matches = [
       {
         opponent_type: 'ai-hard',
@@ -89,12 +94,43 @@ describe('statsStore', () => {
     ]
     const friendCode = 'VJ-9999'
     const secretKey = 'secret-key'
+    const displayName = 'RestoredUser'
 
-    useStatsStore.getState().restoreAccount(matches, friendCode, secretKey)
+    vi.mocked(socketService.restoreAccount).mockResolvedValueOnce({
+      ok: true,
+      friendCode,
+      secretKey,
+      matches,
+      displayName,
+    })
 
+    const result = await useStatsStore.getState().restoreAccount('user', 'pass')
+
+    expect(result.ok).toBe(true)
     const state = useStatsStore.getState()
     expect(state.matches).toEqual(matches)
     expect(state.friendCode).toBe(friendCode)
     expect(state.secretKey).toBe(secretKey)
+    expect(state.displayName).toBe(displayName)
+  })
+
+  it('secures an account and updates local state', async () => {
+    useStatsStore.getState().ensureAccount()
+    const { friendCode } = useStatsStore.getState()
+
+    vi.mocked(socketService.secureAccount).mockResolvedValueOnce({ ok: true })
+
+    const result = await useStatsStore.getState().secureAccount('newuser', 'newpass')
+
+    expect(result.ok).toBe(true)
+    expect(socketService.secureAccount).toHaveBeenCalledWith({
+      friendCode,
+      username: 'newuser',
+      password: 'newpass',
+    })
+
+    const state = useStatsStore.getState()
+    expect(state.displayName).toBe('newuser')
+    expect(state.secretKey).toBe('newpass')
   })
 })
