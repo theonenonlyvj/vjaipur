@@ -187,11 +187,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
 
       // Record match
-      if (mode === 'vs-ai' || mode === 'online') {
+      if (mode === 'vs-ai' || (mode as string) === 'online') {
         const { difficulty, opponentFriendCode } = get()
         useStatsStore.getState().addMatch({
-          opponent_type: mode === 'online' ? 'online' : difficulty,
-          opponent_id: mode === 'online' ? opponentFriendCode : null,
+          opponent_type: (mode as string) === 'online' ? 'online' : difficulty,
+          opponent_id: (mode as string) === 'online' ? opponentFriendCode : null,
           player_score: newMatchScores[0],
           opponent_score: newMatchScores[1],
           won: newSeals[0] > newSeals[1],
@@ -231,7 +231,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const { playerName } = get()
       if (playerName) socketService.sendName(playerName, useStatsStore.getState().friendCode || '')
     }
-    socketService.onOpponentName = ({ name, friendCode }) => set({ opponentName: name, opponentFriendCode: friendCode })
+    socketService.onOpponentName = (data) => set({ opponentName: data.name, opponentFriendCode: data.friendCode })
     socketService.onOpponentAction = (action) => get().receiveOpponentAction(action)
     socketService.onRoundStart = (seed) => get().startNextRound(seed)
     socketService.onOpponentDisconnected = () => set({ onlineStatus: 'opponent-disconnected' })

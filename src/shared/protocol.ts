@@ -29,8 +29,8 @@ export interface RoundStartPayload   { seed: number }
 export interface JoinRoomAck         { ok: boolean; error?: string; playerIndex?: 0 | 1 }
 export interface RejoinPayload       { code: string; playerIndex: 0 | 1 }
 export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1 }
-export interface SetNamePayload      { name: string }
-export interface OpponentNamePayload { name: string }
+export interface SetNamePayload      { name: string; friendCode: string }
+export interface OpponentNamePayload { name: string; friendCode: string }
 
 export interface SyncMatchPayload {
   friendCode: string
