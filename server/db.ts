@@ -45,6 +45,27 @@ export async function getPlayerByCode(friendCode: string) {
   return data
 }
 
+export async function getPlayerByUsername(username: string) {
+  const { data, error } = await supabase
+    .from('players')
+    .select('*')
+    .ilike('display_name', username)
+    .single()
+  if (error && error.code !== 'PGRST116') throw error
+  return data
+}
+
+export async function updatePlayerToSecured(friendCode: string, username: string, password: string) {
+  const { data, error } = await supabase
+    .from('players')
+    .update({ display_name: username, secret_key: password })
+    .eq('friend_code', friendCode)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
 export async function getPlayerMatches(playerId: string) {
   const { data, error } = await supabase
     .from('matches')

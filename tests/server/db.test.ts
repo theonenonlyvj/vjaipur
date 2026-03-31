@@ -6,7 +6,9 @@ const { mockSupabase } = vi.hoisted(() => ({
     from: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
+    update: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    ilike: vi.fn().mockReturnThis(),
     single: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
   }
@@ -17,7 +19,10 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 // Now import the functions to test
-import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches } from '../../server/db'
+import { 
+  getPlayerByCode, getPlayerByUsername, updatePlayerToSecured, 
+  createPlayer, recordMatch, getPlayerMatches 
+} from '../../server/db'
 
 describe('db.ts', () => {
   beforeEach(() => {
@@ -26,7 +31,9 @@ describe('db.ts', () => {
     mockSupabase.from.mockReturnThis()
     mockSupabase.select.mockReturnThis()
     mockSupabase.insert.mockReturnThis()
+    mockSupabase.update.mockReturnThis()
     mockSupabase.eq.mockReturnThis()
+    mockSupabase.ilike.mockReturnThis()
     mockSupabase.single.mockReturnThis()
     mockSupabase.order.mockReturnThis()
   })
@@ -40,6 +47,36 @@ describe('db.ts', () => {
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
     expect(player).toEqual({ id: '123' })
+  })
+
+  it('getPlayerByUsername calls supabase select and ilike', async () => {
+    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'testuser' }, error: null })
+
+    const player = await getPlayerByUsername('testuser')
+    
+    expect(mockSupabase.from).toHaveBeenCalledWith('players')
+    expect(mockSupabase.select).toHaveBeenCalledWith('*')
+    expect(mockSupabase.ilike).toHaveBeenCalledWith('display_name', 'testuser')
+    expect(player).toEqual({ id: '123', display_name: 'testuser' })
+  })
+
+  it('getPlayerByUsername returns null if user is not found', async () => {
+    mockSupabase.single.mockResolvedValue({ data: null, error: { code: 'PGRST116' } })
+
+    const player = await getPlayerByUsername('unknown')
+    
+    expect(player).toBeNull()
+  })
+
+  it('updatePlayerToSecured calls supabase update', async () => {
+    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'newuser' }, error: null })
+
+    const player = await updatePlayerToSecured('ABCDEF', 'newuser', 'newpassword')
+    
+    expect(mockSupabase.from).toHaveBeenCalledWith('players')
+    expect(mockSupabase.update).toHaveBeenCalledWith({ display_name: 'newuser', secret_key: 'newpassword' })
+    expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
+    expect(player).toEqual({ id: '123', display_name: 'newuser' })
   })
 
   it('createPlayer calls supabase insert', async () => {

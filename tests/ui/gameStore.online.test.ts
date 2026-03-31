@@ -10,6 +10,7 @@ vi.mock('../../src/socket/socketService', () => ({
     createRoom: vi.fn().mockResolvedValue('CAML99'),
     joinRoom: vi.fn().mockResolvedValue({ playerIndex: 1 }),
     quickMatch: vi.fn(),
+    sendName: vi.fn(),
     onRoomReady: null,
     onOpponentAction: null,
     onRoundStart: null,

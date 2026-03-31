@@ -1,13 +1,15 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
-import { ProfileHeader } from '../components/ProfileHeader'
+import { ProfileIcon } from '../components/ProfileIcon'
+import { ProfileOverlay } from '../components/ProfileOverlay'
 
 export function LobbyScreen() {
   const navigate = useNavigate()
   const { onlineStatus, roomCode, joinOnline, setOnlineStatus, disconnectOnline, playerName, setPlayerName } = useGameStore()
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [showProfile, setShowProfile] = useState(false)
 
   useEffect(() => {
     if (onlineStatus === 'playing') {
@@ -54,7 +56,7 @@ export function LobbyScreen() {
   if (onlineStatus === 'connecting' || onlineStatus === 'waiting') {
     return (
       <div style={centerStyle}>
-        <ProfileHeader />
+        <ProfileIcon onClick={() => setShowProfile(true)} />
         <h2 style={{ color: '#f0c030', fontWeight: 900, fontSize: 28 }}>Online</h2>
         {roomCode && (
           <div style={{ textAlign: 'center' }}>
@@ -68,13 +70,14 @@ export function LobbyScreen() {
         <button onClick={handleCancel} style={{ ...btnStyle, background: '#3a1a00', border: '2px solid #888' }}>
           Cancel
         </button>
+        {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
       </div>
     )
   }
 
   return (
     <div style={centerStyle}>
-      <ProfileHeader />
+      <ProfileIcon onClick={() => setShowProfile(true)} />
       <h2 style={{ fontSize: 32, fontWeight: 900, color: '#f0c030' }}>Online</h2>
 
       <input
@@ -117,6 +120,8 @@ export function LobbyScreen() {
       <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', color: '#888', fontSize: 14, cursor: 'pointer', marginTop: 8 }}>
         ← Back
       </button>
+
+      {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
     </div>
   )
 }
