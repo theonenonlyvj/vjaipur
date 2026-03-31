@@ -24,7 +24,7 @@ interface Props {
 }
 
 export function CardView({ card, selected = false, onClick, size = 'md' }: Props) {
-  const label = card.type.charAt(0).toUpperCase() + card.type.slice(1)
+  const label = card.type.toUpperCase()
   const w = size === 'sm' ? 56 : 72
   const h = size === 'sm' ? 80 : 100
   return (
@@ -32,30 +32,48 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
       layoutId={`card-${card.id}`}
       layout
       initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
+      animate={{
+        opacity: 1,
+        scale: 1,
+        y: selected ? -10 : 0,
+      }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
       onClick={onClick}
       style={{
         width: w, height: h,
-        background: BG[card.type],
-        border: `2px solid ${ACCENT[card.type]}`,
+        background: `
+          linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0.03) 75%, transparent 75%, transparent),
+          linear-gradient(-45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0.03) 75%, transparent 75%, transparent),
+          ${BG[card.type]}
+        `,
+        backgroundSize: '4px 4px, 4px 4px, 100% 100%',
+        border: selected ? '3px solid #fff' : `2px solid ${ACCENT[card.type]}`,
         borderRadius: 8,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: onClick ? 'pointer' : 'default',
-        outline: selected ? '2px solid #fff' : 'none',
-        outlineOffset: 3,
+        boxShadow: selected ? '0 10px 30px rgba(255, 255, 255, 0.4)' : '0 4px 12px rgba(0,0,0,0.2)',
         userSelect: 'none',
         flexShrink: 0,
+        position: 'relative',
+        overflow: 'hidden',
       }}
     >
+      {/* Shine Highlight */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: '50%',
+        background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+        pointerEvents: 'none',
+      }} />
+
       <span style={{
         color: '#fff',
         fontSize: size === 'sm' ? 10 : 12,
-        fontWeight: 700,
+        fontWeight: 800,
         textAlign: 'center',
-        letterSpacing: 1,
+        letterSpacing: 1.5,
         pointerEvents: 'none',
+        textShadow: '0 2px 4px rgba(0,0,0,0.3)',
       }}>
         {label}
       </span>

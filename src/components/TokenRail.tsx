@@ -27,6 +27,56 @@ const ACCENT: Record<Good, string> = {
   cloth: '#c060e0', spice: '#60c040', leather: '#c08040',
 }
 
+function Token({ good, value, count }: { good?: Good, value?: number, count: number }) {
+  const isBonus = !good
+  const bgColor = good ? ACCENT[good] : '#1a1a1a'
+  const textColor = good ? '#fff' : '#f0c030'
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 48 }}>
+      <div style={{
+        width: 40, height: 40, borderRadius: '50%',
+        background: isBonus 
+          ? 'radial-gradient(circle at 30% 30%, #333, #000)' 
+          : `radial-gradient(circle at 30% 30%, ${bgColor}, #000)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.2), 0 4px 8px rgba(0,0,0,0.4)',
+        border: `2px solid ${isBonus ? '#d0a860' : bgColor}`,
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Shine */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '50%',
+          background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+          borderRadius: '50% 50% 0 0',
+        }} />
+        
+        {isBonus && (
+           <div style={{
+            position: 'absolute', width: '70%', height: '70%',
+            background: 'radial-gradient(circle, #f0c030 10%, transparent 70%)',
+            opacity: 0.1,
+          }} />
+        )}
+
+        <span style={{ 
+          fontSize: 16, fontWeight: 900, color: textColor, 
+          textShadow: '0 2px 4px rgba(0,0,0,0.5)', zIndex: 1
+        }}>
+          {value !== undefined ? <AnimatedTokenValue value={value} /> : '?'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <span style={{ fontSize: 8, color: isBonus ? '#d0a860' : ACCENT[good!], textTransform: 'uppercase', fontWeight: 700, letterSpacing: 0.5 }}>
+          {good || 'Bonus'}
+        </span>
+        <span style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>×{count}</span>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   tokens: TokenPiles
   bonusTokens: BonusPiles
@@ -35,32 +85,27 @@ interface Props {
 export function TokenRail({ tokens, bonusTokens }: Props) {
   return (
     <div style={{
-      display: 'flex', gap: 8, padding: '8px 12px',
-      background: '#1f1000', borderRadius: 8,
-      flexWrap: 'wrap', alignItems: 'center',
+      display: 'flex', gap: 12, padding: '12px 16px',
+      background: 'linear-gradient(to bottom, #2a1a0a, #1a0a00)', 
+      borderRadius: 12,
+      border: '1px solid #3a2a10',
+      flexWrap: 'wrap', alignItems: 'flex-start',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     }}>
-      {GOODS.map(good => {
-        const pile = tokens[good]
-        const top = pile[0]
-        return (
-          <div key={good} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 44 }}>
-            <span style={{ fontSize: 10, color: ACCENT[good], textTransform: 'uppercase', letterSpacing: 1 }}>
-              {good}
-            </span>
-            <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', lineHeight: 1 }}>
-              <AnimatedTokenValue value={top} />
-            </span>
-            <span style={{ fontSize: 10, color: '#888' }}>×{pile.length}</span>
-          </div>
-        )
-      })}
-      <div style={{ width: 1, background: '#3a2a10', alignSelf: 'stretch', margin: '0 4px' }} />
-      {(['three', 'four', 'five'] as const).map(tier => (
-        <div key={tier} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 36 }}>
-          <span style={{ fontSize: 10, color: '#d0a860', textTransform: 'uppercase' }}>{tier}</span>
-          <span style={{ fontSize: 14, color: '#f0e8d8', fontWeight: 700 }}>×{bonusTokens[tier].length}</span>
-        </div>
-      ))}
+      <div style={{ display: 'flex', gap: 8 }}>
+        {GOODS.map(good => {
+          const pile = tokens[good]
+          return <Token key={good} good={good} value={pile[0]} count={pile.length} />
+        })}
+      </div>
+      
+      <div style={{ width: 2, background: '#3a2a10', alignSelf: 'stretch', margin: '4px 8px', borderRadius: 1 }} />
+      
+      <div style={{ display: 'flex', gap: 8 }}>
+        {(['three', 'four', 'five'] as const).map(tier => (
+          <Token key={tier} count={bonusTokens[tier].length} />
+        ))}
+      </div>
     </div>
   )
 }
