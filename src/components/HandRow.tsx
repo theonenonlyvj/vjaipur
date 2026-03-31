@@ -30,7 +30,7 @@ export function HandRow({ hand, inExchange, selectedIndices, camelsUsed, herd, o
       <AnimatePresence mode="popLayout">
         {hand.map((card, i) => {
           const selected = selectedIndices.includes(i)
-          const handleClick = inExchange ? () => onToggleSelect(i) : undefined
+          const handleClick = () => onToggleSelect(i)
           return (
             <CardView
               key={card.id}

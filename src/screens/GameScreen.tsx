@@ -87,6 +87,7 @@ export function GameScreen() {
           const filtered = prev.filter(idx => state.market[idx].type !== 'camel')
           next = [...filtered, i]
         }
+        // If not enough cards for exchange, or selecting first card, clear hand
         if (next.length < 2) setSelHand([])
         return next
       }
@@ -94,7 +95,18 @@ export function GameScreen() {
   }
 
   function handleToggleHand(i: number) {
-    setSelHand(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])
+    setSelHand(prev => {
+      const isAlreadySelected = prev.includes(i)
+      const next = isAlreadySelected ? prev.filter(x => x !== i) : [...prev, i]
+
+      // If we're not currently in an exchange (market selection < 2),
+      // then clicking hand cards should clear any market selection (preparing to sell)
+      if (selMarket.length < 2) {
+        setSelMarket([])
+      }
+
+      return next
+    })
   }
 
   function handleUseHerdCamel() {
@@ -161,7 +173,7 @@ export function GameScreen() {
         state={state}
         playerIndex={myIndex}
         selMarketIndices={selMarket}
-        selHandCount={selHand.length}
+        selHandIndices={selHand}
         onTakeCamels={handleTakeCamels}
         onTake={handleTake}
         onConfirmExchange={handleConfirmExchange}

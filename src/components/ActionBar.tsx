@@ -9,7 +9,7 @@ interface Props {
   state: GameState
   playerIndex: 0 | 1
   selMarketIndices: number[]
-  selHandCount: number
+  selHandIndices: number[]
   onTakeCamels: () => void
   onTake: () => void              // take the single selected market card
   onConfirmExchange: () => void
@@ -19,7 +19,7 @@ interface Props {
 
 export function ActionBar({
   state, playerIndex,
-  selMarketIndices, selHandCount,
+  selMarketIndices, selHandIndices,
   onTakeCamels, onTake, onConfirmExchange, onClearSelection, onSell,
 }: Props) {
   const [sellGood, setSellGood] = useState<Good | null>(null)
@@ -37,10 +37,12 @@ export function ActionBar({
 
   const hasCamels = state.market.some(c => c.type === 'camel')
   const selMarketCount = selMarketIndices.length
+  const selHandCount = selHandIndices.length
   const canConfirmExchange = selMarketCount >= 2 && selMarketCount === selHandCount
   const selMarketTypes: CardType[] = selMarketIndices.map(i => state.market[i]?.type ?? 'leather')
 
   function openSell(good: Good) {
+    onClearSelection()
     const count = goodCounts.get(good) ?? 0
     const min = PRECIOUS.has(good) ? 2 : 1
     setSellGood(good)
@@ -61,7 +63,7 @@ export function ActionBar({
     )
   }
 
-  // Sell quantity picker
+  // Sell quantity picker (from the old grid buttons)
   if (sellGood) {
     const count = goodCounts.get(sellGood) ?? 0
     const min = PRECIOUS.has(sellGood) ? 2 : 1
@@ -83,7 +85,40 @@ export function ActionBar({
   let contextBtn: React.ReactNode = null
   const allCamels = selMarketCount > 0 && selMarketTypes.every(t => t === 'camel')
 
-  if (allCamels) {
+  // Card-click Sell logic
+  const selHandGoods = selHandIndices.filter(i => i !== -1).map(i => player.hand[i])
+  const selHandCamels = selHandIndices.filter(i => i === -1).length
+  const uniqueHandGoods = Array.from(new Set(selHandGoods.map(c => c.type)))
+  const onlyOneGoodSelected = uniqueHandGoods.length === 1 && selHandCamels === 0
+  const selGoodToSell = uniqueHandGoods[0] as Good | undefined
+
+  if (selHandCount > 0 && selMarketCount === 0) {
+    if (onlyOneGoodSelected && selGoodToSell) {
+      const min = PRECIOUS.has(selGoodToSell) ? 2 : 1
+      const isValidQty = selHandCount >= min
+      contextBtn = (
+        <button
+          onClick={() => { onSell(selGoodToSell, selHandCount); onClearSelection() }}
+          disabled={!isValidQty}
+          style={{
+            ...actionBtn,
+            flex: 1,
+            background: isValidQty ? '#306010' : '#2a2a2a',
+            borderColor: isValidQty ? '#60c040' : '#444',
+            opacity: isValidQty ? 1 : 0.6,
+          }}
+        >
+          {isValidQty ? `Sell ${selHandCount} ${selGoodToSell}` : `Need ${min} ${selGoodToSell}`}
+        </button>
+      )
+    } else {
+      contextBtn = (
+        <div style={{ flex: 1, color: '#888', fontSize: 13, textAlign: 'center', fontStyle: 'italic' }}>
+          Select matching cards to sell
+        </div>
+      )
+    }
+  } else if (allCamels) {
     contextBtn = (
       <button
         onClick={onTakeCamels}
@@ -147,16 +182,17 @@ export function ActionBar({
       <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
         {contextBtn || (
           <div style={{ flex: 1, color: '#666', fontSize: 13, textAlign: 'center', fontStyle: 'italic' }}>
-            Select from Market
+            Select from Market or Hand
           </div>
         )}
 
-        {selMarketCount > 0 && (
+        {(selMarketCount > 0 || selHandCount > 0) && (
           <button onClick={onClearSelection} style={{ ...cancelBtn, whiteSpace: 'nowrap' }}>
             ✕ Clear
           </button>
         )}
       </div>
+
 
       {/* Row 2: sell buttons — always rendered in fixed order */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, width: '100%' }}>
