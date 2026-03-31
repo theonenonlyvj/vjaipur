@@ -1,7 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #1a0a00;
+  --bg: radial-gradient(circle at center, #1a120a 0%, #050505 100%);
   --text: #f0e8d8;
   --surface: #2a1800;
   --border: #5a3a20;
@@ -24,7 +24,7 @@
 
 html, body, #root {
   height: 100%;
-  background: var(--bg);
+  background: var(--bg) fixed;
   color: var(--text);
   font-family: system-ui, sans-serif;
   font-size: 14px;
