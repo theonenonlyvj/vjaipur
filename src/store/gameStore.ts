@@ -155,7 +155,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const next = result.value
 
     if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
-      set({ state: next, error: null, lastMoveDescription: mode === 'local' ? playerDesc : null })
+      set({ state: next, error: null, lastMoveDescription: playerDesc })
       return
     }
 
@@ -228,6 +228,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         onlineStatus: 'playing',
         error: null,
         opponentName: null,
+        lastMoveDescription: null,
       })
       const { playerName } = get()
       if (playerName) socketService.sendName(playerName, useStatsStore.getState().friendCode || '')
@@ -337,6 +338,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onForfeit = null
     socketService.onConnect = null
     socketService.onOpponentName = null
-    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null })
+    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, lastMoveDescription: null })
   },
 }))
