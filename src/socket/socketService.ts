@@ -112,6 +112,10 @@ export class SocketService {
     })
   }
 
+  updateProfile(payload: { friendCode: string; secretKey: string; displayName: string }): void {
+    this.socket?.emit(EVENTS.UPDATE_PROFILE, payload)
+  }
+
   // Callbacks — wired by gameStore
   onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
   onOpponentAction: ((action: Action) => void) | null = null
