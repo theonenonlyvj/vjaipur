@@ -2,12 +2,14 @@ import { useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { ProfileHeader } from '../components/ProfileHeader'
+import { StatsDashboard } from '../components/StatsDashboard'
 import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
   const navigate = useNavigate()
   const { startGame, setDifficulty, startTutorial } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
+  const [showStats, setShowStats] = useState(false)
 
   function handleDifficulty(d: Difficulty) {
     setDifficulty(d)
@@ -55,11 +57,19 @@ export function HomeScreen() {
           <button onClick={() => navigate('/lobby')} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
             Online
           </button>
-          <button onClick={handleTutorial} style={{ ...btnStyle, background: 'none', border: '1.5px solid #888', color: '#aaa', fontSize: 15 }}>
-            How to Play
-          </button>
+          
+          <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+            <button onClick={() => setShowStats(true)} style={secondaryBtnStyle}>
+              View Stats
+            </button>
+            <button onClick={handleTutorial} style={secondaryBtnStyle}>
+              How to Play
+            </button>
+          </div>
         </>
       )}
+
+      {showStats && <StatsDashboard onClose={() => setShowStats(false)} />}
     </div>
   )
 }
@@ -75,4 +85,15 @@ const btnStyle: CSSProperties = {
   cursor: 'pointer',
   letterSpacing: 1,
   minWidth: 220,
+}
+
+const secondaryBtnStyle: CSSProperties = {
+  background: 'none',
+  border: '1.5px solid #888',
+  color: '#aaa',
+  fontSize: 14,
+  padding: '8px 20px',
+  borderRadius: 6,
+  cursor: 'pointer',
+  fontWeight: 600,
 }
