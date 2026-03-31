@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { useStatsStore } from '../store/statsStore'
 import { socketService } from '../socket/socketService'
-import { ProfileHeader } from '../components/ProfileHeader'
+import { ProfileIcon } from '../components/ProfileIcon'
+import { ProfileOverlay } from '../components/ProfileOverlay'
 import { StatsDashboard } from '../components/StatsDashboard'
+import { StatsStrip } from '../components/StatsStrip'
 import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
@@ -12,6 +14,7 @@ export function HomeScreen() {
   const { playerName, setPlayerName, startGame, setDifficulty, startTutorial } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [inputName, setInputName] = useState(playerName)
   const [isChecking, setIsChecking] = useState(false)
   const [error, setError] = useState('')
@@ -66,7 +69,7 @@ export function HomeScreen() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 24, padding: 20 }}>
-      <ProfileHeader />
+      <ProfileIcon onClick={() => setShowProfile(true)} />
 
       <h1 style={{ fontSize: 40, fontWeight: 900, letterSpacing: 2, color: '#f0c030', marginTop: 20 }}>VJAIPUR</h1>
       
@@ -126,9 +129,6 @@ export function HomeScreen() {
           </button>
           
           <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-            <button onClick={() => setShowStats(true)} style={secondaryBtnStyle}>
-              View Stats
-            </button>
             <button onClick={handleTutorial} style={secondaryBtnStyle}>
               How to Play
             </button>
@@ -137,6 +137,8 @@ export function HomeScreen() {
       )}
 
       {showStats && <StatsDashboard onClose={() => setShowStats(false)} />}
+      {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
+      <StatsStrip onClick={() => setShowStats(true)} />
     </div>
   )
 }
