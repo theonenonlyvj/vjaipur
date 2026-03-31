@@ -7,6 +7,7 @@ import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3 } from '../ai/worke
 import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
 import { soundService } from '../audio/soundService'
+import { useStatsStore } from './statsStore'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
@@ -26,6 +27,8 @@ export interface GameStore {
   tutorial: boolean
   playerName: string
   opponentName: string | null
+  opponentFriendCode: string | null
+  matchScores: [number, number]
   setPlayerName: (name: string) => void
   toggleMute: () => void
 
@@ -129,9 +132,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   tutorial: false,
   playerName: '',
   opponentName: null,
+  opponentFriendCode: null,
+  matchScores: [0, 0],
 
   startGame: (mode) => {
-    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null })
+    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0] })
   },
 
   dispatch: (action) => {
@@ -171,19 +176,37 @@ export const useGameStore = create<GameStore>((set, get) => ({
       state.seals[0] + (result.sealAwardedTo === 0 ? 1 : 0),
       state.seals[1] + (result.sealAwardedTo === 1 ? 1 : 0),
     ]
+
+    const newMatchScores: [number, number] = [
+      get().matchScores[0] + result.scores[0],
+      get().matchScores[1] + result.scores[1],
+    ]
+
     if (newSeals[0] >= 2 || newSeals[1] >= 2) {
-      set({ state: { ...state, phase: 'game-over', seals: newSeals } })
+      const isGameOver = true
+      set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
+
+      // Record match
+      if (mode === 'vs-ai' || mode === 'online') {
+        const { difficulty, opponentFriendCode } = get()
+        useStatsStore.getState().addMatch({
+          opponent_type: mode === 'online' ? 'online' : difficulty,
+          opponent_id: mode === 'online' ? opponentFriendCode : null,
+          player_score: newMatchScores[0],
+          opponent_score: newMatchScores[1],
+          won: newSeals[0] > newSeals[1],
+        })
+      }
     } else {
       const loser: 0 | 1 | undefined =
         result.sealAwardedTo === 0 ? 1 :
         result.sealAwardedTo === 1 ? 0 :
         undefined
       const newRoundState = setupRound(newSeals, loser)
-      const { mode, difficulty } = get()
+      const { difficulty } = get()
+      set({ state: newRoundState, error: null, matchScores: newMatchScores })
       if (mode === 'vs-ai' && newRoundState.activePlayer === 1) {
         runAi(newRoundState, difficulty, set, get)
-      } else {
-        set({ state: newRoundState, error: null })
       }
     }
   },
@@ -206,9 +229,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         opponentName: null,
       })
       const { playerName } = get()
-      if (playerName) socketService.sendName(playerName)
+      if (playerName) socketService.sendName(playerName, useStatsStore.getState().friendCode || '')
     }
-    socketService.onOpponentName = (name) => set({ opponentName: name })
+    socketService.onOpponentName = ({ name, friendCode }) => set({ opponentName: name, opponentFriendCode: friendCode })
     socketService.onOpponentAction = (action) => get().receiveOpponentAction(action)
     socketService.onRoundStart = (seed) => get().startNextRound(seed)
     socketService.onOpponentDisconnected = () => set({ onlineStatus: 'opponent-disconnected' })
@@ -252,15 +275,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
       state.seals[0] + (result.sealAwardedTo === 0 ? 1 : 0),
       state.seals[1] + (result.sealAwardedTo === 1 ? 1 : 0),
     ]
+
+    const newMatchScores: [number, number] = [
+      get().matchScores[0] + result.scores[0],
+      get().matchScores[1] + result.scores[1],
+    ]
+
     if (newSeals[0] >= 2 || newSeals[1] >= 2) {
-      set({ state: { ...state, phase: 'game-over', seals: newSeals } })
+      set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
+
+      // Record match
+      const { onlinePlayerIndex, opponentFriendCode } = get()
+      if (onlinePlayerIndex !== null) {
+        useStatsStore.getState().addMatch({
+          opponent_type: 'online',
+          opponent_id: opponentFriendCode,
+          player_score: newMatchScores[onlinePlayerIndex],
+          opponent_score: newMatchScores[1 - onlinePlayerIndex],
+          won: newSeals[onlinePlayerIndex] >= 2,
+        })
+      }
     } else {
       const loser: 0 | 1 | undefined =
         result.sealAwardedTo === 0 ? 1 :
         result.sealAwardedTo === 1 ? 0 :
         undefined
       const rng = mulberry32(seed)
-      set({ state: setupRound(newSeals, loser, rng), error: null })
+      set({ state: setupRound(newSeals, loser, rng), error: null, matchScores: newMatchScores })
     }
   },
 
