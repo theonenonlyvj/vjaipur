@@ -44,3 +44,13 @@ export async function getPlayerByCode(friendCode: string) {
   if (error && error.code !== 'PGRST116') throw error
   return data
 }
+
+export async function getPlayerMatches(playerId: string) {
+  const { data, error } = await supabase
+    .from('matches')
+    .select('*')
+    .eq('player_id', playerId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
