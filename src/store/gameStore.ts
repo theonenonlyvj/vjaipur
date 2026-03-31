@@ -131,7 +131,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
   lastMoveDescription: null,
   tutorial: false,
-  playerName: useStatsStore.getState().ensureAccount().displayName,
+  playerName: useStatsStore.getState().ensureAccount().displayName || '',
   opponentName: null,
   opponentFriendCode: null,
   matchScores: [0, 0],
