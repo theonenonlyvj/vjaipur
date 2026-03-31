@@ -15,7 +15,11 @@ import { TutorialOverlay } from '../components/TutorialOverlay'
 import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
-export function GameScreen() {
+export interface GameScreenProps {
+  frozen?: boolean
+}
+
+export function GameScreen({ frozen = false }: GameScreenProps) {
   const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName } = useGameStore()
 
   const [selMarket, setSelMarket] = useState<number[]>([])
@@ -29,42 +33,45 @@ export function GameScreen() {
   useSoundEffects(myIndex)
 
   useEffect(() => {
-    if (!state) return
+    if (!state || frozen) return
     const count = state.players[myIndex].bonusTokens.length
     if (count > prevBonusCountRef.current) setShowBonusReveal(true)
     prevBonusCountRef.current = count
-  }, [state?.players[myIndex]?.bonusTokens.length, myIndex])
+  }, [state?.players[myIndex]?.bonusTokens.length, myIndex, frozen])
 
   if (!state) return <Navigate to="/" replace />
-  if (state.phase === 'round-end') return <Navigate to="/round-end" replace />
-  if (state.phase === 'game-over') return <Navigate to="/game-over" replace />
+  if (!frozen) {
+    if (state.phase === 'round-end') return <Navigate to="/round-end" replace />
+    if (state.phase === 'game-over') return <Navigate to="/game-over" replace />
+  }
 
   const opponentIndex: 0 | 1 = myIndex === 0 ? 1 : 0
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
-  const isMyTurn = state.activePlayer === myIndex
+  const isMyTurn = !frozen && state.activePlayer === myIndex
   const camelsUsed = selHand.filter(i => i === -1).length
   const inExchange = selMarket.filter(i => state.market[i]?.type !== 'camel').length >= 2
 
   function clearSelection() {
+    if (frozen) return
     setSelMarket([])
     setSelHand([])
   }
 
   function handleTakeCamels() {
-    if (!isMyTurn) return
+    if (frozen || !isMyTurn) return
     dispatch({ type: 'TAKE_CAMELS' })
     clearSelection()
   }
 
   function handleTake() {
-    if (!isMyTurn || selMarket.length !== 1) return
+    if (frozen || !isMyTurn || selMarket.length !== 1) return
     dispatch({ type: 'TAKE_SINGLE', marketIndex: selMarket[0] })
     clearSelection()
   }
 
   function handleToggleMarket(i: number) {
-    if (!state) return
+    if (frozen || !state) return
     const card = state.market[i]
     if (!card) return
 
@@ -96,7 +103,7 @@ export function GameScreen() {
   }
 
   function handleToggleHand(i: number) {
-    if (!state) return
+    if (frozen || !state) return
     const myPlayer = state.players[myIndex]
     const card = myPlayer.hand[i]
     if (!card) return
@@ -124,10 +131,12 @@ export function GameScreen() {
   }
 
   function handleUseHerdCamel() {
+    if (frozen) return
     setSelHand(prev => [...prev, -1])
   }
 
   function handleRemoveCamel() {
+    if (frozen) return
     setSelHand(prev => {
       const idx = prev.lastIndexOf(-1)
       if (idx === -1) return prev
@@ -136,21 +145,25 @@ export function GameScreen() {
   }
 
   function handleConfirmExchange() {
+    if (frozen) return
     dispatch({ type: 'TAKE_EXCHANGE', marketIndices: selMarket, handIndices: selHand })
     clearSelection()
   }
 
   function handleSell(good: Good, quantity: number) {
+    if (frozen) return
     dispatch({ type: 'SELL', good, quantity })
   }
 
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 10,
-      padding: 16, maxWidth: 620, margin: '0 auto',
+      padding: frozen ? 0 : 16, maxWidth: 620, margin: '0 auto',
       height: '100%', overflowY: 'auto',
+      pointerEvents: frozen ? 'none' : 'auto',
+      opacity: frozen ? 0.8 : 1,
     }}>
-      <DisconnectBanner />
+      {!frozen && <DisconnectBanner />}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', color: '#888', fontSize: 12 }}>
         <span>Round {state.round}</span>
@@ -160,13 +173,13 @@ export function GameScreen() {
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat(2 - state.seals[1])}
         </span>
         <span>Deck: {state.deck.length}</span>
-        <MuteButton />
+        {!frozen && <MuteButton />}
       </div>
 
       <OpponentStrip
         player={opponentPlayer}
         playerIndex={opponentIndex}
-        isActive={state.activePlayer === opponentIndex}
+        isActive={!frozen && state.activePlayer === opponentIndex}
         name={mode === 'online' ? opponentName : null}
       />
 
@@ -183,18 +196,20 @@ export function GameScreen() {
         />
       </div>
 
-      <ActionBar
-        state={state}
-        playerIndex={myIndex}
-        selMarketIndices={selMarket}
-        selHandIndices={selHand}
-        onTakeCamels={handleTakeCamels}
-        onTake={handleTake}
-        onConfirmExchange={handleConfirmExchange}
-        onClearSelection={clearSelection}
-        onSell={handleSell}
-        onUpdateHandSelection={setSelHand}
-      />
+      {!frozen && (
+        <ActionBar
+          state={state}
+          playerIndex={myIndex}
+          selMarketIndices={selMarket}
+          selHandIndices={selHand}
+          onTakeCamels={handleTakeCamels}
+          onTake={handleTake}
+          onConfirmExchange={handleConfirmExchange}
+          onClearSelection={clearSelection}
+          onSell={handleSell}
+          onUpdateHandSelection={setSelHand}
+        />
+      )}
 
       {(aiThinking || lastMoveDescription) && (
         <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic' }}>
@@ -228,9 +243,9 @@ export function GameScreen() {
         name={mode === 'online' ? playerName || null : null}
       />
 
-      <Toast message={error?.message ?? null} onDismiss={clearError} />
+      {!frozen && <Toast message={error?.message ?? null} onDismiss={clearError} />}
 
-      {tutorial && <TutorialOverlay onDone={endTutorial} />}
+      {!frozen && tutorial && <TutorialOverlay onDone={endTutorial} />}
     </div>
   )
 }
