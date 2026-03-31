@@ -17,7 +17,7 @@ export function MarketRow({ market, selectedIndices, onToggleSelect }: Props) {
             key={card.id}
             card={card}
             selected={selectedIndices.includes(i)}
-            onClick={card.type === 'camel' ? undefined : () => onToggleSelect(i)}
+            onClick={() => onToggleSelect(i)}
             size="md"
           />
         ))}

@@ -63,11 +63,33 @@ export function GameScreen() {
   }
 
   function handleToggleMarket(i: number) {
-    // Deselecting clears hand selection too if it would no longer be needed
+    if (!state) return
+    const card = state.market[i]
+    if (!card) return
+
     setSelMarket(prev => {
-      const next = prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]
-      if (next.length < 2) setSelHand([])
-      return next
+      if (card.type === 'camel') {
+        const isAlreadySelected = prev.includes(i)
+        if (isAlreadySelected) {
+          return prev.filter(idx => state.market[idx].type !== 'camel')
+        } else {
+          setSelHand([])
+          return state.market
+            .map((c, idx) => (c.type === 'camel' ? idx : -1))
+            .filter(idx => idx !== -1)
+        }
+      } else {
+        const isAlreadySelected = prev.includes(i)
+        let next: number[]
+        if (isAlreadySelected) {
+          next = prev.filter(x => x !== i)
+        } else {
+          const filtered = prev.filter(idx => state.market[idx].type !== 'camel')
+          next = [...filtered, i]
+        }
+        if (next.length < 2) setSelHand([])
+        return next
+      }
     })
   }
 

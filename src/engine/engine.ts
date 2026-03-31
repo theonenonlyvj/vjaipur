@@ -4,6 +4,21 @@ import { Errors } from './errors'
 // Precious goods require a minimum 2-card sale
 const PRECIOUS: ReadonlySet<Good> = new Set(['diamond', 'gold', 'silver'])
 
+const GOOD_ORDER: Good[] = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
+const GOOD_PRIORITY: Record<string, number> = GOOD_ORDER.reduce((acc, good, i) => {
+  acc[good] = i
+  return acc
+}, {} as Record<string, number>)
+
+export function sortHand(hand: Card[]): Card[] {
+  return [...hand].sort((a, b) => {
+    const pa = GOOD_PRIORITY[a.type] ?? 99
+    const pb = GOOD_PRIORITY[b.type] ?? 99
+    if (pa !== pb) return pa - pb
+    return a.id - b.id // stable sort by ID within same type
+  })
+}
+
 export function applyAction(state: GameState, action: Action): Result<GameState> {
   if (state.phase !== 'playing') {
     return { ok: false, error: Errors.WRONG_PHASE }
@@ -59,7 +74,7 @@ function takeSingle(state: GameState, marketIndex: number): Result<GameState> {
     newMarket.splice(marketIndex, 1)
   }
 
-  const newPlayer = { ...player, hand: [...player.hand, card] }
+  const newPlayer = { ...player, hand: sortHand([...player.hand, card]) }
   const next: GameState = {
     ...state,
     market: newMarket,
@@ -187,7 +202,7 @@ function takeExchange(
 
   const newPlayer = {
     ...player,
-    hand: newHandGoods,
+    hand: sortHand(newHandGoods),
     herd: player.herd - camelsUsed,
   }
 
