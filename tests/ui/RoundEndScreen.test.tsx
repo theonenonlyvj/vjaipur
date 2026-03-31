@@ -16,8 +16,8 @@ beforeEach(() => {
 describe('RoundEndScreen', () => {
   it('shows Player 1 and Player 2 labels', () => {
     render(<MemoryRouter><RoundEndScreen /></MemoryRouter>)
-    expect(screen.getByText(/player 1/i)).toBeInTheDocument()
-    expect(screen.getByText(/player 2/i)).toBeInTheDocument()
+    expect(screen.getByText(/Guest|You/i)).toBeInTheDocument()
+    expect(screen.getByText(/Opponent/i)).toBeInTheDocument()
   })
 
   it('shows a Continue button', () => {
