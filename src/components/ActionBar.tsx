@@ -1,9 +1,7 @@
-import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { GameState, Good, CardType } from '../engine'
 
 const PRECIOUS = new Set<Good>(['diamond', 'gold', 'silver'])
-const GOODS: Good[] = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
 
 interface Props {
   state: GameState
@@ -22,61 +20,18 @@ export function ActionBar({
   selMarketIndices, selHandIndices,
   onTakeCamels, onTake, onConfirmExchange, onClearSelection, onSell,
 }: Props) {
-  const [sellGood, setSellGood] = useState<Good | null>(null)
-  const [sellQty, setSellQty] = useState(1)
-
   const player = state.players[playerIndex]
   const isMyTurn = state.activePlayer === playerIndex
 
-  const goodCounts = new Map<Good, number>()
-  for (const card of player.hand) {
-    if (card.type === 'camel') continue
-    const g = card.type as Good
-    goodCounts.set(g, (goodCounts.get(g) ?? 0) + 1)
-  }
-
-  const hasCamels = state.market.some(c => c.type === 'camel')
   const selMarketCount = selMarketIndices.length
   const selHandCount = selHandIndices.length
   const canConfirmExchange = selMarketCount >= 2 && selMarketCount === selHandCount
   const selMarketTypes: CardType[] = selMarketIndices.map(i => state.market[i]?.type ?? 'leather')
 
-  function openSell(good: Good) {
-    onClearSelection()
-    const count = goodCounts.get(good) ?? 0
-    const min = PRECIOUS.has(good) ? 2 : 1
-    setSellGood(good)
-    setSellQty(count >= min ? count : min)
-  }
-
-  function confirmSell() {
-    if (!sellGood) return
-    onSell(sellGood, sellQty)
-    setSellGood(null)
-  }
-
   if (!isMyTurn) {
     return (
       <div style={barStyle}>
         <span style={{ color: '#888' }}>Waiting for opponent…</span>
-      </div>
-    )
-  }
-
-  // Sell quantity picker (from the old grid buttons)
-  if (sellGood) {
-    const count = goodCounts.get(sellGood) ?? 0
-    const min = PRECIOUS.has(sellGood) ? 2 : 1
-    return (
-      <div style={barStyle}>
-        <span style={{ color: '#f0e8d8' }}>Sell {sellGood}:</span>
-        <button onClick={() => setSellQty(q => Math.max(min, q - 1))} style={smallBtn}>−</button>
-        <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{sellQty}</span>
-        <button onClick={() => setSellQty(q => Math.min(count, q + 1))} style={smallBtn}>+</button>
-        <button onClick={confirmSell} style={{ ...actionBtn, background: '#306010', borderColor: '#60c040' }}>
-          Confirm Sell
-        </button>
-        <button onClick={() => setSellGood(null)} style={cancelBtn}>Cancel</button>
       </div>
     )
   }
@@ -178,7 +133,6 @@ export function ActionBar({
 
   return (
     <div style={barStyle}>
-      {/* Row 1: fixed-position primary actions */}
       <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
         {contextBtn || (
           <div style={{ flex: 1, color: '#666', fontSize: 13, textAlign: 'center', fontStyle: 'italic' }}>
@@ -191,35 +145,6 @@ export function ActionBar({
             ✕ Clear
           </button>
         )}
-      </div>
-
-
-      {/* Row 2: sell buttons — always rendered in fixed order */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, width: '100%' }}>
-        {GOODS.map(good => {
-          const count = goodCounts.get(good) ?? 0
-          const min = PRECIOUS.has(good) ? 2 : 1
-          const canSell = count >= min
-          return (
-            <button
-              key={good}
-              onClick={canSell ? () => openSell(good) : undefined}
-              disabled={!canSell}
-              style={{
-                ...sellBtn,
-                opacity: canSell ? 1 : 0.25,
-                cursor: canSell ? 'pointer' : 'default',
-              }}
-            >
-              <span style={{ fontSize: 10, display: 'block', color: '#aaa', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                {good.slice(0, 4)}
-              </span>
-              <span style={{ fontWeight: 700, fontSize: 13 }}>
-                {canSell ? `×${count}` : '–'}
-              </span>
-            </button>
-          )
-        })}
       </div>
     </div>
   )
@@ -236,18 +161,7 @@ const actionBtn: CSSProperties = {
   fontSize: 13, fontWeight: 600,
 }
 
-const smallBtn: CSSProperties = {
-  padding: '4px 12px', background: '#2a1800', color: '#f0e8d8',
-  border: '1px solid #5a3a20', borderRadius: 4, cursor: 'pointer', fontSize: 18,
-}
-
 const cancelBtn: CSSProperties = {
   padding: '8px 14px', background: '#3a1010', color: '#f0e8d8',
   border: '1px solid #ff4060', borderRadius: 6, cursor: 'pointer', fontSize: 13,
-}
-
-const sellBtn: CSSProperties = {
-  padding: '6px 4px', background: '#304020', color: '#f0e8d8',
-  border: '1px solid #60c040', borderRadius: 6,
-  fontSize: 13, textAlign: 'center',
 }
