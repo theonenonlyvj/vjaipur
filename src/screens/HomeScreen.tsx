@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
+import { ProfileHeader } from '../components/ProfileHeader'
 import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
@@ -27,8 +28,10 @@ export function HomeScreen() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 24 }}>
-      <h1 style={{ fontSize: 40, fontWeight: 900, letterSpacing: 2, color: '#f0c030' }}>VJAIPUR</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 24, padding: 20 }}>
+      <ProfileHeader />
+
+      <h1 style={{ fontSize: 40, fontWeight: 900, letterSpacing: 2, color: '#f0c030', marginTop: 20 }}>VJAIPUR</h1>
       <p style={{ color: '#888', fontSize: 14 }}>First to 2 Seals of Excellence wins</p>
 
       {showDifficulty ? (

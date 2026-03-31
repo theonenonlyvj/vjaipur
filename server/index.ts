@@ -3,8 +3,12 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
+import { getPlayerByCode, createPlayer, recordMatch, getPlayerMatches } from './db.js'
 import { EVENTS } from '../src/shared/protocol.js'
-import type { RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload } from '../src/shared/protocol.js'
+import type { 
+  RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
+  SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck 
+} from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
 
@@ -95,6 +99,43 @@ io.on('connection', (socket) => {
     ;(socket as any)._playerName = name
     const opponentId = rm.getOpponentId(socket.id)
     if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name })
+  })
+
+  socket.on(EVENTS.SYNC_MATCH, async (data: SyncMatchPayload) => {
+    try {
+      let player = await getPlayerByCode(data.friendCode)
+      if (!player) {
+        player = await createPlayer(data.friendCode, data.secretKey)
+      } else if (player.secret_key !== data.secretKey) {
+        console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
+        return
+      }
+      await recordMatch({
+        player_id: player.id,
+        opponent_type: data.match.opponent_type,
+        opponent_id: data.match.opponent_id || null,
+        player_score: data.match.player_score,
+        opponent_score: data.match.opponent_score,
+        won: data.match.won,
+      })
+    } catch (error) {
+      console.error('SYNC_MATCH error:', error)
+    }
+  })
+
+  socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
+    try {
+      const player = await getPlayerByCode(data.friendCode)
+      if (!player || player.secret_key !== data.secretKey) {
+        cb({ ok: false, error: 'Invalid friend code or secret key' })
+        return
+      }
+      const matches = await getPlayerMatches(player.id)
+      cb({ ok: true, matches })
+    } catch (error) {
+      console.error('RESTORE_ACCOUNT error:', error)
+      cb({ ok: false, error: 'Internal server error' })
+    }
   })
 
   socket.on('disconnect', () => {

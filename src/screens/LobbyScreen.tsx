@@ -1,6 +1,7 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
+import { ProfileHeader } from '../components/ProfileHeader'
 
 export function LobbyScreen() {
   const navigate = useNavigate()
@@ -53,6 +54,7 @@ export function LobbyScreen() {
   if (onlineStatus === 'connecting' || onlineStatus === 'waiting') {
     return (
       <div style={centerStyle}>
+        <ProfileHeader />
         <h2 style={{ color: '#f0c030', fontWeight: 900, fontSize: 28 }}>Online</h2>
         {roomCode && (
           <div style={{ textAlign: 'center' }}>
@@ -72,6 +74,7 @@ export function LobbyScreen() {
 
   return (
     <div style={centerStyle}>
+      <ProfileHeader />
       <h2 style={{ fontSize: 32, fontWeight: 900, color: '#f0c030' }}>Online</h2>
 
       <input

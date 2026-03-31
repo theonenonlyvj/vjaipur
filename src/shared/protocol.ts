@@ -9,6 +9,8 @@ export const EVENTS = {
   NEXT_ROUND:   'next_round',
   REJOIN:       'rejoin',
   SET_NAME:     'set_name',
+  SYNC_MATCH:   'sync_match',
+  RESTORE_ACCOUNT: 'restore_account',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -29,3 +31,26 @@ export interface RejoinPayload       { code: string; playerIndex: 0 | 1 }
 export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1 }
 export interface SetNamePayload      { name: string }
 export interface OpponentNamePayload { name: string }
+
+export interface SyncMatchPayload {
+  friendCode: string
+  secretKey: string
+  match: {
+    opponent_type: string
+    opponent_id?: string | null
+    player_score: number
+    opponent_score: number
+    won: boolean
+  }
+}
+
+export interface RestoreAccountPayload {
+  friendCode: string
+  secretKey: string
+}
+
+export interface RestoreAccountAck {
+  ok: boolean
+  matches?: any[]
+  error?: string
+}

@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -90,6 +90,19 @@ export class SocketService {
     })
   }
 
+  syncMatch(payload: SyncMatchPayload): void {
+    this.socket?.emit(EVENTS.SYNC_MATCH, payload)
+  }
+
+  restoreAccount(payload: RestoreAccountPayload): Promise<RestoreAccountAck> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) return reject(new Error('Not connected'))
+      this.socket.emit(EVENTS.RESTORE_ACCOUNT, payload, (ack: RestoreAccountAck) => {
+        resolve(ack)
+      })
+    })
+  }
+
   // Callbacks — wired by gameStore
   onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
   onOpponentAction: ((action: Action) => void) | null = null
@@ -102,3 +115,4 @@ export class SocketService {
 }
 
 export const socketService = new SocketService()
+
