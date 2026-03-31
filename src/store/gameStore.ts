@@ -44,6 +44,7 @@ export interface GameStore {
   setDifficulty: (d: Difficulty) => void
   startTutorial: () => void
   endTutorial: () => void
+  clearMatches: () => void
 }
 
 function describeAction(action: Action, state?: GameState): string {
@@ -311,6 +312,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   startTutorial: () => set({ tutorial: true }),
   endTutorial: () => set({ tutorial: false }),
+
+  clearMatches: () => useStatsStore.getState().clearHistory(),
 
   setPlayerName: (name) => {
     const trimmed = name.trim().slice(0, 24)

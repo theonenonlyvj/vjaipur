@@ -103,6 +103,15 @@ export class SocketService {
     })
   }
 
+  checkUsername(name: string): Promise<{ available: boolean }> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) return reject(new Error('Not connected'))
+      this.socket.emit(EVENTS.CHECK_USERNAME, { name }, (ack: { available: boolean }) => {
+        resolve(ack)
+      })
+    })
+  }
+
   // Callbacks — wired by gameStore
   onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
   onOpponentAction: ((action: Action) => void) | null = null
