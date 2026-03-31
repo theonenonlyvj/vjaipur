@@ -29,7 +29,7 @@ export class SocketService {
       this.onForfeit?.()
     })
     this.socket.on(EVENTS.OPPONENT_NAME, (data: OpponentNamePayload) => {
-      this.onOpponentName?.(data.name)
+      this.onOpponentName?.(data)
     })
     this.socket.on('connect', () => {
       this.onConnect?.()
@@ -75,8 +75,8 @@ export class SocketService {
     this.socket?.emit(EVENTS.NEXT_ROUND, round)
   }
 
-  sendName(name: string): void {
-    this.socket?.emit(EVENTS.SET_NAME, { name })
+  sendName(name: string, friendCode: string): void {
+    this.socket?.emit(EVENTS.SET_NAME, { name, friendCode })
   }
 
   rejoin(code: string, playerIndex: 0 | 1): Promise<void> {
@@ -111,7 +111,7 @@ export class SocketService {
   onOpponentReconnected: (() => void) | null = null
   onForfeit: (() => void) | null = null
   onConnect: (() => void) | null = null
-  onOpponentName: ((name: string) => void) | null = null
+  onOpponentName: ((data: OpponentNamePayload) => void) | null = null
 }
 
 export const socketService = new SocketService()
