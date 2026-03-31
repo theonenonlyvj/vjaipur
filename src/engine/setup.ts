@@ -1,4 +1,5 @@
 import type { Card, CardType, GameState, PlayerState, TokenPiles, BonusPiles, BonusToken } from './types'
+import { sortHand } from './engine'
 
 export function createDeck(): Card[] {
   const counts: [CardType, number][] = [
@@ -65,7 +66,7 @@ export function setupRound(
   // Deal 5 to each player, move camels to herd
   const deal = (cards: Card[]): PlayerState => ({
     ...emptyPlayer(),
-    hand: cards.filter(c => c.type !== 'camel'),
+    hand: sortHand(cards.filter(c => c.type !== 'camel')),
     herd: cards.filter(c => c.type === 'camel').length,
   })
 

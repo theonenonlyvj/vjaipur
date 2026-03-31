@@ -81,7 +81,23 @@ export function ActionBar({
 
   // --- Context button (slot 2 of row 1) ---
   let contextBtn: React.ReactNode = null
-  if (selMarketCount === 1) {
+  const allCamels = selMarketCount > 0 && selMarketTypes.every(t => t === 'camel')
+
+  if (allCamels) {
+    contextBtn = (
+      <button
+        onClick={onTakeCamels}
+        style={{
+          ...actionBtn,
+          flex: 1,
+          background: '#3a3010',
+          borderColor: '#d0a860',
+        }}
+      >
+        Take Camels
+      </button>
+    )
+  } else if (selMarketCount === 1) {
     const goodName = selMarketTypes[0] !== 'camel' ? selMarketTypes[0] : null
     if (goodName) {
       const wouldExceedLimit = player.hand.length >= 7
@@ -129,22 +145,11 @@ export function ActionBar({
     <div style={barStyle}>
       {/* Row 1: fixed-position primary actions */}
       <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
-        <button
-          onClick={onTakeCamels}
-          disabled={!hasCamels || selMarketCount > 0}
-          style={{
-            ...actionBtn,
-            background: '#3a3010',
-            borderColor: '#d0a860',
-            opacity: (!hasCamels || selMarketCount > 0) ? 0.35 : 1,
-            cursor: (!hasCamels || selMarketCount > 0) ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Take Camels
-        </button>
-
-        {contextBtn}
+        {contextBtn || (
+          <div style={{ flex: 1, color: '#666', fontSize: 13, textAlign: 'center', fontStyle: 'italic' }}>
+            Select from Market
+          </div>
+        )}
 
         {selMarketCount > 0 && (
           <button onClick={onClearSelection} style={{ ...cancelBtn, whiteSpace: 'nowrap' }}>

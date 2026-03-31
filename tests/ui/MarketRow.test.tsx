@@ -42,7 +42,7 @@ describe('MarketRow', () => {
     unmount()
   })
 
-  it('does not call onToggleSelect for camels', () => {
+  it('calls onToggleSelect for camels', () => {
     const onToggle = vi.fn()
     const { unmount } = render(
       <MarketRow
@@ -52,7 +52,7 @@ describe('MarketRow', () => {
       />
     )
     fireEvent.click(screen.getAllByText('Camel')[0])
-    expect(onToggle).not.toHaveBeenCalled()
+    expect(onToggle).toHaveBeenCalledWith(1)
     unmount()
   })
 

@@ -164,4 +164,25 @@ describe('setupRound', () => {
     const ids = allCards.map(c => c.id)
     expect(new Set(ids).size).toBe(allCards.length)
   })
+
+  it('player hands are sorted by type and then id', () => {
+    const state = setupRound([0, 0])
+    const GOOD_ORDER = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
+    const GOOD_PRIORITY: Record<string, number> = GOOD_ORDER.reduce((acc, good, i) => {
+      acc[good] = i
+      return acc
+    }, {} as Record<string, number>)
+
+    for (const player of state.players) {
+      for (let i = 0; i < player.hand.length - 1; i++) {
+        const a = player.hand[i]
+        const b = player.hand[i + 1]
+        const pa = GOOD_PRIORITY[a.type]
+        const pb = GOOD_PRIORITY[b.type]
+        if (pa < pb) continue
+        if (pa > pb) throw new Error(`Hand not sorted: ${a.type} before ${b.type}`)
+        if (a.id > b.id) throw new Error(`Hand not stable-sorted: ID ${a.id} before ${b.id} for type ${a.type}`)
+      }
+    }
+  })
 })
