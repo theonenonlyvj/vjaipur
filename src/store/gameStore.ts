@@ -130,7 +130,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
   lastMoveDescription: null,
   tutorial: false,
-  playerName: '',
+  playerName: useStatsStore.getState().displayName || '',
   opponentName: null,
   opponentFriendCode: null,
   matchScores: [0, 0],
@@ -312,7 +312,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   startTutorial: () => set({ tutorial: true }),
   endTutorial: () => set({ tutorial: false }),
 
-  setPlayerName: (name) => set({ playerName: name.trim().slice(0, 24) }),
+  setPlayerName: (name) => {
+    const trimmed = name.trim().slice(0, 24)
+    useStatsStore.getState().setDisplayName(trimmed)
+    set({ playerName: trimmed })
+  },
 
   toggleMute: () => {
     const muted = !get().muted

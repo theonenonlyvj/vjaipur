@@ -15,13 +15,15 @@ export interface MatchRecord {
 interface StatsState {
   friendCode: string | null
   secretKey: string | null
+  displayName: string | null
   matches: MatchRecord[]
 }
 
 interface StatsActions {
-  ensureAccount: () => { friendCode: string; secretKey: string }
+  ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
   addMatch: (match: Omit<MatchRecord, 'timestamp'>) => void
-  restoreAccount: (matches: MatchRecord[], friendCode: string, secretKey: string) => void
+  restoreAccount: (matches: MatchRecord[], friendCode: string, secretKey: string, displayName?: string | null) => void
+  setDisplayName: (name: string) => void
   clearStats: () => void
 }
 
@@ -43,12 +45,13 @@ export const useStatsStore = create<StatsStore>()(
     (set, get) => ({
       friendCode: null,
       secretKey: null,
+      displayName: null,
       matches: [],
 
       ensureAccount: () => {
-        const { friendCode, secretKey } = get()
+        const { friendCode, secretKey, displayName } = get()
         if (friendCode && secretKey) {
-          return { friendCode, secretKey }
+          return { friendCode, secretKey, displayName }
         }
 
         const newFriendCode = generateFriendCode()
@@ -59,11 +62,11 @@ export const useStatsStore = create<StatsStore>()(
           secretKey: newSecretKey,
         })
 
-        return { friendCode: newFriendCode, secretKey: newSecretKey }
+        return { friendCode: newFriendCode, secretKey: newSecretKey, displayName: null }
       },
 
       addMatch: (matchData) => {
-        const { friendCode, secretKey } = get().ensureAccount()
+        const { friendCode, secretKey, displayName } = get().ensureAccount()
         const newMatch: MatchRecord = {
           ...matchData,
           timestamp: Date.now(),
@@ -77,6 +80,7 @@ export const useStatsStore = create<StatsStore>()(
         const payload: SyncMatchPayload = {
           friendCode,
           secretKey,
+          displayName: displayName || undefined,
           match: {
             opponent_type: newMatch.opponent_type,
             opponent_id: newMatch.opponent_id,
@@ -88,18 +92,24 @@ export const useStatsStore = create<StatsStore>()(
         socketService.syncMatch(payload)
       },
 
-      restoreAccount: (matches, friendCode, secretKey) => {
+      restoreAccount: (matches, friendCode, secretKey, displayName) => {
         set({
           matches,
           friendCode,
           secretKey,
+          displayName: displayName || null,
         })
+      },
+
+      setDisplayName: (name) => {
+        set({ displayName: name })
       },
 
       clearStats: () => {
         set({
           friendCode: null,
           secretKey: null,
+          displayName: null,
           matches: [],
         })
       },

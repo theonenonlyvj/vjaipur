@@ -36,7 +36,7 @@ export function ProfileHeader() {
     try {
       const ack = await socketService.restoreAccount({ friendCode: fc, secretKey: sk })
       if (ack.ok && ack.matches) {
-        restoreAccount(ack.matches, fc, sk)
+        restoreAccount(ack.matches, fc, sk, ack.displayName)
         setIsRestoring(false)
         setRestoreValue('')
         setShowSecret(false)

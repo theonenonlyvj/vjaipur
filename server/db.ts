@@ -54,3 +54,11 @@ export async function getPlayerMatches(playerId: string) {
   if (error) throw error
   return data
 }
+
+export async function updatePlayerName(playerId: string, displayName: string) {
+  const { error } = await supabase
+    .from('players')
+    .update({ display_name: displayName })
+    .eq('id', playerId)
+  if (error) throw error
+}
