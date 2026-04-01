@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
-import type { SyncMatchPayload } from '../shared/protocol'
+import type { SyncMatchPayload, RestoreAccountAck } from '../shared/protocol'
 
 export interface MatchRecord {
   opponent_type: string
@@ -26,6 +26,7 @@ interface StatsActions {
   secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
   syncFullHistory: () => Promise<void>
+  pullFullHistory: () => Promise<void>
   clearHistory: () => void
   clearStats: () => void
 }
@@ -193,8 +194,44 @@ export const useStatsStore = create<StatsStore>()(
             // Small delay to avoid flooding socket if there are many matches
             await new Promise(r => setTimeout(r, 50))
           }
+          // After pushing, pull to make sure we are fully in sync
+          await get().pullFullHistory()
         } catch (e) {
           console.error('syncFullHistory failed:', e)
+        }
+      },
+
+      pullFullHistory: async () => {
+        const { displayName, secretKey, friendCode } = get()
+        if (!secretKey) return
+
+        try {
+          await waitForConnection()
+          
+          let ack: RestoreAccountAck
+          const isGuest = displayName?.startsWith('Guest_')
+          
+          if (!isGuest && displayName) {
+            // Secured account: pull by username
+            ack = await socketService.restoreAccount({ username: displayName, password: secretKey })
+          } else if (friendCode) {
+            // Guest account: pull by friendCode + secretKey (the long auto-gen one)
+            // We'll need to update restoreAccount to handle this on the server
+            ack = await socketService.restoreAccount({ friendCode, secretKey })
+          } else {
+            return
+          }
+
+          if (ack.ok && ack.matches) {
+            set({ 
+              matches: ack.matches,
+              displayName: ack.displayName || get().displayName,
+              friendCode: ack.friendCode || get().friendCode,
+              secretKey: ack.secretKey || get().secretKey,
+            })
+          }
+        } catch (e) {
+          console.warn('pullFullHistory failed (likely offline or server waking up)')
         }
       },
 
