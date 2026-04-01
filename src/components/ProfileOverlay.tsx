@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore, useStatsAggregates } from '../store/statsStore'
 import { socketService } from '../socket/socketService'
 
@@ -7,6 +7,11 @@ interface ProfileOverlayProps {
 }
 
 export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
+  useEffect(() => {
+    const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
+    socketService.connect(url)
+  }, [])
+
   const { displayName, friendCode, secureAccount, restoreAccount, clearStats } = useStatsStore()
   const { totalMatches, wins, losses, winRate } = useStatsAggregates()
   

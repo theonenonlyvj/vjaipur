@@ -157,17 +157,20 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', gap: 10,
+      display: 'flex', flexDirection: 'column', gap: 12,
       padding: frozen ? 0 : 16, maxWidth: 620, margin: '0 auto',
       height: '100%', overflowY: 'auto',
       pointerEvents: frozen ? 'none' : 'auto',
       opacity: frozen ? 0.8 : 1,
+      background: 'radial-gradient(circle at center, #1a120a 0%, #050505 100%)',
+      color: '#fff',
+      fontFamily: "'Inter', sans-serif",
     }}>
       {!frozen && <DisconnectBanner />}
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#888', fontSize: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
         <span>Round {state.round}</span>
-        <span>
+        <span style={{ color: '#d0a860' }}>
           P1 {'★'.repeat(state.seals[0])}{'☆'.repeat(2 - state.seals[0])}
           {' · '}
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat(2 - state.seals[1])}

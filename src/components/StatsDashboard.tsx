@@ -111,7 +111,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                 <tbody>
                   {rivals.map((rival) => (
                     <tr key={rival.id} style={trStyle}>
-                      <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{rival.id}</td>
+                      <td style={{ ...tdStyle, fontSize: 12 }}>{rival.id}</td>
                       <td style={tdStyle}>{rival.wins}</td>
                       <td style={tdStyle}>{rival.losses}</td>
                       <td style={tdStyle}>{rival.winRate.toFixed(0)}%</td>
@@ -173,7 +173,6 @@ const modalStyle: CSSProperties = {
   borderRadius: 16,
   border: '2px solid #f0c030',
   padding: '24px 24px 32px 24px',
-  boxShadow: '0 0 50px rgba(0,0,0,0.8)',
   position: 'relative',
 }
 

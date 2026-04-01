@@ -50,7 +50,6 @@ export function GameOverScreen() {
         fontSize: 32, 
         fontWeight: 900, 
         color: winner === playerIndex ? '#60c040' : '#ff4060',
-        textShadow: winner === playerIndex ? '0 0 20px rgba(96, 192, 64, 0.3)' : '0 0 20px rgba(255, 64, 96, 0.3)',
         letterSpacing: 2,
         marginBottom: 8
       }}>
@@ -100,7 +99,6 @@ export function GameOverScreen() {
           border: '2px solid #333', 
           borderRadius: 16, 
           overflow: 'hidden',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
           background: '#1a0a00'
         }}>
           <GameScreen frozen />
@@ -136,8 +134,7 @@ export function GameOverScreen() {
             borderRadius: 16, 
             border: '1px solid rgba(240, 192, 48, 0.1)', 
             textAlign: 'center', 
-            minWidth: 240,
-            boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+            minWidth: 240
           }}>
             <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>Match Delta</div>
             <div style={{ fontSize: 32, fontWeight: 900, color: matchDelta >= 0 ? '#60c040' : '#ff4060' }}>
@@ -160,7 +157,6 @@ export function GameOverScreen() {
         color: '#f0e8d8',
         border: '2px solid #f0c030', borderRadius: 12, cursor: 'pointer',
         marginTop: 10,
-        boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
         textTransform: 'uppercase',
         letterSpacing: 1,
       }}>
