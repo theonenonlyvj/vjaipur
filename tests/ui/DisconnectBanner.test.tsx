@@ -17,7 +17,7 @@ describe('DisconnectBanner', () => {
     useGameStore.setState({ onlineStatus: 'opponent-disconnected' })
     render(<DisconnectBanner />)
     expect(screen.getByText(/opponent disconnected/i)).toBeInTheDocument()
-    expect(screen.getByText(/60s/i)).toBeInTheDocument()
+    expect(screen.getByText(/180s/i)).toBeInTheDocument()
   })
 
   it('shows forfeit win message when opponent forfeits', () => {
