@@ -8,7 +8,7 @@ export type {
 } from './types'
 
 // Logic
-export { applyAction, getLegalActions } from './engine'
+export { applyAction, getLegalActions, sortHand } from './engine'
 export { scoreRound } from './scoring'
 export { setupRound, createDeck, shuffle, initialTokenPiles, initialBonusPiles } from './setup'
 export { Errors } from './errors'
