@@ -8,6 +8,8 @@ const MIN_SELL: Record<Good, number> = {
   diamond: 2, gold: 2, silver: 2, cloth: 1, spice: 1, leather: 1,
 }
 const PRECIOUS: ReadonlySet<Good> = new Set(['diamond', 'gold', 'silver'])
+const ALL_CARDS = createDeck()
+const DECK_MAP = new Map(ALL_CARDS.map(c => [c.id, c.type]))
 
 function goodCount(hand: Card[], good: Good): number {
   return hand.filter(c => c.type === good).length
@@ -27,8 +29,7 @@ function getDeckHeat(state: GameState, myIndex: 0 | 1): number {
   const oppIndex = myIndex === 0 ? 1 : 0
   state.revealedHands[oppIndex].forEach(id => knownIds.add(id))
 
-  const allCards = createDeck()
-  const unknownPool = allCards.filter(c => !knownIds.has(c.id))
+  const unknownPool = ALL_CARDS.filter(c => !knownIds.has(c.id))
   if (unknownPool.length === 0) return 0
 
   const preciousCount = unknownPool.filter(c => 
@@ -107,6 +108,23 @@ function evalPositionFair(state: GameState, myIndex: 0 | 1): number {
   const drawRisk = (5 - state.market.length) * heat * 20
   score -= drawRisk
 
+  // 8. Defensive Valuation ("Hate-Drafting")
+  const oppIndex = myIndex === 0 ? 1 : 0
+  const oppRevealed = state.revealedHands[oppIndex]
+  const oppHandMap = new Map<string, number>()
+
+  for (const id of oppRevealed) {
+    const type = DECK_MAP.get(id)
+    if (type && type !== 'camel') {
+      oppHandMap.set(type, (oppHandMap.get(type) ?? 0) + 1)
+    }
+  }
+
+  for (const count of oppHandMap.values()) {
+    const threatLevel = count === 2 ? 25 : count === 1 ? 8 : 30
+    score -= threatLevel
+  }
+
   return score
 }
 
@@ -167,15 +185,14 @@ function fairifyState(state: GameState, myIndex: 0 | 1): GameState {
   
   // 2. Identify cards that are definitively IN the opponent's hand (taken from market)
   const oppRevealedIds = new Set(state.revealedHands[oppIndex])
-  const allCards = createDeck()
   
   // pool = cards that are either in the deck or were dealt to opponent at start (never revealed)
-  const unknownPool = allCards.filter(c => !knownIds.has(c.id) && !oppRevealedIds.has(c.id))
+  const unknownPool = ALL_CARDS.filter(c => !knownIds.has(c.id) && !oppRevealedIds.has(c.id))
   const shuffledPool = shuffle(unknownPool)
   
   // 3. Reconstruct opponent's hand
   // Start with cards we KNOW they have
-  const confirmedOppHand = allCards.filter(c => oppRevealedIds.has(c.id))
+  const confirmedOppHand = ALL_CARDS.filter(c => oppRevealedIds.has(c.id))
   
   // Fill the rest of their hand with random cards from the unknown pool
   const missingCount = opp.hand.length - confirmedOppHand.length
