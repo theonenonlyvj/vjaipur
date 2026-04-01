@@ -59,14 +59,23 @@ export async function getPlayerByUsername(username: string) {
 }
 
 export async function updatePlayerToSecured(friendCode: string, username: string, password: string) {
-  const { data, error } = await supabase
-    .from('players')
-    .update({ display_name: username, secret_key: password })
-    .eq('friend_code', friendCode)
-    .select()
-    .single()
-  if (error) throw error
-  return data
+  // Try to find existing player by friendCode
+  const existing = await getPlayerByCode(friendCode)
+  
+  if (existing) {
+    // Update existing
+    const { data, error } = await supabase
+      .from('players')
+      .update({ display_name: username, secret_key: password })
+      .eq('id', existing.id)
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  } else {
+    // Create new
+    return createPlayer(friendCode, password, username)
+  }
 }
 
 export async function getPlayerMatches(playerId: string) {
@@ -87,14 +96,16 @@ export async function updatePlayerName(playerId: string, displayName: string) {
   if (error) throw error
 }
 
-export async function isUsernameAvailable(name: string, excludePlayerId?: string) {
+export async function isUsernameAvailable(name: string, excludeFriendCode?: string) {
+  if (!name || name.trim() === '') return false
+
   let query = supabase
     .from('players')
-    .select('id', { count: 'exact', head: true })
-    .ilike('display_name', name)
+    .select('id, friend_code', { count: 'exact', head: true })
+    .ilike('display_name', name.trim())
   
-  if (excludePlayerId) {
-    query = query.neq('id', excludePlayerId)
+  if (excludeFriendCode) {
+    query = query.neq('friend_code', excludeFriendCode)
   }
 
   const { count, error } = await query

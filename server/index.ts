@@ -154,15 +154,22 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
     try {
+      console.log('RESTORE_ACCOUNT attempt for username:', data.username)
       const player = await getPlayerByUsername(data.username)
-      if (!player || player.secret_key !== data.password) {
+      if (!player) {
+        console.warn('RESTORE_ACCOUNT: Player not found for username:', data.username)
+        cb({ ok: false, error: 'Invalid username or password' })
+        return
+      }
+      if (player.secret_key !== data.password) {
+        console.warn('RESTORE_ACCOUNT: Password mismatch for username:', data.username)
         cb({ ok: false, error: 'Invalid username or password' })
         return
       }
       const matches = await getPlayerMatches(player.id)
       cb({ 
         ok: true, 
-        matches, 
+        matches: matches || [], 
         displayName: player.display_name,
         friendCode: player.friend_code,
         secretKey: player.secret_key
@@ -175,8 +182,10 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.SECURE_ACCOUNT, async (data: SecureAccountPayload, cb: (ack: SecureAccountAck) => void) => {
     try {
-      const available = await isUsernameAvailable(data.username)
+      console.log('SECURE_ACCOUNT attempt for friendCode:', data.friendCode, 'to username:', data.username)
+      const available = await isUsernameAvailable(data.username, data.friendCode)
       if (!available) {
+        console.warn('SECURE_ACCOUNT: Username already taken:', data.username)
         cb({ ok: false, error: 'Username already taken' })
         return
       }
