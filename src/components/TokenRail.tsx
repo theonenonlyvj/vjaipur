@@ -112,7 +112,7 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
             justifyContent: 'center',
             width: '100%',
             height: '100%',
-            lineHeight: 1,
+            lineHeight: 0,
           }}>
             {value !== undefined ? <AnimatedTokenValue value={value} /> : '—'}
           </span>
