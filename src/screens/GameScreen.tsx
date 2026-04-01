@@ -164,7 +164,6 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       opacity: frozen ? 0.8 : 1,
       background: 'radial-gradient(circle at center, #1a120a 0%, #050505 100%)',
       color: '#fff',
-      fontFamily: "'Inter', sans-serif",
     }}>
       {!frozen && <DisconnectBanner />}
       {/* Header */}

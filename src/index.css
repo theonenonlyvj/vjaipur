@@ -29,3 +29,7 @@ html, body, #root {
   font-family: 'Iosevka Charon', monospace;
   font-size: 14px;
 }
+
+button, input, select, textarea {
+  font-family: inherit;
+}
