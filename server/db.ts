@@ -21,13 +21,18 @@ export interface Match {
 }
 
 export async function createPlayer(friendCode: string, secretKey: string, displayName?: string) {
-  const { data, error } = await supabase
-    .from('players')
-    .insert([{ friend_code: friendCode, secret_key: secretKey, display_name: displayName }])
-    .select()
-    .single()
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase
+      .from('players')
+      .insert([{ friend_code: friendCode, secret_key: secretKey, display_name: displayName }])
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  } catch (err) {
+    console.error('db: createPlayer error:', err)
+    throw err
+  }
 }
 
 export async function recordMatch(match: Match) {
@@ -36,56 +41,76 @@ export async function recordMatch(match: Match) {
 }
 
 export async function getPlayerByCode(friendCode: string) {
-  const { data, error } = await supabase
-    .from('players')
-    .select('*')
-    .eq('friend_code', friendCode)
-    .limit(1)
-  
-  if (error) throw error
-  return data && data.length > 0 ? data[0] : null
+  try {
+    const { data, error } = await supabase
+      .from('players')
+      .select('*')
+      .eq('friend_code', friendCode)
+      .limit(1)
+    
+    if (error) throw error
+    return data && data.length > 0 ? data[0] : null
+  } catch (err) {
+    console.error('db: getPlayerByCode error:', err)
+    throw err
+  }
 }
 
 export async function getPlayerByUsername(username: string) {
-  const { data, error } = await supabase
-    .from('players')
-    .select('*')
-    .ilike('display_name', username)
-    .order('created_at', { ascending: false })
-    .limit(1)
-  
-  if (error) throw error
-  return data && data.length > 0 ? data[0] : null
+  try {
+    const { data, error } = await supabase
+      .from('players')
+      .select('*')
+      .ilike('display_name', username)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    
+    if (error) throw error
+    return data && data.length > 0 ? data[0] : null
+  } catch (err) {
+    console.error('db: getPlayerByUsername error:', err)
+    throw err
+  }
 }
 
 export async function updatePlayerToSecured(friendCode: string, username: string, password: string) {
-  // Try to find existing player by friendCode
-  const existing = await getPlayerByCode(friendCode)
-  
-  if (existing) {
-    // Update existing
-    const { data, error } = await supabase
-      .from('players')
-      .update({ display_name: username, secret_key: password })
-      .eq('id', existing.id)
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  } else {
-    // Create new
-    return createPlayer(friendCode, password, username)
+  try {
+    // Try to find existing player by friendCode
+    const existing = await getPlayerByCode(friendCode)
+    
+    if (existing) {
+      // Update existing
+      const { data, error } = await supabase
+        .from('players')
+        .update({ display_name: username, secret_key: password })
+        .eq('id', existing.id)
+        .select()
+        .single()
+      if (error) throw error
+      return data
+    } else {
+      // Create new
+      return createPlayer(friendCode, password, username)
+    }
+  } catch (err) {
+    console.error('db: updatePlayerToSecured error:', err)
+    throw err
   }
 }
 
 export async function getPlayerMatches(playerId: string) {
-  const { data, error } = await supabase
-    .from('matches')
-    .select('*')
-    .eq('player_id', playerId)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('player_id', playerId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  } catch (err) {
+    console.error('db: getPlayerMatches error:', err)
+    throw err
+  }
 }
 
 export async function updatePlayerName(playerId: string, displayName: string) {
