@@ -113,9 +113,14 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
         </div>
 
         {/* Camels */}
+        <div style={rowStyle}>
+          <span style={{ fontWeight: 600 }}>Camels held</span>
+          <span style={{ color: '#d0a860', fontWeight: 800 }}>{playerState.herd}</span>
+        </div>
+
         {camelBonus > 0 && (
           <div style={rowStyle}>
-            <span style={{ fontWeight: 600 }}>Camel Bonus</span>
+            <span style={{ fontWeight: 600, color: '#60c040' }}>Camel Bonus Winner</span>
             <span style={{ color: '#60c040', fontWeight: 800 }}>+5 pts</span>
           </div>
         )}
