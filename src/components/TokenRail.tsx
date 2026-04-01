@@ -59,6 +59,7 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
   const isBonus = !!tier
   const isEmpty = count === 0
   const bgColor = good ? ACCENT[good] : '#000'
+  const label = tier ? tier : good
   
   return (
     <div style={{ 
@@ -71,18 +72,16 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
       filter: isEmpty ? 'grayscale(1)' : 'none',
       transition: 'all 0.3s ease',
     }}>
-      {isBonus && (
-        <span style={{ 
-          fontSize: 8, 
-          color: '#d0a860', 
-          fontWeight: 900, 
-          textTransform: 'uppercase', 
-          letterSpacing: 1,
-          marginBottom: 2
-        }}>
-          {tier}
-        </span>
-      )}
+      <span style={{ 
+        fontSize: 8, 
+        color: isBonus ? '#d0a860' : ACCENT[good!], 
+        fontWeight: 900, 
+        textTransform: 'uppercase', 
+        letterSpacing: 1,
+        marginBottom: 2
+      }}>
+        {label}
+      </span>
       <div style={{
         width: 32, height: 32, borderRadius: '50%',
         background: isBonus 
@@ -106,7 +105,11 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
         ) : (
           <span style={{ 
             fontSize: 14, fontWeight: 900, color: '#fff', 
-            zIndex: 1
+            zIndex: 1,
+            lineHeight: '32px',
+            display: 'block',
+            textAlign: 'center',
+            width: '100%',
           }}>
             {value !== undefined ? <AnimatedTokenValue value={value} /> : '—'}
           </span>
