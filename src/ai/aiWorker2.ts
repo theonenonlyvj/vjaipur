@@ -1,8 +1,7 @@
 import type { GameState, Action } from '../engine'
-import { mcts } from './hardAi'
-import { pickMediumAction } from './mediumAi'
+import { pickHard2Action } from './hardAi2'
 
 self.onmessage = (e: MessageEvent<GameState>) => {
-  const action: Action | null = mcts(e.data, 3000, pickMediumAction)
+  const action: Action | null = pickHard2Action(e.data)
   self.postMessage(action)
 }
