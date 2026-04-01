@@ -35,7 +35,6 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
     padding: '24px 20px',
     position: 'relative',
     minWidth: 280,
-    boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
     display: 'flex',
     flexDirection: 'column',
     gap: 20,
@@ -55,7 +54,6 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
     fontWeight: 900,
     textTransform: 'uppercase',
     letterSpacing: 1.5,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
     borderTop: '1px solid rgba(255,255,255,0.3)',
     borderBottom: '1px solid rgba(0,0,0,0.2)',
   }
@@ -76,7 +74,7 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
         <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>
           {name || `Player ${playerIndex + 1}`}
         </div>
-        <div style={{ fontSize: 56, fontWeight: 900, color: '#f0c030', lineHeight: 1, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+        <div style={{ fontSize: 56, fontWeight: 900, color: '#f0c030', lineHeight: 1 }}>
           {roundTotal}
         </div>
         <div style={{ fontSize: 11, color: '#888', marginTop: 4, letterSpacing: 1 }}>RUPEES</div>
@@ -101,7 +99,6 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
                  fontWeight: 800,
                  color: '#fff',
                  border: `1px solid rgba(255,255,255,0.2)`,
-                 boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                }}>
                  {good.toUpperCase()}: {goodsBreakdown[good].count}
                </div>

@@ -82,7 +82,6 @@ const valueStyle: CSSProperties = {
   fontSize: 15,
   fontWeight: 700,
   color: '#fff',
-  fontFamily: 'monospace',
 }
 
 const dividerStyle: CSSProperties = {

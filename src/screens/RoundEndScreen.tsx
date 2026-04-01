@@ -92,7 +92,6 @@ export function RoundEndScreen() {
           border: '2px solid #333', 
           borderRadius: 16, 
           overflow: 'hidden',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
           background: '#1a0a00'
         }}>
           <GameScreen frozen />
@@ -119,7 +118,6 @@ export function RoundEndScreen() {
         background: 'linear-gradient(to bottom, #305040, #203828)',
         color: '#f0e8d8',
         border: '2px solid #60c040', borderRadius: 12, cursor: 'pointer',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
         textTransform: 'uppercase',
         letterSpacing: 1,
       }}>

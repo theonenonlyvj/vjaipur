@@ -58,7 +58,6 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
         borderRadius: 10,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: selected ? '0 0 30px rgba(240, 192, 48, 0.6)' : '0 6px 15px rgba(0,0,0,0.8)',
         userSelect: 'none',
         flexShrink: 0,
         position: 'relative',
@@ -85,7 +84,6 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
           style={{
             width: size === 'sm' ? 24 : 36,
             height: size === 'sm' ? 24 : 36,
-            filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.2))',
             marginBottom: size === 'sm' ? 2 : 6,
             pointerEvents: 'none',
           }}
@@ -97,7 +95,6 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
           textAlign: 'center',
           letterSpacing: 1.5,
           pointerEvents: 'none',
-          textShadow: card.type === 'gold' && selected ? 'none' : '0 2px 4px rgba(0,0,0,0.5)',
         }}>
           {label}
         </span>
