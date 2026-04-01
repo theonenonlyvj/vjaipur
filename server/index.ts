@@ -139,18 +139,17 @@ io.on('connection', (socket) => {
         await updatePlayerName(player.id, data.displayName)
       }
 
-      // Basic duplicate check: don't record if an identical match exists for this player within the last 10 seconds
+      // Exact deduplication check using client-side timestamp
       const existingMatches = await getPlayerMatches(player.id)
       const isDuplicate = existingMatches?.some(m => 
         m.opponent_type === data.match.opponent_type &&
         m.opponent_id === (data.match.opponent_id || null) &&
         m.player_score === data.match.player_score &&
         m.opponent_score === data.match.opponent_score &&
-        Math.abs(new Date(m.timestamp).getTime() - Date.now()) < 10000 // 10s window
+        new Date(m.timestamp).getTime() === data.match.timestamp
       )
 
       if (isDuplicate) {
-        console.log('SYNC_MATCH: Skipping duplicate match record')
         return
       }
 
@@ -161,6 +160,7 @@ io.on('connection', (socket) => {
         player_score: data.match.player_score,
         opponent_score: data.match.opponent_score,
         won: data.match.won,
+        timestamp: data.match.timestamp,
       })
     } catch (error) {
       console.error('SYNC_MATCH error:', error)
