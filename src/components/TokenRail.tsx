@@ -67,18 +67,15 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
       display: 'flex', 
       flexDirection: 'column', 
       alignItems: 'center', 
-      gap: 2,
-      opacity: isEmpty ? 0.3 : 1,
-      filter: isEmpty ? 'grayscale(1)' : 'none',
-      transition: 'all 0.3s ease',
+      gap: 4,
     }}>
       <span style={{ 
-        fontSize: 8, 
-        color: isBonus ? '#d0a860' : ACCENT[good!], 
+        fontSize: 10, 
+        color: '#fff', 
         fontWeight: 900, 
         textTransform: 'uppercase', 
-        letterSpacing: 1,
-        marginBottom: 2
+        letterSpacing: 1.5,
+        opacity: isEmpty ? 0.4 : 0.9,
       }}>
         {label}
       </span>
@@ -91,6 +88,9 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
         border: `2px solid ${isBonus ? '#d0a860' : bgColor}`,
         position: 'relative',
         overflow: 'hidden',
+        opacity: isEmpty ? 0.3 : 1,
+        filter: isEmpty ? 'grayscale(1)' : 'none',
+        transition: 'all 0.3s ease',
       }}>
         {/* Shine */}
         <div style={{
@@ -103,19 +103,19 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
         {isBonus ? (
           <StarGrid tier={tier} />
         ) : (
-          <span style={{ 
+          <div style={{ 
             fontSize: 14, fontWeight: 900, color: '#fff', 
             zIndex: 1,
-            lineHeight: '32px',
-            display: 'block',
-            textAlign: 'center',
-            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            lineHeight: 1,
           }}>
             {value !== undefined ? <AnimatedTokenValue value={value} /> : '—'}
-          </span>
+          </div>
         )}
       </div>
-      <span style={{ fontSize: 10, color: '#888', fontWeight: 'bold' }}>×{count}</span>
+      <span style={{ fontSize: 10, color: '#888', fontWeight: 'bold', opacity: isEmpty ? 0.5 : 1 }}>×{count}</span>
     </div>
   )
 }
