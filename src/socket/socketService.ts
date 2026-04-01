@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
-import type { Action } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck } from '../shared/protocol'
+import type { Action, GameState } from '../engine'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -24,8 +24,8 @@ export class SocketService {
     this.socket.on(EVENTS.ROOM_READY, (data: RoomReadyPayload) => {
       this.onRoomReady?.(data.playerIndex, data.seed)
     })
-    this.socket.on(EVENTS.OPPONENT_ACTION, (data: { action: Action }) => {
-      this.onOpponentAction?.(data.action)
+    this.socket.on(EVENTS.OPPONENT_ACTION, (data: OpponentActionPayload) => {
+      this.onOpponentAction?.(data.action, data.state)
     })
     this.socket.on(EVENTS.ROUND_START, (data: { seed: number }) => {
       this.onRoundStart?.(data.seed)
@@ -78,8 +78,8 @@ export class SocketService {
     this.socket?.emit(EVENTS.QUICK_MATCH)
   }
 
-  sendAction(action: Action): void {
-    this.socket?.emit(EVENTS.ACTION, action)
+  sendAction(action: Action, state: GameState): void {
+    this.socket?.emit(EVENTS.ACTION, { action, state })
   }
 
   sendNextRound(round: number): void {
@@ -90,13 +90,13 @@ export class SocketService {
     this.socket?.emit(EVENTS.SET_NAME, { name, friendCode })
   }
 
-  rejoin(code: string, playerIndex: 0 | 1): Promise<void> {
+  rejoin(code: string, playerIndex: 0 | 1): Promise<RejoinAck> {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error('Not connected'))
       const payload: RejoinPayload = { code, playerIndex }
       this.socket.emit(EVENTS.REJOIN, payload, (ack: RejoinAck) => {
         if (!ack.ok) reject(new Error('Rejoin failed'))
-        else resolve()
+        else resolve(ack)
       })
     })
   }
@@ -138,7 +138,7 @@ export class SocketService {
 
   // Callbacks — wired by gameStore
   onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
-  onOpponentAction: ((action: Action) => void) | null = null
+  onOpponentAction: ((action: Action, state?: GameState) => void) | null = null
   onRoundStart: ((seed: number) => void) | null = null
   onOpponentDisconnected: (() => void) | null = null
   onOpponentReconnected: (() => void) | null = null
