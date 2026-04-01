@@ -125,6 +125,26 @@ function evalPositionFair(state: GameState, myIndex: 0 | 1): number {
     score -= threatLevel
   }
 
+  // 9. Camel Starvation
+  if (opp.herd === 0) {
+    score += me.herd * 3.0
+  }
+
+  // 10. Round-End Sniping
+  let emptyPiles = 0
+  for (const good of GOOD_ORDER) {
+    if (state.tokens[good].length === 0) {
+      emptyPiles++
+    }
+  }
+
+  const aiLead = myPts - oppPts
+  if (aiLead > 5) {
+    score += emptyPiles * 15
+  } else if (aiLead < -5) {
+    score -= emptyPiles * 25
+  }
+
   return score
 }
 
