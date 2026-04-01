@@ -43,6 +43,7 @@ describe('gameStore online mode', () => {
     const base = setupRound([0, 0])
     // Find camel index or construct a state where we know TAKE_CAMELS is valid
     const camelIdx = base.market.findIndex(c => c.type === 'camel')
+    const action = { type: 'TAKE_CAMELS' as const }
     if (camelIdx === -1) {
       // Force a camel into market slot 0 for a known-good test
       const stateWithCamel = {
@@ -50,12 +51,12 @@ describe('gameStore online mode', () => {
         market: [{ id: 999, type: 'camel' as const }, ...base.market.slice(1)],
       }
       useGameStore.setState({ state: stateWithCamel, mode: 'online', onlinePlayerIndex: 0 })
-      useGameStore.getState().dispatch({ type: 'TAKE_CAMELS' })
+      useGameStore.getState().dispatch(action)
     } else {
       useGameStore.setState({ state: base, mode: 'online', onlinePlayerIndex: 0 })
-      useGameStore.getState().dispatch({ type: 'TAKE_CAMELS' })
+      useGameStore.getState().dispatch(action)
     }
-    expect(socketService.sendAction).toHaveBeenCalledWith({ type: 'TAKE_CAMELS' })
+    expect(socketService.sendAction).toHaveBeenCalledWith(action, expect.any(Object))
   })
 
   it('dispatch in online mode does nothing when it is not our turn', () => {
