@@ -9,6 +9,10 @@ import { socketService } from './socket/socketService'
 const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 socketService.connect(url)
 
+// Auto-pull stats from cloud on startup if an account exists
+import { useStatsStore } from './store/statsStore'
+useStatsStore.getState().pullFullHistory()
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>

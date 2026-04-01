@@ -139,6 +139,21 @@ io.on('connection', (socket) => {
         await updatePlayerName(player.id, data.displayName)
       }
 
+      // Basic duplicate check: don't record if an identical match exists for this player within the last 10 seconds
+      const existingMatches = await getPlayerMatches(player.id)
+      const isDuplicate = existingMatches?.some(m => 
+        m.opponent_type === data.match.opponent_type &&
+        m.opponent_id === (data.match.opponent_id || null) &&
+        m.player_score === data.match.player_score &&
+        m.opponent_score === data.match.opponent_score &&
+        Math.abs(new Date(m.timestamp).getTime() - Date.now()) < 10000 // 10s window
+      )
+
+      if (isDuplicate) {
+        console.log('SYNC_MATCH: Skipping duplicate match record')
+        return
+      }
+
       await recordMatch({
         player_id: player.id,
         opponent_type: data.match.opponent_type,
@@ -154,16 +169,18 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
     try {
-      console.log('RESTORE_ACCOUNT attempt for username:', data.username)
-      const player = await getPlayerByUsername(data.username)
-      if (!player) {
-        console.warn('RESTORE_ACCOUNT: Player not found for username:', data.username)
-        cb({ ok: false, error: 'Invalid username or password' })
-        return
+      console.log('RESTORE_ACCOUNT attempt for:', data.username || data.friendCode)
+      let player: Player | null = null
+      
+      if (data.username && data.password) {
+        player = await getPlayerByUsername(data.username)
+      } else if (data.friendCode && data.secretKey) {
+        player = await getPlayerByCode(data.friendCode)
       }
-      if (player.secret_key !== data.password) {
-        console.warn('RESTORE_ACCOUNT: Password mismatch for username:', data.username)
-        cb({ ok: false, error: 'Invalid username or password' })
+
+      if (!player || player.secret_key !== (data.password || data.secretKey)) {
+        console.warn('RESTORE_ACCOUNT: Invalid credentials for:', data.username || data.friendCode)
+        cb({ ok: false, error: 'Invalid credentials' })
         return
       }
       const matches = await getPlayerMatches(player.id)
@@ -175,6 +192,7 @@ io.on('connection', (socket) => {
         secretKey: player.secret_key
       })
     } catch (error) {
+...
       console.error('RESTORE_ACCOUNT error:', error)
       cb({ ok: false, error: 'Internal server error' })
     }

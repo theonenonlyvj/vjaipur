@@ -51,8 +51,10 @@ export interface SyncMatchPayload {
 }
 
 export interface RestoreAccountPayload {
-  username: string
-  password: string
+  username?: string
+  password?: string
+  friendCode?: string
+  secretKey?: string
 }
 
 export interface RestoreAccountAck {
