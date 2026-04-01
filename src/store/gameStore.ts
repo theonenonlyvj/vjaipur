@@ -341,3 +341,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, lastMoveDescription: null })
   },
 }))
+
+// Subscribe to statsStore changes to keep playerName in sync (e.g. after restoration)
+useStatsStore.subscribe((state) => {
+  const { playerName } = useGameStore.getState()
+  if (state.displayName && state.displayName !== playerName) {
+    useGameStore.setState({ playerName: state.displayName })
+  }
+})
