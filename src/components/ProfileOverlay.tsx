@@ -82,7 +82,7 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
         <div style={sectionStyle}>
           <div style={{ fontSize: 14, color: '#aaa', marginBottom: 4 }}>CURRENT IDENTITY</div>
           <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>{displayName}</div>
-          <div style={{ fontSize: 12, color: '#666', fontFamily: 'monospace' }}>Friend Code: {friendCode}</div>
+          <div style={{ fontSize: 12, color: '#666' }}>Friend Code: {friendCode}</div>
           <div style={{ marginTop: 8, padding: '4px 8px', background: isGuest ? '#3a1a00' : '#003a1a', border: `1px solid ${isGuest ? '#a06000' : '#00a060'}`, borderRadius: 4, display: 'inline-block', fontSize: 11, color: isGuest ? '#f0c030' : '#80ff80' }}>
             {isGuest ? 'GUEST ACCOUNT' : 'SECURED ACCOUNT'}
           </div>
@@ -204,7 +204,6 @@ const modalStyle: CSSProperties = {
   padding: 24,
   borderRadius: 16,
   border: '2px solid #f0c030',
-  boxShadow: '0 0 30px rgba(0,0,0,1)',
   color: '#eee',
 }
 

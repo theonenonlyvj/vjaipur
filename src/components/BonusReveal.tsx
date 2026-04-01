@@ -31,7 +31,6 @@ export function BonusReveal({ show, onDone }: BonusRevealProps) {
             fontSize: 36,
             fontWeight: 900,
             letterSpacing: 2,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
           }}>
             BONUS!
           </div>

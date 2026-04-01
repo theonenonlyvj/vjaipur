@@ -98,7 +98,6 @@ export function TutorialOverlay({ onDone }: Props) {
           padding: '10px 16px',
           maxWidth: 620, width: '100%',
           pointerEvents: 'all',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.7)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
           <div>
@@ -135,7 +134,6 @@ export function TutorialOverlay({ onDone }: Props) {
         padding: '20px 20px 32px',
         maxWidth: 620, width: '100%', margin: '0 auto',
         pointerEvents: 'all',
-        boxShadow: '0 -4px 32px rgba(0,0,0,0.6)',
       }}>
         <div style={{ fontSize: 11, color: '#888', marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>
           Tutorial · {step + 1} / {STEPS.length}
