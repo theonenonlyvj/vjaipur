@@ -17,6 +17,27 @@ function sumTopN(pile: readonly number[], n: number): number {
   return pile.slice(0, n).reduce((s, v) => s + v, 0)
 }
 
+function getDeckHeat(state: GameState, myIndex: 0 | 1): number {
+  const me = state.players[myIndex]
+  const knownIds = new Set<number>()
+  me.hand.forEach(c => knownIds.add(c.id))
+  state.market.forEach(c => knownIds.add(c.id))
+  state.discard.forEach(c => knownIds.add(c.id))
+  
+  const oppIndex = myIndex === 0 ? 1 : 0
+  state.revealedHands[oppIndex].forEach(id => knownIds.add(id))
+
+  const allCards = createDeck()
+  const unknownPool = allCards.filter(c => !knownIds.has(c.id))
+  if (unknownPool.length === 0) return 0
+
+  const preciousCount = unknownPool.filter(c => 
+    c.type === 'diamond' || c.type === 'gold' || c.type === 'silver'
+  ).length
+
+  return preciousCount / unknownPool.length
+}
+
 /**
  * FAIR evaluation function. 
  * Does NOT look at opponent's hand contents.
@@ -80,6 +101,11 @@ function evalPositionFair(state: GameState, myIndex: 0 | 1): number {
   // 6. Hand pressure (approaching 7-card limit)
   if (me.hand.length >= 6) score -= 4
   if (opp.hand.length >= 6) score += 3
+
+  // 7. Deck Heat & Market Flip Logic
+  const heat = getDeckHeat(state, myIndex)
+  const drawRisk = (5 - state.market.length) * heat * 20
+  score -= drawRisk
 
   return score
 }
