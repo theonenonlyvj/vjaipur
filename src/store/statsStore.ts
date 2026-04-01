@@ -119,6 +119,7 @@ export const useStatsStore = create<StatsStore>()(
             player_score: newMatch.player_score,
             opponent_score: newMatch.opponent_score,
             won: newMatch.won,
+            timestamp: newMatch.timestamp,
           },
         }
         socketService.syncMatch(payload)
@@ -176,8 +177,23 @@ export const useStatsStore = create<StatsStore>()(
 
         try {
           await waitForConnection()
-          // Send matches in reverse order (oldest first) to preserve sequence
-          const toSync = [...matches].reverse()
+          
+          // First, get the current cloud record to see what's already there
+          let cloudMatches: MatchRecord[] = []
+          const isGuest = displayName?.startsWith('Guest_')
+          let ack: RestoreAccountAck
+          if (!isGuest && displayName) {
+            ack = await socketService.restoreAccount({ username: displayName, password: secretKey })
+          } else {
+            ack = await socketService.restoreAccount({ friendCode, secretKey })
+          }
+          if (ack.ok && ack.matches) cloudMatches = ack.matches
+
+          const cloudTimestamps = new Set(cloudMatches.map(m => m.timestamp))
+
+          // Only sync matches that DON'T exist in the cloud
+          const toSync = matches.filter(m => !cloudTimestamps.has(m.timestamp)).reverse()
+          
           for (const m of toSync) {
             socketService.syncMatch({
               friendCode,
@@ -189,12 +205,13 @@ export const useStatsStore = create<StatsStore>()(
                 player_score: m.player_score,
                 opponent_score: m.opponent_score,
                 won: m.won,
+                timestamp: m.timestamp,
               }
             })
-            // Small delay to avoid flooding socket if there are many matches
             await new Promise(r => setTimeout(r, 50))
           }
-          // After pushing, pull to make sure we are fully in sync
+          
+          // Refresh local state with the final merged set from cloud
           await get().pullFullHistory()
         } catch (e) {
           console.error('syncFullHistory failed:', e)
