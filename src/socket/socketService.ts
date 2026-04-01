@@ -22,7 +22,7 @@ export class SocketService {
     })
 
     this.socket.on(EVENTS.ROOM_READY, (data: RoomReadyPayload) => {
-      this.onRoomReady?.(data.playerIndex, data.seed)
+      this.onRoomReady?.(data.playerIndex, data.seed, data.matchLength)
     })
     this.socket.on(EVENTS.OPPONENT_ACTION, (data: OpponentActionPayload) => {
       this.onOpponentAction?.(data.action, data.state)
@@ -56,10 +56,10 @@ export class SocketService {
     return this.socket?.connected ?? false
   }
 
-  createRoom(): Promise<string> {
+  createRoom(matchLength: number): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error('Not connected'))
-      this.socket.emit(EVENTS.CREATE_ROOM, (code: string) => resolve(code))
+      this.socket.emit(EVENTS.CREATE_ROOM, matchLength, (code: string) => resolve(code))
     })
   }
 
@@ -74,8 +74,8 @@ export class SocketService {
     })
   }
 
-  quickMatch(): void {
-    this.socket?.emit(EVENTS.QUICK_MATCH)
+  quickMatch(matchLength: number): void {
+    this.socket?.emit(EVENTS.QUICK_MATCH, matchLength)
   }
 
   sendAction(action: Action, state: GameState): void {
@@ -141,7 +141,7 @@ export class SocketService {
   }
 
   // Callbacks — wired by gameStore
-  onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
+  onRoomReady: ((playerIndex: 0 | 1, seed: number, matchLength: number) => void) | null = null
   onOpponentAction: ((action: Action, state?: GameState) => void) | null = null
   onRoundStart: ((seed: number) => void) | null = null
   onOpponentDisconnected: ((data: OpponentDisconnectedPayload) => void) | null = null

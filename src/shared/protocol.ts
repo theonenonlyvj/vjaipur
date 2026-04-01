@@ -14,6 +14,7 @@ export const EVENTS = {
   CHECK_USERNAME: 'check_username',
   UPDATE_PROFILE: 'update_profile',
   SECURE_ACCOUNT: 'secure_account',
+  FORCE_FORFEIT:  'force_forfeit',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -26,7 +27,7 @@ export const EVENTS = {
 
 export type EventName = typeof EVENTS[keyof typeof EVENTS]
 
-export interface RoomReadyPayload    { playerIndex: 0 | 1; seed: number }
+export interface RoomReadyPayload    { playerIndex: 0 | 1; seed: number; matchLength: number }
 export interface ActionPayload       { action: Action; state: GameState }
 export interface OpponentActionPayload { action: Action; state?: GameState }
 export interface RoundStartPayload   { seed: number }
@@ -35,6 +36,7 @@ export interface RejoinPayload       { code: string; playerIndex: 0 | 1 }
 export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1; state?: GameState | null }
 export interface SetNamePayload      { name: string; friendCode: string }
 export interface OpponentNamePayload { name: string; friendCode: string }
+export interface OpponentDisconnectedPayload { timestamp: number }
 
 export interface SyncMatchPayload {
   friendCode?: string

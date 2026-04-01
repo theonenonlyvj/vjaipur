@@ -95,7 +95,7 @@ describe('gameStore online mode', () => {
 
   it('startNextRound advances to next round using seeded RNG', () => {
     const state = setupRound([0, 0])
-    useGameStore.setState({ state: { ...state, phase: 'round-end' }, mode: 'online' })
+    useGameStore.setState({ state: { ...state, phase: 'round-end' }, mode: 'online', matchLength: 3 })
     useGameStore.getState().startNextRound(999)
     expect(useGameStore.getState().state?.phase).toBe('playing')
   })

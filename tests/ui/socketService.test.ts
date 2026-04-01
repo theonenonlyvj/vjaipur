@@ -47,8 +47,8 @@ describe('SocketService', () => {
 
   it('quickMatch emits QUICK_MATCH event', () => {
     svc.connect('http://localhost:3001')
-    svc.quickMatch()
-    expect(mockEmit).toHaveBeenCalledWith(EVENTS.QUICK_MATCH)
+    svc.quickMatch(3)
+    expect(mockEmit).toHaveBeenCalledWith(EVENTS.QUICK_MATCH, 3)
   })
 
   it('sendNextRound emits NEXT_ROUND with round number', () => {
@@ -69,13 +69,23 @@ describe('SocketService', () => {
     expect(cb).toHaveBeenCalledWith(action, state)
   })
 
-  it('onRoomReady callback fires with playerIndex and seed', () => {
+  it('createRoom emits CREATE_ROOM event', async () => {
+    svc.connect('http://localhost:3001')
+    mockEmit.mockImplementation((event, ml, cb) => {
+      if (event === EVENTS.CREATE_ROOM) cb('ROOM123')
+    })
+    const code = await svc.createRoom(3)
+    expect(mockEmit).toHaveBeenCalledWith(EVENTS.CREATE_ROOM, 3, expect.any(Function))
+    expect(code).toBe('ROOM123')
+  })
+
+  it('onRoomReady callback fires with playerIndex, seed, and matchLength', () => {
     svc.connect('http://localhost:3001')
     const cb = vi.fn()
     svc.onRoomReady = cb
     const call = mockOn.mock.calls.find(([event]) => event === EVENTS.ROOM_READY)!
-    call[1]({ playerIndex: 1, seed: 42 })
-    expect(cb).toHaveBeenCalledWith(1, 42)
+    call[1]({ playerIndex: 1, seed: 42, matchLength: 3 })
+    expect(cb).toHaveBeenCalledWith(1, 42, 3)
   })
 
   it('disconnect clears socket', () => {

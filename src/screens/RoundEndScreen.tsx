@@ -7,7 +7,7 @@ import { GameScreen } from './GameScreen'
 
 export function RoundEndScreen() {
   const navigate = useNavigate()
-  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName } = useGameStore()
+  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName, matchLength } = useGameStore()
   const [showBoard, setShowBoard] = useState(false)
 
   useEffect(() => {
@@ -38,6 +38,8 @@ export function RoundEndScreen() {
   const myIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
   const p0Name = myIndex === 0 ? (playerName || 'Player 1') : (opponentName || 'Opponent')
   const p1Name = myIndex === 1 ? (playerName || 'Player 2') : (opponentName || 'Opponent')
+
+  const totalSeals = Math.floor(matchLength / 2) + 1
 
   return (
     <div style={{
@@ -107,6 +109,8 @@ export function RoundEndScreen() {
               isWinner={sealAwardedTo === p}
               roundTotal={scores[p]}
               name={p === 0 ? p0Name : p1Name}
+              totalSeals={totalSeals}
+              currentSeals={state.seals[p] + (sealAwardedTo === p ? 1 : 0)}
             />
           ))}
         </div>
