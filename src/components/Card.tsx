@@ -90,7 +90,7 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
         />
         <span style={{
           color: card.type === 'gold' && selected ? '#000' : 'rgba(255,255,255,0.9)',
-          fontSize: size === 'sm' ? 6 : 8,
+          fontSize: size === 'sm' ? 10 : 14,
           fontWeight: 900,
           textAlign: 'center',
           letterSpacing: 1.5,
