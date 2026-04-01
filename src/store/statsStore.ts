@@ -25,6 +25,7 @@ interface StatsActions {
   restoreAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
+  syncFullHistory: () => Promise<void>
   clearHistory: () => void
   clearStats: () => void
 }
@@ -165,6 +166,35 @@ export const useStatsStore = create<StatsStore>()(
           socketService.updateProfile({ friendCode, secretKey, displayName: name })
         } catch (e) {
           console.warn('Could not sync profile name: connection timeout')
+        }
+      },
+
+      syncFullHistory: async () => {
+        const { matches, friendCode, secretKey, displayName } = get()
+        if (!friendCode || !secretKey) return
+
+        try {
+          await waitForConnection()
+          // Send matches in reverse order (oldest first) to preserve sequence
+          const toSync = [...matches].reverse()
+          for (const m of toSync) {
+            socketService.syncMatch({
+              friendCode,
+              secretKey,
+              displayName: displayName || undefined,
+              match: {
+                opponent_type: m.opponent_type,
+                opponent_id: m.opponent_id,
+                player_score: m.player_score,
+                opponent_score: m.opponent_score,
+                won: m.won,
+              }
+            })
+            // Small delay to avoid flooding socket if there are many matches
+            await new Promise(r => setTimeout(r, 50))
+          }
+        } catch (e) {
+          console.error('syncFullHistory failed:', e)
         }
       },
 
