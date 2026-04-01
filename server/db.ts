@@ -40,9 +40,10 @@ export async function getPlayerByCode(friendCode: string) {
     .from('players')
     .select('*')
     .eq('friend_code', friendCode)
-    .single()
-  if (error && error.code !== 'PGRST116') throw error
-  return data
+    .limit(1)
+  
+  if (error) throw error
+  return data && data.length > 0 ? data[0] : null
 }
 
 export async function getPlayerByUsername(username: string) {
@@ -50,9 +51,11 @@ export async function getPlayerByUsername(username: string) {
     .from('players')
     .select('*')
     .ilike('display_name', username)
-    .single()
-  if (error && error.code !== 'PGRST116') throw error
-  return data
+    .order('created_at', { ascending: false })
+    .limit(1)
+  
+  if (error) throw error
+  return data && data.length > 0 ? data[0] : null
 }
 
 export async function updatePlayerToSecured(friendCode: string, username: string, password: string) {
