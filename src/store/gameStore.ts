@@ -66,17 +66,28 @@ function describeAction(name: string, action: Action, state?: GameState): string
     case 'TAKE_EXCHANGE': {
       if (!state) return `${prefix}made an exchange`
       const player = state.players[state.activePlayer]
-      const taken = action.marketIndices
-        .map(i => state.market[i]?.type ?? '?')
-        .join(' and ')
+      
+      const countItems = (items: string[]) => {
+        const counts = new Map<string, number>()
+        for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1)
+        return Array.from(counts.entries()).map(([type, count]) => {
+          const label = count > 1 ? (type === 'spice' ? 'spice' : type + 's') : type
+          return `${count} ${label}`
+        }).join(' and ')
+      }
+
+      const takenTypes = action.marketIndices.map(i => state.market[i]?.type ?? '?')
+      const taken = countItems(takenTypes)
+
       const givenGoods = action.handIndices
         .filter(i => i !== -1)
         .map(i => player.hand[i]?.type ?? '?')
       const camelsGiven = action.handIndices.filter(i => i === -1).length
-      const givenParts = [
-        ...givenGoods,
-        ...(camelsGiven > 0 ? [`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`] : []),
-      ]
+      
+      const givenParts = []
+      if (givenGoods.length > 0) givenParts.push(countItems(givenGoods))
+      if (camelsGiven > 0) givenParts.push(`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`)
+
       return `${prefix}traded ${givenParts.join(' and ')} for ${taken}`
     }
     case 'SELL':
