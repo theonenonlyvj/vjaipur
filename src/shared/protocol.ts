@@ -47,6 +47,7 @@ export interface SyncMatchPayload {
     player_score: number
     opponent_score: number
     won: boolean
+    timestamp: number
   }
 }
 
