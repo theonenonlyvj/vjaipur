@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { useState, useEffect } from 'react'
 import type { Card, CardType } from '../engine'
 
 const BG: Record<CardType, string> = {
@@ -35,9 +36,25 @@ interface Props {
 }
 
 export function CardView({ card, selected = false, onClick, size = 'md' }: Props) {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 480)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
   const label = card.type.toUpperCase()
-  const w = size === 'sm' ? 58 : 75
-  const h = size === 'sm' ? 82 : 105
+  
+  // Base dimensions
+  const baseW = size === 'sm' ? 58 : 75
+  const baseH = size === 'sm' ? 82 : 105
+
+  // Apply 10% reduction on mobile
+  const w = isMobile ? baseW * 0.9 : baseW
+  const h = isMobile ? baseH * 0.9 : baseH
+
   return (
     <motion.div
       layoutId={`card-${card.id}`}
@@ -76,21 +93,21 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
       <div style={{
         zIndex: 2,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: size === 'sm' ? 4 : 8,
+        padding: size === 'sm' ? 4 : (isMobile ? 6 : 8),
       }}>
         <img 
           src={ICON_URLS[card.type]} 
           alt={card.type}
           style={{
-            width: size === 'sm' ? 24 : 36,
-            height: size === 'sm' ? 24 : 36,
-            marginBottom: size === 'sm' ? 2 : 6,
+            width: size === 'sm' ? 24 : (isMobile ? 32 : 36),
+            height: size === 'sm' ? 24 : (isMobile ? 32 : 36),
+            marginBottom: size === 'sm' ? 2 : (isMobile ? 4 : 6),
             pointerEvents: 'none',
           }}
         />
         <span style={{
           color: card.type === 'gold' && selected ? '#000' : 'rgba(255,255,255,0.9)',
-          fontSize: size === 'sm' ? 10 : 14,
+          fontSize: size === 'sm' ? 10 : (isMobile ? 12 : 14),
           fontWeight: 900,
           textAlign: 'center',
           letterSpacing: 1.5,

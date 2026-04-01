@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import type { Card } from '../engine'
 import { CardView } from './Card'
@@ -15,6 +15,15 @@ interface Props {
 }
 
 export function HandRow({ hand, inExchange, selectedIndices, camelsUsed, herd, onToggleSelect, onUseHerdCamel, onRemoveCamel }: Props) {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 480)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
   const availableCamels = herd - camelsUsed
 
   if (hand.length === 0 && !inExchange) {
@@ -26,7 +35,7 @@ export function HandRow({ hand, inExchange, selectedIndices, camelsUsed, herd, o
   }
 
   return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 0', minHeight: 116, alignItems: 'center' }}>
+    <div style={{ display: 'flex', gap: isMobile ? 8 : 12, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 0', minHeight: 116, alignItems: 'center' }}>
       <AnimatePresence mode="popLayout">
         {hand.map((card, i) => {
           const selected = selectedIndices.includes(i)
