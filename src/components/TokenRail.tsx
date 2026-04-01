@@ -70,12 +70,12 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
       gap: 4,
     }}>
       <span style={{ 
-        fontSize: 10, 
-        color: '#fff', 
+        fontSize: 8, 
+        color: '#888', 
         fontWeight: 900, 
         textTransform: 'uppercase', 
-        letterSpacing: 1.5,
-        opacity: isEmpty ? 0.4 : 0.9,
+        letterSpacing: 1,
+        opacity: isEmpty ? 0.4 : 1,
       }}>
         {label}
       </span>
@@ -104,7 +104,7 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
           <StarGrid tier={tier} />
         ) : (
           <div style={{ 
-            fontSize: 18, fontWeight: 900, color: '#fff', 
+            fontSize: 22, fontWeight: 900, color: '#fff', 
             zIndex: 1,
             display: 'flex',
             alignItems: 'center',
@@ -115,7 +115,7 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
           </div>
         )}
       </div>
-      <span style={{ fontSize: 10, color: '#888', fontWeight: 'bold', opacity: isEmpty ? 0.5 : 1 }}>×{count}</span>
+      <span style={{ fontSize: 12, color: '#888', fontWeight: '900', opacity: isEmpty ? 0.5 : 1 }}>×{count}</span>
     </div>
   )
 }
