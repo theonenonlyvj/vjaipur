@@ -192,7 +192,6 @@ io.on('connection', (socket) => {
         secretKey: player.secret_key
       })
     } catch (error) {
-...
       console.error('RESTORE_ACCOUNT error:', error)
       cb({ ok: false, error: 'Internal server error' })
     }
