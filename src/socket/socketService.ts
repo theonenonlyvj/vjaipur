@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -30,8 +30,8 @@ export class SocketService {
     this.socket.on(EVENTS.ROUND_START, (data: { seed: number }) => {
       this.onRoundStart?.(data.seed)
     })
-    this.socket.on(EVENTS.OPPONENT_DISCONNECTED, () => {
-      this.onOpponentDisconnected?.()
+    this.socket.on(EVENTS.OPPONENT_DISCONNECTED, (data: OpponentDisconnectedPayload) => {
+      this.onOpponentDisconnected?.(data)
     })
     this.socket.on(EVENTS.OPPONENT_RECONNECTED, () => {
       this.onOpponentReconnected?.()
@@ -136,11 +136,15 @@ export class SocketService {
     this.socket?.emit(EVENTS.UPDATE_PROFILE, payload)
   }
 
+  forceForfeit(): void {
+    this.socket?.emit(EVENTS.FORCE_FORFEIT)
+  }
+
   // Callbacks — wired by gameStore
   onRoomReady: ((playerIndex: 0 | 1, seed: number) => void) | null = null
   onOpponentAction: ((action: Action, state?: GameState) => void) | null = null
   onRoundStart: ((seed: number) => void) | null = null
-  onOpponentDisconnected: (() => void) | null = null
+  onOpponentDisconnected: ((data: OpponentDisconnectedPayload) => void) | null = null
   onOpponentReconnected: (() => void) | null = null
   onForfeit: (() => void) | null = null
   onConnect: (() => void) | null = null
