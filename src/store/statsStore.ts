@@ -108,10 +108,14 @@ export const useStatsStore = create<StatsStore>()(
           matches: [newMatch, ...state.matches],
         }))
 
+        const isGuest = displayName?.startsWith('Guest_')
+
         // Sync with server
         const payload: SyncMatchPayload = {
           friendCode,
           secretKey,
+          username: !isGuest ? displayName! : undefined,
+          password: !isGuest ? secretKey : undefined,
           displayName: displayName || undefined,
           match: {
             opponent_type: newMatch.opponent_type,
@@ -189,15 +193,21 @@ export const useStatsStore = create<StatsStore>()(
           }
           if (ack.ok && ack.matches) cloudMatches = ack.matches
 
-          const cloudTimestamps = new Set(cloudMatches.map(m => m.timestamp))
+          const cloudTimestamps = new Set(cloudMatches.map(m => 
+            typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
+          ))
 
           // Only sync matches that DON'T exist in the cloud
-          const toSync = matches.filter(m => !cloudTimestamps.has(m.timestamp)).reverse()
-          
+          const toSync = matches.filter(m => {
+            const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
+            return !cloudTimestamps.has(ts)
+          }).reverse()
           for (const m of toSync) {
             socketService.syncMatch({
               friendCode,
               secretKey,
+              username: !isGuest ? displayName! : undefined,
+              password: !isGuest ? secretKey : undefined,
               displayName: displayName || undefined,
               match: {
                 opponent_type: m.opponent_type,
@@ -208,9 +218,12 @@ export const useStatsStore = create<StatsStore>()(
                 timestamp: m.timestamp,
               }
             })
+            // Small delay to avoid flooding socket if there are many matches
             await new Promise(r => setTimeout(r, 50))
           }
-          
+
+          // Wait a bit to ensure DB inserts are processed
+          await new Promise(r => setTimeout(r, 1000))
           // Refresh local state with the final merged set from cloud
           await get().pullFullHistory()
         } catch (e) {
@@ -240,8 +253,25 @@ export const useStatsStore = create<StatsStore>()(
           }
 
           if (ack.ok && ack.matches) {
+            const cloudMatches = ack.matches
+            const cloudTimestamps = new Set(cloudMatches.map(m => 
+              typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
+            ))
+            
+            const localMatches = get().matches
+            const unsyncedLocal = localMatches.filter(m => {
+               const localTs = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
+               return !cloudTimestamps.has(localTs)
+            })
+
+            const merged = [...unsyncedLocal, ...cloudMatches].sort((a, b) => {
+                 const tA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp
+                 const tB = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp
+                 return tB - tA
+            })
+
             set({ 
-              matches: ack.matches,
+              matches: merged,
               displayName: ack.displayName || get().displayName,
               friendCode: ack.friendCode || get().friendCode,
               secretKey: ack.secretKey || get().secretKey,
