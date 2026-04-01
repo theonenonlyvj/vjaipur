@@ -41,6 +41,7 @@ export interface GameState {
   market: Card[]                       // always 5 cards (goods or camels)
   deck: Card[]                         // face-down draw pile
   discard: Card[]                      // sold cards, face-up; used by UI and AI reasoning
+  revealedHands: [number[], number[]]  // IDs of cards known to be in each player's hand (taken from market)
   players: [PlayerState, PlayerState]
   tokens: TokenPiles                   // board token piles (remaining)
   bonusTokens: BonusPiles              // board bonus token piles (remaining)

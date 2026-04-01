@@ -75,11 +75,15 @@ function takeSingle(state: GameState, marketIndex: number): Result<GameState> {
   }
 
   const newPlayer = { ...player, hand: sortHand([...player.hand, card]) }
+  const newRevealed = [...state.revealedHands]
+  newRevealed[state.activePlayer] = [...newRevealed[state.activePlayer], card.id]
+
   const next: GameState = {
     ...state,
     market: newMarket,
     deck: newDeck,
     players: setPlayer(state, newPlayer),
+    revealedHands: newRevealed as [number[], number[]],
     activePlayer: nextPlayer(state),
   }
   return { ok: true, value: checkRoundEnd(next) }
@@ -206,10 +210,17 @@ function takeExchange(
     herd: player.herd - camelsUsed,
   }
 
+  const newRevealed = [...state.revealedHands]
+  const pRev = new Set(newRevealed[state.activePlayer])
+  returnedIds.forEach(id => pRev.delete(id))
+  takenFromMarket.forEach(c => pRev.add(c.id))
+  newRevealed[state.activePlayer] = Array.from(pRev)
+
   const next: GameState = {
     ...state,
     market: newMarket,
     players: setPlayer(state, newPlayer),
+    revealedHands: newRevealed as [number[], number[]],
     activePlayer: nextPlayer(state),
   }
   return { ok: true, value: checkRoundEnd(next) }
@@ -265,6 +276,13 @@ function sell(state: GameState, good: Good, quantity: number): Result<GameState>
     players: setPlayer(state, newPlayer),
     tokens: { ...state.tokens, [good]: tokenPile },
     bonusTokens: newBonusPiles,
+    revealedHands: (() => {
+      const rev = [...state.revealedHands]
+      const pRev = new Set(rev[state.activePlayer])
+      soldIds.forEach(id => pRev.delete(id))
+      rev[state.activePlayer] = Array.from(pRev)
+      return rev as [number[], number[]]
+    })(),
     activePlayer: nextPlayer(state),
   }
   return { ok: true, value: checkRoundEnd(next) }
