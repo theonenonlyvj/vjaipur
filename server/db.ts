@@ -18,6 +18,7 @@ export interface Match {
   player_score: number
   opponent_score: number
   won: boolean
+  timestamp?: number
 }
 
 export async function createPlayer(friendCode: string, secretKey: string, displayName?: string) {
@@ -36,7 +37,18 @@ export async function createPlayer(friendCode: string, secretKey: string, displa
 }
 
 export async function recordMatch(match: Match) {
-  const { error } = await supabase.from('matches').insert([match])
+  const payload: any = {
+    player_id: match.player_id,
+    opponent_type: match.opponent_type,
+    opponent_id: match.opponent_id,
+    player_score: match.player_score,
+    opponent_score: match.opponent_score,
+    won: match.won,
+  }
+  if (match.timestamp) {
+    payload.timestamp = new Date(match.timestamp).toISOString()
+  }
+  const { error } = await supabase.from('matches').insert([payload])
   if (error) throw error
 }
 
