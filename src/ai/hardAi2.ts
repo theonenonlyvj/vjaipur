@@ -133,21 +133,31 @@ function fairifyState(state: GameState, myIndex: 0 | 1): GameState {
   const me = state.players[myIndex]
   const opp = state.players[oppIndex]
   
-  // 1. Identify all known cards
+  // 1. Identify all cards that are definitively NOT in the deck or opponent's hand
   const knownIds = new Set<number>()
   me.hand.forEach(c => knownIds.add(c.id))
   state.market.forEach(c => knownIds.add(c.id))
   state.discard.forEach(c => knownIds.add(c.id))
   
+  // 2. Identify cards that are definitively IN the opponent's hand (taken from market)
+  const oppRevealedIds = new Set(state.revealedHands[oppIndex])
   const allCards = createDeck()
-  const unknownCards = allCards.filter(c => !knownIds.has(c.id))
   
-  const pool = shuffle(unknownCards)
+  // pool = cards that are either in the deck or were dealt to opponent at start (never revealed)
+  const unknownPool = allCards.filter(c => !knownIds.has(c.id) && !oppRevealedIds.has(c.id))
+  const shuffledPool = shuffle(unknownPool)
   
-  const oppHandSize = opp.hand.length
-  const goodsPool = pool.filter(c => c.type !== 'camel')
-  const fairOppHand = sortHand(goodsPool.slice(0, oppHandSize))
-  const fairDeck = pool.filter(c => !fairOppHand.find(hc => hc.id === c.id))
+  // 3. Reconstruct opponent's hand
+  // Start with cards we KNOW they have
+  const confirmedOppHand = allCards.filter(c => oppRevealedIds.has(c.id))
+  
+  // Fill the rest of their hand with random cards from the unknown pool
+  const missingCount = opp.hand.length - confirmedOppHand.length
+  const randomOppHand = shuffledPool.slice(0, missingCount)
+  const fairOppHand = sortHand([...confirmedOppHand, ...randomOppHand])
+  
+  // 4. Reconstruct the deck with whatever is left
+  const fairDeck = shuffledPool.slice(missingCount)
 
   return {
     ...state,

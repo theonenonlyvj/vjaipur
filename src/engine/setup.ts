@@ -85,6 +85,7 @@ export function setupRound(
     market,
     deck,
     discard: [],
+    revealedHands: [[], []],
     players: [p0, p1],
     tokens: initialTokenPiles(),
     bonusTokens: initialBonusPiles(rng),
