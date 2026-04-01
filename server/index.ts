@@ -74,10 +74,11 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on(EVENTS.ACTION, (action: unknown) => {
+  socket.on(EVENTS.ACTION, (data: ActionPayload) => {
     const room = rm.getRoomBySocket(socket.id)
     if (!room) return
-    socket.to(room.code).emit(EVENTS.OPPONENT_ACTION, { action })
+    room.state = data.state
+    socket.to(room.code).emit(EVENTS.OPPONENT_ACTION, { action: data.action, state: data.state })
   })
 
   socket.on(EVENTS.NEXT_ROUND, (round: number) => {
@@ -91,10 +92,12 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.REJOIN, (data: RejoinPayload, cb: (ack: RejoinAck) => void) => {
     const code = data.code.toUpperCase()
+    const room = rm.rooms.get(code)
+    if (!room) { cb({ ok: false }); return }
     const ok = rm.rejoinRoom(socket.id, code, data.playerIndex)
     if (!ok) { cb({ ok: false }); return }
     socket.join(code)
-    cb({ ok: true, playerIndex: data.playerIndex })
+    cb({ ok: true, playerIndex: data.playerIndex, state: room.state })
     socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
   })
 
@@ -140,13 +143,17 @@ io.on('connection', (socket) => {
       }
 
       // Exact deduplication check using client-side timestamp
+      const incomingTs = typeof data.match.timestamp === 'string' 
+        ? new Date(data.match.timestamp).getTime() 
+        : data.match.timestamp;
+
       const existingMatches = await getPlayerMatches(player.id)
       const isDuplicate = existingMatches?.some(m => 
         m.opponent_type === data.match.opponent_type &&
         m.opponent_id === (data.match.opponent_id || null) &&
         m.player_score === data.match.player_score &&
         m.opponent_score === data.match.opponent_score &&
-        new Date(m.timestamp).getTime() === data.match.timestamp
+        new Date(m.timestamp).getTime() === incomingTs
       )
 
       if (isDuplicate) {
@@ -244,14 +251,30 @@ io.on('connection', (socket) => {
     const code = room.code
     const playerIndex = rm.getPlayerIndex(socket.id)
     const opponentId = rm.getOpponentId(socket.id)
-    rm.markDisconnected(socket.id)
+    
+    // Notify opponent immediately
     if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_DISCONNECTED)
+    
     if (playerIndex !== null) {
       rm.startDisconnectTimer(code, playerIndex, () => {
-        if (opponentId) io.to(opponentId).emit(EVENTS.FORFEIT)
+        // TIMER EXPIRED: Check if opponent is still there to receive the win
+        const currentRoom = rm.rooms.get(code)
+        if (!currentRoom) return
+
+        const opponentIndex = 1 - playerIndex
+        const actualOpponentId = currentRoom.players[opponentIndex]
+        
+        // Only declare forfeit if the opponent is actually connected!
+        if (actualOpponentId) {
+          io.to(actualOpponentId).emit(EVENTS.FORFEIT)
+        }
+        
         rm.removeRoom(code)
       })
     }
+    
+    // Mark this specific socket as gone AFTER starting timer
+    rm.markDisconnected(socket.id)
   })
 })
 

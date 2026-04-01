@@ -1,3 +1,5 @@
+import type { GameState } from '../src/engine/types'
+
 function randomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
@@ -8,6 +10,7 @@ export interface Room {
   players: [string | null, string | null]
   status: 'waiting' | 'playing'
   lastRoundSeeded: number
+  state: GameState | null
   disconnectTimers: [ReturnType<typeof setTimeout> | null, ReturnType<typeof setTimeout> | null]
 }
 
@@ -24,6 +27,7 @@ export class RoomManager {
       players: [socketId, null],
       status: 'waiting',
       lastRoundSeeded: 0,
+      state: null,
       disconnectTimers: [null, null],
     })
     this.socketToRoom.set(socketId, code)

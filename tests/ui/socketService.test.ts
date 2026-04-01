@@ -40,8 +40,9 @@ describe('SocketService', () => {
   it('sendAction emits ACTION event', () => {
     svc.connect('http://localhost:3001')
     const action = { type: 'TAKE_CAMELS' as const }
-    svc.sendAction(action)
-    expect(mockEmit).toHaveBeenCalledWith(EVENTS.ACTION, action)
+    const state = { phase: 'playing' } as any
+    svc.sendAction(action, state)
+    expect(mockEmit).toHaveBeenCalledWith(EVENTS.ACTION, { action, state })
   })
 
   it('quickMatch emits QUICK_MATCH event', () => {
@@ -61,10 +62,11 @@ describe('SocketService', () => {
     const cb = vi.fn()
     svc.onOpponentAction = cb
     const action = { type: 'TAKE_CAMELS' as const }
+    const state = { phase: 'playing' } as any
     // Get the handler registered for OPPONENT_ACTION and call it
     const call = mockOn.mock.calls.find(([event]) => event === EVENTS.OPPONENT_ACTION)!
-    call[1]({ action })
-    expect(cb).toHaveBeenCalledWith(action)
+    call[1]({ action, state })
+    expect(cb).toHaveBeenCalledWith(action, state)
   })
 
   it('onRoomReady callback fires with playerIndex and seed', () => {

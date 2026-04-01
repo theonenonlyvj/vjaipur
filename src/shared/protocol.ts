@@ -1,4 +1,4 @@
-import type { Action } from '../engine'
+import type { Action, GameState } from '../engine'
 
 export const EVENTS = {
   // Client → Server
@@ -27,11 +27,12 @@ export const EVENTS = {
 export type EventName = typeof EVENTS[keyof typeof EVENTS]
 
 export interface RoomReadyPayload    { playerIndex: 0 | 1; seed: number }
-export interface OpponentActionPayload { action: Action }
+export interface ActionPayload       { action: Action; state: GameState }
+export interface OpponentActionPayload { action: Action; state?: GameState }
 export interface RoundStartPayload   { seed: number }
 export interface JoinRoomAck         { ok: boolean; error?: string; playerIndex?: 0 | 1 }
 export interface RejoinPayload       { code: string; playerIndex: 0 | 1 }
-export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1 }
+export interface RejoinAck           { ok: boolean; playerIndex?: 0 | 1; state?: GameState | null }
 export interface SetNamePayload      { name: string; friendCode: string }
 export interface OpponentNamePayload { name: string; friendCode: string }
 
@@ -77,3 +78,5 @@ export interface SecureAccountAck {
   ok: boolean
   error?: string
 }
+
+export type { GameState }

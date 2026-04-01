@@ -37,7 +37,7 @@ export interface GameStore {
   nextRound: () => void
   clearError: () => void
   joinOnline: (variant: 'create' | 'join' | 'quick', code?: string) => Promise<void>
-  receiveOpponentAction: (action: Action) => void
+  receiveOpponentAction: (action: Action, syncedState?: GameState) => void
   startNextRound: (seed: number) => void
   setOnlineStatus: (status: OnlineStatus) => void
   disconnectOnline: () => void
@@ -150,9 +150,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const result = applyAction(state, action)
     if (!result.ok) { set({ error: result.error }); return }
 
-    if (mode === 'online') socketService.sendAction(action)
-
     const next = result.value
+    if (mode === 'online') socketService.sendAction(action, next)
 
     if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
       set({ state: next, error: null, lastMoveDescription: playerDesc })
@@ -243,7 +242,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const { mode, roomCode, onlinePlayerIndex } = get()
       // Reconnect: only attempt rejoin when a game is active
       if (mode === 'online' && roomCode !== null && onlinePlayerIndex !== null) {
-        socketService.rejoin(roomCode, onlinePlayerIndex).catch(() => {
+        socketService.rejoin(roomCode, onlinePlayerIndex).then((ack) => {
+          if (ack.ok && ack.state) {
+            set({ state: ack.state, onlineStatus: 'playing' })
+          }
+        }).catch(() => {
           set({ onlineStatus: 'forfeited' })
         })
       }
@@ -262,11 +265,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   },
 
-  receiveOpponentAction: (action) => {
+  receiveOpponentAction: (action: Action, syncedState?: GameState) => {
     const { state } = get()
     if (!state) return
     const result = applyAction(state, action)
-    if (result.ok) set({ state: result.value, error: null, lastMoveDescription: describeAction(action, state) })
+    if (result.ok) {
+      set({ 
+        state: syncedState || result.value, 
+        error: null, 
+        lastMoveDescription: describeAction(action, state) 
+      })
+    }
   },
 
   startNextRound: (seed) => {
