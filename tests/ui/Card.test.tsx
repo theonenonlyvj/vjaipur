@@ -27,7 +27,7 @@ describe('CardView', () => {
     const { container } = render(<CardView card={{ id: 1, type: 'gold' }} selected />)
     const div = container.firstChild as HTMLElement
     expect(div.style.border).toContain('3px solid')
-    expect(div.style.boxShadow).toContain('0 10px 30px')
+    expect(div.style.boxShadow).toContain('0 0 30px rgba(240, 192, 48, 0.6)')
   })
 
   it('has normal border when selected=false', () => {
