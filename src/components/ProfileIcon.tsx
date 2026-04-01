@@ -47,6 +47,5 @@ const circleStyle = (isGuest?: boolean): CSSProperties => ({
   justifyContent: 'center',
   fontSize: 20,
   fontWeight: 900,
-  boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
   transition: 'transform 0.2s',
 })

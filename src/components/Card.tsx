@@ -16,9 +16,9 @@ const ICON_URLS: Record<CardType, string> = {
   diamond: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F48E.svg',
   gold:    'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F4B0.svg',
   silver:  'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/2694.svg',
-  cloth:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F457.svg',
-  spice:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F33F.svg',
-  leather: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F45E.svg',
+  cloth:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F97B.svg',
+  spice:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F966.svg',
+  leather: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F462.svg',
   camel:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F42A.svg',
 }
 
