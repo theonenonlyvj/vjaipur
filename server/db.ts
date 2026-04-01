@@ -104,7 +104,7 @@ export async function getPlayerMatches(playerId: string) {
       .from('matches')
       .select('*')
       .eq('player_id', playerId)
-      .order('created_at', { ascending: false })
+      .order('timestamp', { ascending: false })
     if (error) throw error
     return data
   } catch (err) {
