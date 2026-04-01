@@ -104,7 +104,7 @@ function Token({ good, tier, value, count }: { good?: Good, tier?: 'three' | 'fo
           <StarGrid tier={tier} />
         ) : (
           <div style={{ 
-            fontSize: 14, fontWeight: 900, color: '#fff', 
+            fontSize: 18, fontWeight: 900, color: '#fff', 
             zIndex: 1,
             display: 'flex',
             alignItems: 'center',
