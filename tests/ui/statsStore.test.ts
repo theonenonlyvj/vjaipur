@@ -80,7 +80,10 @@ describe('statsStore', () => {
     expect(socketService.syncMatch).toHaveBeenCalledWith(expect.objectContaining({
       friendCode: state.friendCode,
       secretKey: state.secretKey,
-      match: matchData,
+      match: expect.objectContaining({
+        ...matchData,
+        timestamp: expect.any(Number)
+      }),
     }))
   })
 
