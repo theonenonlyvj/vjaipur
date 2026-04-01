@@ -12,6 +12,7 @@ import { useStatsStore } from './statsStore'
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3'
+export type MatchLength = 1 | 3 | 5
 
 export interface GameStore {
   state: GameState | null
@@ -21,6 +22,7 @@ export interface GameStore {
   roomCode: string | null
   onlineStatus: OnlineStatus
   difficulty: Difficulty
+  matchLength: MatchLength
   aiThinking: boolean
   muted: boolean
   lastMoveDescription: string | null
@@ -28,6 +30,7 @@ export interface GameStore {
   playerName: string
   opponentName: string | null
   opponentFriendCode: string | null
+  disconnectTimestamp: number | null
   matchScores: [number, number]
   setPlayerName: (name: string) => void
   toggleMute: () => void
@@ -41,24 +44,27 @@ export interface GameStore {
   startNextRound: (seed: number) => void
   setOnlineStatus: (status: OnlineStatus) => void
   disconnectOnline: () => void
+  forceForfeit: () => void
   setDifficulty: (d: Difficulty) => void
+  setMatchLength: (l: MatchLength) => void
   startTutorial: () => void
   endTutorial: () => void
   clearMatches: () => void
 }
 
-function describeAction(action: Action, state?: GameState): string {
+function describeAction(name: string, action: Action, state?: GameState): string {
+  const prefix = `${name.toUpperCase()}: `
   switch (action.type) {
     case 'TAKE_SINGLE': {
       const type = state?.market[action.marketIndex]?.type ?? 'card'
-      return `took a ${type}`
+      return `${prefix}took a ${type}`
     }
     case 'TAKE_CAMELS': {
       const count = state ? state.market.filter(c => c.type === 'camel').length : 1
-      return `took ${count} camel${count === 1 ? '' : 's'}`
+      return `${prefix}took ${count} camel${count === 1 ? '' : 's'}`
     }
     case 'TAKE_EXCHANGE': {
-      if (!state) return 'made an exchange'
+      if (!state) return `${prefix}made an exchange`
       const player = state.players[state.activePlayer]
       const taken = action.marketIndices
         .map(i => state.market[i]?.type ?? '?')
@@ -71,10 +77,10 @@ function describeAction(action: Action, state?: GameState): string {
         ...givenGoods,
         ...(camelsGiven > 0 ? [`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`] : []),
       ]
-      return `traded ${givenParts.join(' and ')} for ${taken}`
+      return `${prefix}traded ${givenParts.join(' and ')} for ${taken}`
     }
     case 'SELL':
-      return `sold ${action.quantity} ${action.good}`
+      return `${prefix}sold ${action.quantity} ${action.good}`
   }
 }
 
@@ -103,7 +109,7 @@ function runAi(
           set({ aiThinking: false }); return
         }
         const aiResult = applyAction(cur, aiAction)
-        if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction(aiAction, cur) })
+        if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', aiAction, cur) })
         else set({ aiThinking: false })
       })
     return
@@ -114,7 +120,7 @@ function runAi(
     : pickEasyAction(next)
   if (aiAction) {
     const aiResult = applyAction(next, aiAction)
-    if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction(aiAction, next) }); return }
+    if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction('AI', aiAction, next) }); return }
   }
   set({ state: next, error: null })
 }
@@ -127,6 +133,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   roomCode: null,
   onlineStatus: 'idle',
   difficulty: 'easy',
+  matchLength: 1,
   aiThinking: false,
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
   lastMoveDescription: null,
@@ -134,6 +141,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   playerName: useStatsStore.getState().ensureAccount().displayName || '',
   opponentName: null,
   opponentFriendCode: null,
+  disconnectTimestamp: null,
   matchScores: [0, 0],
 
   startGame: (mode) => {
@@ -145,7 +153,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!state) return
     if (mode === 'online' && state.activePlayer !== onlinePlayerIndex) return
 
-    const playerDesc = describeAction(action, state)
+    const playerDesc = describeAction('YOU', action, state)
 
     const result = applyAction(state, action)
     if (!result.ok) { set({ error: result.error }); return }
@@ -182,7 +190,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       get().matchScores[1] + result.scores[1],
     ]
 
-    if (newSeals[0] >= 2 || newSeals[1] >= 2) {
+    const { matchLength } = get()
+    const sealsNeeded = Math.floor(matchLength / 2) + 1
+
+    if (newSeals[0] >= sealsNeeded || newSeals[1] >= sealsNeeded) {
       const isGameOver = true
       set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
 
@@ -218,11 +229,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
     socketService.connect(url)
 
-    socketService.onRoomReady = (playerIndex, seed) => {
+    socketService.onRoomReady = (playerIndex, seed, serverMatchLength) => {
       const rng = mulberry32(seed)
       set({
         state: setupRound([0, 0], undefined, rng),
         mode: 'online',
+        matchLength: serverMatchLength as MatchLength,
         onlinePlayerIndex: playerIndex,
         onlineStatus: 'playing',
         error: null,
@@ -233,11 +245,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (playerName) socketService.sendName(playerName, useStatsStore.getState().friendCode || '')
     }
     socketService.onOpponentName = (data) => set({ opponentName: data.name, opponentFriendCode: data.friendCode })
-    socketService.onOpponentAction = (action) => get().receiveOpponentAction(action)
+    socketService.onOpponentAction = (action, syncedState) => get().receiveOpponentAction(action, syncedState)
     socketService.onRoundStart = (seed) => get().startNextRound(seed)
-    socketService.onOpponentDisconnected = () => set({ onlineStatus: 'opponent-disconnected' })
-    socketService.onOpponentReconnected = () => set({ onlineStatus: 'playing' })
-    socketService.onForfeit = () => set({ onlineStatus: 'forfeited' })
+    socketService.onOpponentDisconnected = (data) => set({ onlineStatus: 'opponent-disconnected', disconnectTimestamp: data.timestamp })
+    socketService.onOpponentReconnected = () => set({ onlineStatus: 'playing', disconnectTimestamp: null })
+    socketService.onForfeit = () => set({ onlineStatus: 'forfeited', disconnectTimestamp: null })
     socketService.onConnect = () => {
       const { mode, roomCode, onlinePlayerIndex } = get()
       // Reconnect: only attempt rejoin when a game is active
@@ -253,27 +265,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     if (variant === 'create') {
-      const newCode = await socketService.createRoom()
+      const { matchLength } = get()
+      const newCode = await socketService.createRoom(matchLength)
       set({ roomCode: newCode, onlineStatus: 'waiting' })
     } else if (variant === 'join') {
       if (!code) throw new Error('Code required for join')
       await socketService.joinRoom(code)
       set({ roomCode: code.toUpperCase(), onlineStatus: 'waiting' })
     } else {
-      socketService.quickMatch()
+      const { matchLength } = get()
+      socketService.quickMatch(matchLength)
       set({ onlineStatus: 'waiting' })
     }
   },
 
   receiveOpponentAction: (action: Action, syncedState?: GameState) => {
-    const { state } = get()
+    const { state, opponentName } = get()
     if (!state) return
     const result = applyAction(state, action)
     if (result.ok) {
+      const oppDesc = describeAction(opponentName || 'Opponent', action, state)
       set({ 
         state: syncedState || result.value, 
         error: null, 
-        lastMoveDescription: describeAction(action, state) 
+        lastMoveDescription: oppDesc 
       })
     }
   },
@@ -292,7 +307,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       get().matchScores[1] + result.scores[1],
     ]
 
-    if (newSeals[0] >= 2 || newSeals[1] >= 2) {
+    const { matchLength } = get()
+    const sealsNeeded = Math.floor(matchLength / 2) + 1
+
+    if (newSeals[0] >= sealsNeeded || newSeals[1] >= sealsNeeded) {
       set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
 
       // Record match
@@ -319,6 +337,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setOnlineStatus: (status) => set({ onlineStatus: status }),
 
   setDifficulty: (d) => set({ difficulty: d }),
+  setMatchLength: (l) => set({ matchLength: l }),
 
   startTutorial: () => set({ tutorial: true }),
   endTutorial: () => set({ tutorial: false }),
@@ -347,7 +366,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onForfeit = null
     socketService.onConnect = null
     socketService.onOpponentName = null
-    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, lastMoveDescription: null })
+    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, opponentFriendCode: null, disconnectTimestamp: null, lastMoveDescription: null })
+  },
+
+  forceForfeit: () => {
+    socketService.forceForfeit()
   },
 }))
 

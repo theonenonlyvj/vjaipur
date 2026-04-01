@@ -6,7 +6,7 @@ import { GameScreen } from './GameScreen'
 
 export function GameOverScreen() {
   const navigate = useNavigate()
-  const { state, mode, difficulty, matchScores, opponentName, opponentFriendCode, disconnectOnline, lastMoveDescription } = useGameStore()
+  const { state, mode, difficulty, matchScores, opponentName, opponentFriendCode, disconnectOnline, lastMoveDescription, matchLength } = useGameStore()
   const matches = useStatsStore(s => s.matches)
   const [showBoard, setShowBoard] = useState(false)
 
@@ -120,7 +120,7 @@ export function GameOverScreen() {
                     {isPlayer ? 'You' : oppLabel}
                   </div>
                   <div style={{ fontSize: 32, letterSpacing: 6, margin: '8px 0', color: isWinner ? '#f0c030' : '#444' }}>
-                    {'★'.repeat(state.seals[p])}{'☆'.repeat(2 - state.seals[p])}
+                    {'★'.repeat(state.seals[p])}{'☆'.repeat((Math.floor(matchLength / 2) + 1) - state.seals[p])}
                   </div>
                   <div style={{ fontSize: 24, fontWeight: 900, color: isWinner ? '#f0e8d8' : '#888' }}>{matchScores[p]} <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.6 }}>PTS</span></div>
                 </div>

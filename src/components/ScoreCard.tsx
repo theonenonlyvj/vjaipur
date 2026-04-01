@@ -8,9 +8,11 @@ interface ScoreCardProps {
   isWinner: boolean
   roundTotal: number
   name?: string
+  totalSeals: number
+  currentSeals: number
 }
 
-export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, roundTotal, name }: ScoreCardProps) {
+export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, roundTotal, name, totalSeals, currentSeals }: ScoreCardProps) {
   const goodsBreakdown = playerState.tokens.reduce((acc, t) => {
     if (!acc[t.good]) acc[t.good] = { count: 0, total: 0 }
     acc[t.good].count++
@@ -73,6 +75,9 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>
           {name || `Player ${playerIndex + 1}`}
+        </div>
+        <div style={{ fontSize: 24, letterSpacing: 4, marginBottom: 8, color: '#f0c030' }}>
+          {'★'.repeat(currentSeals)}{'☆'.repeat(totalSeals - currentSeals)}
         </div>
         <div style={{ fontSize: 56, fontWeight: 900, color: '#f0c030', lineHeight: 1 }}>
           {roundTotal}

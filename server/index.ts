@@ -27,8 +27,8 @@ const rm = new RoomManager()
 
 io.on('connection', (socket) => {
 
-  socket.on(EVENTS.CREATE_ROOM, (cb: (code: string) => void) => {
-    const code = rm.createRoom(socket.id)
+  socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb: (code: string) => void) => {
+    const code = rm.createRoom(socket.id, matchLength)
     socket.join(code)
     cb(code)
   })
@@ -43,8 +43,8 @@ io.on('connection', (socket) => {
     const room = rm.getRoomBySocket(socket.id)!
     const player0Id = room.players[0]!
     const player0Socket = io.sockets.sockets.get(player0Id)
-    io.to(player0Id).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed })
-    socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed })
+    io.to(player0Id).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
+    socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
     // Exchange names if already set
     const name0 = (player0Socket as any)?._playerName as string | undefined
     const name1 = (socket as any)._playerName as string | undefined
@@ -52,10 +52,11 @@ io.on('connection', (socket) => {
     if (name1) io.to(player0Id).emit(EVENTS.OPPONENT_NAME, { name: name1 })
   })
 
-  socket.on(EVENTS.QUICK_MATCH, () => {
-    const result = rm.quickMatch(socket.id)
+  socket.on(EVENTS.QUICK_MATCH, (matchLength: number) => {
+    const result = rm.quickMatch(socket.id, matchLength)
     if (result.matched) {
       const { code, opponentId } = result
+      const room = rm.rooms.get(code)!
       const opponentSocket = io.sockets.sockets.get(opponentId)
       if (!opponentSocket) {
         rm.removeRoom(code)
@@ -64,8 +65,8 @@ io.on('connection', (socket) => {
       socket.join(code)
       opponentSocket.join(code)
       const seed = (Math.random() * 2 ** 32) >>> 0
-      io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed })
-      socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed })
+      io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
+      socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
       // Exchange names if already set
       const nameOpp = (opponentSocket as any)._playerName as string | undefined
       const nameMe = (socket as any)._playerName as string | undefined
@@ -245,6 +246,20 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on(EVENTS.FORCE_FORFEIT, () => {
+    const room = rm.getRoomBySocket(socket.id)
+    if (!room) return
+    const myIndex = rm.getPlayerIndex(socket.id)
+    if (myIndex === null) return
+    const opponentIndex = 1 - myIndex
+    
+    // Safety check: is the opponent actually disconnected?
+    if (room.players[opponentIndex] === null) {
+      socket.emit(EVENTS.FORFEIT)
+      rm.removeRoom(room.code)
+    }
+  })
+
   socket.on('disconnect', () => {
     const room = rm.getRoomBySocket(socket.id)
     if (!room) return
@@ -253,7 +268,7 @@ io.on('connection', (socket) => {
     const opponentId = rm.getOpponentId(socket.id)
     
     // Notify opponent immediately
-    if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_DISCONNECTED)
+    if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_DISCONNECTED, { timestamp: Date.now() })
     
     if (playerIndex !== null) {
       rm.startDisconnectTimer(code, playerIndex, () => {

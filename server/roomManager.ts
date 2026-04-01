@@ -11,6 +11,7 @@ export interface Room {
   status: 'waiting' | 'playing'
   lastRoundSeeded: number
   state: GameState | null
+  matchLength: number
   disconnectTimers: [ReturnType<typeof setTimeout> | null, ReturnType<typeof setTimeout> | null]
 }
 
@@ -19,7 +20,7 @@ export class RoomManager {
   private socketToRoom = new Map<string, string>()
   quickMatchQueue: string[] = []
 
-  createRoom(socketId: string): string {
+  createRoom(socketId: string, matchLength: number = 1): string {
     let code = randomCode()
     while (this.rooms.has(code)) code = randomCode()
     this.rooms.set(code, {
@@ -28,6 +29,7 @@ export class RoomManager {
       status: 'waiting',
       lastRoundSeeded: 0,
       state: null,
+      matchLength,
       disconnectTimers: [null, null],
     })
     this.socketToRoom.set(socketId, code)
@@ -46,10 +48,10 @@ export class RoomManager {
     return { playerIndex: 1 }
   }
 
-  quickMatch(socketId: string): { matched: false } | { matched: true; code: string; opponentId: string } {
+  quickMatch(socketId: string, matchLength: number = 1): { matched: false } | { matched: true; code: string; opponentId: string } {
     if (this.quickMatchQueue.length > 0) {
       const opponentId = this.quickMatchQueue.shift()!
-      const code = this.createRoom(opponentId)
+      const code = this.createRoom(opponentId, matchLength)
       const result = this.joinRoom(socketId, code)
       if ('error' in result) return { matched: false }
       return { matched: true, code, opponentId }
@@ -109,7 +111,7 @@ export class RoomManager {
     room.disconnectTimers[playerIndex] = setTimeout(() => {
       room.disconnectTimers[playerIndex] = null
       onForfeit()
-    }, 60_000)
+    }, 180_000) // 3 minutes
   }
 
   cancelDisconnectTimer(code: string, playerIndex: 0 | 1): void {

@@ -20,7 +20,7 @@ export interface GameScreenProps {
 }
 
 export function GameScreen({ frozen = false }: GameScreenProps) {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
 
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
@@ -170,9 +170,9 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
         <span>Round {state.round}</span>
         <span style={{ color: '#d0a860' }}>
-          P1 {'★'.repeat(state.seals[0])}{'☆'.repeat(2 - state.seals[0])}
+          P1 {'★'.repeat(state.seals[0])}{'☆'.repeat((Math.floor(matchLength / 2) + 1) - state.seals[0])}
           {' · '}
-          P2 {'★'.repeat(state.seals[1])}{'☆'.repeat(2 - state.seals[1])}
+          P2 {'★'.repeat(state.seals[1])}{'☆'.repeat((Math.floor(matchLength / 2) + 1) - state.seals[1])}
         </span>
         <span>Deck: {state.deck.length}</span>
         {!frozen && <MuteButton />}
@@ -214,11 +214,10 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       )}
 
       {(aiThinking || lastMoveDescription) && (
-        <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic' }}>
+        <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic', minHeight: '20px', opacity: 0.8 }}>
           {aiThinking
             ? 'AI is thinking…'
-            : `${mode === 'vs-ai' ? 'AI' : mode === 'online' ? (opponentName || 'Opponent') : `Player ${opponentIndex + 1}`}: ${lastMoveDescription}`
-          }
+            : lastMoveDescription}
         </div>
       )}
 
