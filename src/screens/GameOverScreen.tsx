@@ -12,7 +12,8 @@ export function GameOverScreen() {
 
   if (!state || state.phase !== 'game-over') return <Navigate to="/" replace />
 
-  const winner: 0 | 1 = state.seals[0] >= 2 ? 0 : 1
+  const sealsNeeded = Math.floor(matchLength / 2) + 1
+  const winner: 0 | 1 = state.seals[0] >= sealsNeeded ? 0 : 1
   const playerIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
   
   const playerScore = matchScores[playerIndex]
