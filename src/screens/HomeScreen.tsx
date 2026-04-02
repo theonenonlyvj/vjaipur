@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { useStatsStore } from '../store/statsStore'
@@ -94,18 +94,6 @@ export function HomeScreen() {
       <StatsStrip onClick={() => setShowStats(true)} />
     </div>
   )
-}
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  fontSize: 18,
-  background: '#111',
-  color: '#fff',
-  border: '2px solid #444',
-  borderRadius: 8,
-  padding: '12px',
-  textAlign: 'center',
-  outline: 'none',
 }
 
 const btnStyle: CSSProperties = {
