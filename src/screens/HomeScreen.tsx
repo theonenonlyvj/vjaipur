@@ -11,20 +11,13 @@ import type { Difficulty } from '../store/gameStore'
 
 export function HomeScreen() {
   const navigate = useNavigate()
-  const { startGame, setDifficulty, startTutorial, matchLength, setMatchLength } = useGameStore()
+  const { startGame, setDifficulty, matchLength, setMatchLength } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
 
   function handleDifficulty(d: Difficulty) {
     setDifficulty(d)
-    startGame('vs-ai')
-    navigate('/game')
-  }
-
-  function handleTutorial() {
-    setDifficulty('easy')
-    startTutorial()
     startGame('vs-ai')
     navigate('/game')
   }
@@ -89,7 +82,7 @@ export function HomeScreen() {
           </button>
           
           <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-            <button onClick={handleTutorial} style={secondaryBtnStyle}>
+            <button onClick={() => navigate('/rules')} style={secondaryBtnStyle}>
               How to Play
             </button>
           </div>
