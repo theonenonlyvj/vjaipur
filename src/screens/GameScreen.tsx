@@ -12,6 +12,7 @@ import { DisconnectBanner } from '../components/DisconnectBanner'
 import { MuteButton } from '../components/MuteButton'
 import { BonusReveal } from '../components/BonusReveal'
 import { TutorialOverlay } from '../components/TutorialOverlay'
+import { RulesModal } from '../components/RulesModal'
 import { useSoundEffects } from '../hooks/useSoundEffects'
 import type { Good } from '../engine'
 
@@ -24,6 +25,7 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
 
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
+  const [showRules, setShowRules] = useState(false)
   const [showBonusReveal, setShowBonusReveal] = useState(false)
   const prevBonusCountRef = useRef(0)
 
@@ -175,7 +177,19 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat((Math.floor(matchLength / 2) + 1) - state.seals[1])}
         </span>
         <span>Deck: {state.deck.length}</span>
-        {!frozen && <MuteButton />}
+        {!frozen && (
+          <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button
+              onClick={() => setShowRules(true)}
+              aria-label="Rules"
+              title="How to Play"
+              style={{ background: 'none', border: 'none', color: '#f0c030', fontSize: 16, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+            >
+              📖
+            </button>
+            <MuteButton />
+          </span>
+        )}
       </div>
 
       <OpponentStrip
@@ -247,6 +261,7 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       {!frozen && <Toast message={error?.message ?? null} onDismiss={clearError} />}
 
       {!frozen && tutorial && <TutorialOverlay onDone={endTutorial} />}
+      {!frozen && showRules && <RulesModal onClose={() => setShowRules(false)} />}
     </div>
   )
 }
