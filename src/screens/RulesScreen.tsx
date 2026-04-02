@@ -20,6 +20,7 @@ export function RulesScreen() {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
+      maxWidth: 620, margin: '0 auto', width: '100%',
       background: 'radial-gradient(circle at 50% 50%, #1a0a00 0%, #000000 100%)',
     }}>
       {/* Header */}
@@ -169,9 +170,9 @@ const sectionBodyStyle: CSSProperties = {
 
 const tutorialBtnStyle: CSSProperties = {
   padding: '14px 40px', fontSize: 16, fontWeight: 900,
-  background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
-  color: '#f0e8d8',
-  border: '2px solid #f0c030', borderRadius: 12,
+  background: 'linear-gradient(to bottom, #306010, #1a4000)',
+  color: '#e0f0d0',
+  border: '2px solid #60c040', borderRadius: 12,
   cursor: 'pointer', letterSpacing: 1,
   textTransform: 'uppercase',
   minWidth: 220,
