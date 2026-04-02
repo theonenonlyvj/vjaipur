@@ -85,7 +85,7 @@ function GameplayTab() {
         On your turn you can do one of three things: take 1 good card from the market, take all camel cards from the market, or exchange 2+ cards between the market and your hand.
       </Section>
       <Section title="The Market">
-        5 cards sit in the center. When you take cards, the market is replenished from the deck.
+        5 cards sit in the center. When you take cards, the market is replenished from a 55-card deck: 44 goods (6 diamond, 6 gold, 6 silver, 8 cloth, 8 spice, 10 leather) and 11 camels.
       </Section>
       <Section title="Hand Limit">
         You can hold a maximum of 7 goods cards. Camels go to your herd and don't count toward this limit.
