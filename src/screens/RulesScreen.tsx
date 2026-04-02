@@ -20,7 +20,7 @@ export function RulesScreen() {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
-      maxWidth: 620, margin: '0 auto', width: '100%',
+      maxWidth: 760, margin: '0 auto', width: '100%',
       background: 'radial-gradient(circle at 50% 50%, #1a0a00 0%, #000000 100%)',
     }}>
       {/* Header */}
@@ -47,7 +47,8 @@ export function RulesScreen() {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px 120px' }}>
+      <style>{`.rules-content::-webkit-scrollbar { display: none; }`}</style>
+      <div className="rules-content" style={{ flex: 1, overflow: 'auto', padding: '20px 24px 120px', scrollbarWidth: 'none' }}>
         {tab === 'gameplay' && <GameplayTab />}
         {tab === 'scoring' && <ScoringTab />}
         {tab === 'strategy' && <StrategyTab />}
