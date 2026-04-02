@@ -45,7 +45,10 @@ export function CamelStack({ herd, camelsUsed, inExchange, onUseHerdCamel, onRem
   const layerCount = herd === 1 ? 0 : herd === 2 ? 1 : 2
 
   const handleStackClick = () => {
-    if (inExchange && !showControls) setShowControls(true)
+    if (inExchange && available > 0) {
+      if (!showControls) setShowControls(true)
+      onUseHerdCamel()
+    }
   }
 
   const layerStyle = (offset: number): CSSProperties => ({
@@ -163,12 +166,12 @@ export function CamelStack({ herd, camelsUsed, inExchange, onUseHerdCamel, onRem
             }}
           >
             <span style={{ fontSize: 16, fontWeight: 700 }}>+</span>
-            <span style={{ fontSize: 10, color: '#aaa' }}>(use 1)</span>
+            <span style={{ fontSize: 14, color: '#fff', fontWeight: 700 }}>{camelsUsed} used</span>
           </button>
           {camelsUsed > 0 && (
             <button onClick={onRemoveCamel} style={{ ...ctrlBtn, background: '#4a2010', borderColor: '#c08040' }}>
               <span style={{ fontSize: 16, fontWeight: 700 }}>-</span>
-              <span style={{ fontSize: 10, color: '#aaa' }}>(remove 1)</span>
+              <span style={{ fontSize: 14, color: '#fff', fontWeight: 700 }}>{available} remaining</span>
             </button>
           )}
         </div>

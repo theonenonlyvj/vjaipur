@@ -39,7 +39,7 @@ describe('CamelStack', () => {
     )
     fireEvent.click(screen.getByTestId('camel-stack'))
     expect(screen.getByText('+')).toBeInTheDocument()
-    expect(screen.getByText('(use 1)')).toBeInTheDocument()
+    expect(screen.getByText(/used/)).toBeInTheDocument()
   })
 
   it('hides - button when camelsUsed is 0', () => {
@@ -47,7 +47,7 @@ describe('CamelStack', () => {
       <CamelStack herd={3} camelsUsed={0} inExchange={true} onUseHerdCamel={noop} onRemoveCamel={noop} />
     )
     fireEvent.click(screen.getByTestId('camel-stack'))
-    expect(screen.queryByText('(remove 1)')).toBeNull()
+    expect(screen.queryByText(/remaining/)).toBeNull()
   })
 
   it('shows - button when camelsUsed > 0', () => {
@@ -55,17 +55,18 @@ describe('CamelStack', () => {
       <CamelStack herd={3} camelsUsed={1} inExchange={true} onUseHerdCamel={noop} onRemoveCamel={noop} />
     )
     fireEvent.click(screen.getByTestId('camel-stack'))
-    expect(screen.getByText('(remove 1)')).toBeInTheDocument()
+    expect(screen.getByText('2 remaining')).toBeInTheDocument()
   })
 
-  it('calls onUseHerdCamel when + is clicked', () => {
+  it('calls onUseHerdCamel when stack is tapped and when + is clicked', () => {
     const onUse = vi.fn()
     render(
       <CamelStack herd={3} camelsUsed={0} inExchange={true} onUseHerdCamel={onUse} onRemoveCamel={noop} />
     )
     fireEvent.click(screen.getByTestId('camel-stack'))
+    expect(onUse).toHaveBeenCalledTimes(1) // tap auto-selects 1
     fireEvent.click(screen.getByText('+'))
-    expect(onUse).toHaveBeenCalledOnce()
+    expect(onUse).toHaveBeenCalledTimes(2) // + adds another
   })
 
   it('calls onRemoveCamel when - is clicked', () => {
@@ -116,7 +117,7 @@ describe('CamelStack', () => {
       <CamelStack herd={3} camelsUsed={1} inExchange={true} onUseHerdCamel={noop} onRemoveCamel={noop} />
     )
     expect(screen.getByText('+')).toBeInTheDocument()
-    expect(screen.getByText('(remove 1)')).toBeInTheDocument()
+    expect(screen.getByText('2 remaining')).toBeInTheDocument()
   })
 
   it('controls disappear when exchange ends', () => {
