@@ -24,8 +24,7 @@ export function RulesScreen() {
       background: 'radial-gradient(circle at 50% 50%, #1a0a00 0%, #000000 100%)',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', gap: 16 }}>
-        <button onClick={() => navigate('/')} style={backBtnStyle}>← Back</button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 20px' }}>
         <h1 style={{ fontSize: 20, fontWeight: 900, color: '#f0c030', margin: 0, letterSpacing: 2 }}>HOW TO PLAY</h1>
       </div>
 
@@ -59,8 +58,11 @@ export function RulesScreen() {
         position: 'fixed', bottom: 0, left: 0, right: 0,
         padding: '16px 24px 32px',
         background: 'linear-gradient(transparent, #000 40%)',
-        display: 'flex', justifyContent: 'center',
+        display: 'flex', justifyContent: 'center', gap: 12, alignItems: 'center',
       }}>
+        <button onClick={() => navigate('/')} style={backBtnStyle}>
+          ← Back
+        </button>
         <button onClick={handleStartTutorial} style={tutorialBtnStyle}>
           Start Tutorial
         </button>
