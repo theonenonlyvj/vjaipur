@@ -177,7 +177,25 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
     }
   }
 
-  // 8. Sell timing pressure — opponent may sell first
+  // 8. Market-context "almost sellable" — value cards one away from sellable
+  for (const card of state.market) {
+    if (card.type === 'camel') continue
+    const good = card.type as Good
+    const topValue = state.tokens[good][0] ?? 0
+    if (topValue === 0) continue
+    const myCount = goodCount(me.hand, good)
+    // I have N-1 and matching card is in market → strong (can complete next turn)
+    if (myCount === MIN_SELL[good] - 1) {
+      score += topValue * (PRECIOUS.has(good) ? 2.2 : 1.2)
+    }
+    // Opponent threat: they're one away from sellable
+    const oppEff = tracker.opponentEffective(good, unaccounted)
+    if (oppEff >= MIN_SELL[good] - 1 && oppEff < MIN_SELL[good]) {
+      score -= topValue * (PRECIOUS.has(good) ? 1.4 : 0.6)
+    }
+  }
+
+  // 9. Sell timing pressure — opponent may sell first
   for (const good of GOOD_ORDER) {
     const pile = state.tokens[good] as readonly number[]
     const oppEffective = tracker.opponentEffective(good, unaccounted)
@@ -217,6 +235,10 @@ function orderActions(actions: Action[], state: GameState, myIndex: 0 | 1): Acti
   return [...actions].sort((a, b) => priority(b) - priority(a))
 }
 
+// NOTE: applyAction uses the actual deck order for market replenishment during search.
+// A true fair bot would use expectimax (probability-weighted over possible draws) instead.
+// This is a known limitation — the bot still "sees" deck order in the search tree.
+// Future enhancement: replace applyAction in inner nodes with probability-weighted sampling.
 function alphabeta(
   state: GameState,
   depth: number,
