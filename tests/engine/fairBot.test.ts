@@ -1,6 +1,48 @@
 import { describe, it, expect } from 'vitest'
-import { OpponentTracker } from '../../src/ai/fairBot'
-import type { Card, Good } from '../../src/engine/types'
+import { OpponentTracker, pickFairBotAction } from '../../src/ai/fairBot'
+import type { Card, Good, GameState, TokenPiles } from '../../src/engine/types'
+import { setupRound, initialBonusPiles } from '../../src/engine/setup'
+
+const PAD_DECK: Card[] = [
+  { id: 100, type: 'leather' }, { id: 101, type: 'leather' },
+  { id: 102, type: 'cloth' },   { id: 103, type: 'cloth' },
+  { id: 104, type: 'spice' },   { id: 105, type: 'spice' },
+  { id: 106, type: 'leather' }, { id: 107, type: 'leather' },
+  { id: 108, type: 'cloth' },   { id: 109, type: 'cloth' },
+  { id: 110, type: 'spice' },   { id: 111, type: 'spice' },
+]
+
+const FULL_TOKENS: TokenPiles = {
+  diamond: [7, 7, 5, 5, 5],
+  gold:    [6, 6, 5, 5, 5],
+  silver:  [5, 5, 5, 5, 5],
+  cloth:   [5, 3, 3, 2, 2, 1, 1],
+  spice:   [5, 3, 3, 2, 2, 1, 1],
+  leather: [4, 3, 2, 1, 1, 1, 1, 1, 1],
+}
+
+function makeState(
+  market: Card[],
+  aiHand: Card[],
+  tokens: TokenPiles,
+  oppHand: Card[] = [],
+  aiHerd = 0,
+  oppHerd = 0,
+): GameState {
+  const base = setupRound([0, 0], undefined, () => 0)
+  return {
+    ...base,
+    activePlayer: 1,
+    market,
+    deck: PAD_DECK,
+    players: [
+      { ...base.players[0], hand: oppHand, herd: oppHerd },
+      { ...base.players[1], hand: aiHand, herd: aiHerd },
+    ],
+    tokens,
+    bonusTokens: initialBonusPiles(() => 0),
+  }
+}
 
 describe('OpponentTracker', () => {
   it('initializes unknownInHand from opponent hand length', () => {
@@ -78,5 +120,86 @@ describe('OpponentTracker', () => {
     }
     const expected = tracker.expectedInOpponentHand('diamond' as Good, unaccounted)
     expect(expected).toBe(0)
+  })
+})
+
+describe('Fair Bot — decisions with known opponent hand', () => {
+  it('takes diamond to complete a pair when opponent hand is known', () => {
+    const state = makeState(
+      [
+        { id: 1, type: 'cloth' }, { id: 2, type: 'spice' },
+        { id: 3, type: 'leather' }, { id: 4, type: 'gold' },
+        { id: 5, type: 'diamond' },
+      ],
+      [{ id: 6, type: 'diamond' }, { id: 7, type: 'gold' }],
+      FULL_TOKENS,
+    )
+    const tracker = new OpponentTracker(0)
+    const action = pickFairBotAction(state, tracker)
+    expect(action).toMatchObject({ type: 'TAKE_SINGLE', marketIndex: 4 })
+  })
+
+  it('sells diamonds urgently when pile is nearly depleted', () => {
+    const urgentTokens: TokenPiles = { ...FULL_TOKENS, diamond: [7, 7] }
+    const state = makeState(
+      [
+        { id: 1, type: 'cloth' }, { id: 2, type: 'leather' },
+        { id: 3, type: 'spice' }, { id: 4, type: 'gold' },
+        { id: 5, type: 'leather' },
+      ],
+      [{ id: 6, type: 'diamond' }, { id: 7, type: 'diamond' }, { id: 8, type: 'leather' }],
+      urgentTokens,
+      [{ id: 9, type: 'diamond' }, { id: 10, type: 'diamond' }],
+    )
+    const tracker = new OpponentTracker(0)
+    tracker.opponentTookFromMarket({ id: 9, type: 'diamond' })
+    tracker.opponentTookFromMarket({ id: 10, type: 'diamond' })
+    const action = pickFairBotAction(state, tracker)
+    expect(action).toMatchObject({ type: 'SELL', good: 'diamond' })
+  })
+
+  it('makes a reasonable move even with fully unknown opponent hand', () => {
+    const state = makeState(
+      [
+        { id: 1, type: 'cloth' }, { id: 2, type: 'spice' },
+        { id: 3, type: 'leather' }, { id: 4, type: 'gold' },
+        { id: 5, type: 'diamond' },
+      ],
+      [{ id: 6, type: 'diamond' }, { id: 7, type: 'leather' }],
+      FULL_TOKENS,
+      [{ id: 8, type: 'cloth' }, { id: 9, type: 'spice' }, { id: 10, type: 'gold' }],
+    )
+    const tracker = new OpponentTracker(3)
+    const action = pickFairBotAction(state, tracker)
+    expect(action).not.toBeNull()
+    expect(action!.type).toBeDefined()
+  })
+})
+
+describe('Fair Bot — endgame solver', () => {
+  it('sells gold urgently when opponent also holds gold and pile is small', () => {
+    const endgameTokens: TokenPiles = {
+      diamond: [],
+      gold: [6, 5],
+      silver: [5, 5, 5, 5, 5],
+      cloth: [5, 3, 3, 2, 2, 1, 1],
+      spice: [5, 3, 3, 2, 2, 1, 1],
+      leather: [4, 3, 2, 1, 1, 1, 1, 1, 1],
+    }
+    const state = makeState(
+      [
+        { id: 1, type: 'leather' }, { id: 2, type: 'cloth' },
+        { id: 3, type: 'spice' }, { id: 4, type: 'leather' },
+        { id: 5, type: 'camel' },
+      ],
+      [{ id: 6, type: 'gold' }, { id: 7, type: 'gold' }],
+      endgameTokens,
+      [{ id: 8, type: 'gold' }, { id: 9, type: 'gold' }],
+    )
+    const tracker = new OpponentTracker(0)
+    tracker.opponentTookFromMarket({ id: 8, type: 'gold' })
+    tracker.opponentTookFromMarket({ id: 9, type: 'gold' })
+    const action = pickFairBotAction(state, tracker)
+    expect(action).toMatchObject({ type: 'SELL', good: 'gold' })
   })
 })
