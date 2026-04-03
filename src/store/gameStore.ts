@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { GameState, Action, EngineError } from '../engine'
+import type { GameState, Action, EngineError, Card } from '../engine'
 import { applyAction, setupRound, scoreRound } from '../engine'
 import { pickEasyAction } from '../ai/easyAi'
 import { pickMediumAction } from '../ai/mediumAi'
-import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3 } from '../ai/workerBridge'
+import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3, getFairBotWorkerBridge } from '../ai/workerBridge'
 import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
 import { soundService } from '../audio/soundService'
@@ -11,7 +11,7 @@ import { useStatsStore } from './statsStore'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
-export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3'
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3' | 'fair'
 export type MatchLength = 1 | 3 | 5
 
 export interface GameStore {
@@ -32,6 +32,7 @@ export interface GameStore {
   opponentFriendCode: string | null
   disconnectTimestamp: number | null
   matchScores: [number, number]
+  fairBotTracker: { knownInHand: Card[]; unknownInHand: number } | null
   setPlayerName: (name: string) => void
   toggleMute: () => void
 
@@ -103,14 +104,20 @@ function runAi(
   set: (partial: Partial<GameStore>) => void,
   get: () => GameStore,
 ) {
-  if (difficulty === 'hard' || difficulty === 'hard2' || difficulty === 'hard3') {
+  if (difficulty === 'hard' || difficulty === 'hard2' || difficulty === 'hard3' || difficulty === 'fair') {
     const bridge =
+      difficulty === 'fair' ? getFairBotWorkerBridge() :
       difficulty === 'hard3' ? getWorkerBridge3() :
       difficulty === 'hard2' ? getWorkerBridge2() :
       getWorkerBridge()
+
+    const workerData = difficulty === 'fair'
+      ? { state: next, tracker: get().fairBotTracker ?? { knownInHand: [], unknownInHand: 0 } }
+      : next
+
     set({ state: next, error: null, aiThinking: true })
     bridge
-      .getAction(next)
+      .getAction(workerData)
       .then(aiAction => aiAction ?? pickMediumAction(next))
       .catch(() => pickMediumAction(next))
       .then(aiAction => {
@@ -154,9 +161,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
   opponentFriendCode: null,
   disconnectTimestamp: null,
   matchScores: [0, 0],
+  fairBotTracker: null,
 
   startGame: (mode) => {
-    set({ state: setupRound([0, 0]), mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0] })
+    const newState = setupRound([0, 0])
+    set({ state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0] })
+    if (mode === 'vs-ai' && get().difficulty === 'fair') {
+      set({ fairBotTracker: { knownInHand: [], unknownInHand: newState.players[0].hand.length } })
+    } else {
+      set({ fairBotTracker: null })
+    }
   },
 
   dispatch: (action) => {
@@ -171,6 +185,46 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const next = result.value
     if (mode === 'online') socketService.sendAction(action, next)
+
+    // Update fair bot tracker with player's action
+    const { fairBotTracker } = get()
+    if (mode === 'vs-ai' && difficulty === 'fair' && fairBotTracker && state) {
+      const updatedTracker = { ...fairBotTracker, knownInHand: [...fairBotTracker.knownInHand] }
+      if (action.type === 'TAKE_SINGLE') {
+        const card = state.market[action.marketIndex]
+        if (card) updatedTracker.knownInHand.push(card)
+      } else if (action.type === 'TAKE_EXCHANGE') {
+        // Cards leaving player's hand
+        for (const hi of action.handIndices) {
+          if (hi === -1) continue // camel from herd
+          const card = state.players[0].hand[hi]
+          if (card) {
+            const idx = updatedTracker.knownInHand.findIndex(c => c.id === card.id)
+            if (idx >= 0) updatedTracker.knownInHand.splice(idx, 1)
+            else updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - 1)
+          }
+        }
+        // Cards entering player's hand from market
+        for (const mi of action.marketIndices) {
+          const card = state.market[mi]
+          if (card && card.type !== 'camel') updatedTracker.knownInHand.push(card)
+        }
+      } else if (action.type === 'SELL') {
+        const soldType = action.good
+        let remaining = action.quantity
+        const newKnown = [...updatedTracker.knownInHand]
+        for (let i = newKnown.length - 1; i >= 0 && remaining > 0; i--) {
+          if (newKnown[i].type === soldType) {
+            newKnown.splice(i, 1)
+            remaining--
+          }
+        }
+        updatedTracker.knownInHand = newKnown
+        updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - remaining)
+      }
+      // TAKE_CAMELS: no hand change
+      set({ fairBotTracker: updatedTracker })
+    }
 
     if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
       set({ state: next, error: null, lastMoveDescription: playerDesc })
@@ -227,6 +281,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const newRoundState = setupRound(newSeals, loser)
       const { difficulty } = get()
       set({ state: newRoundState, error: null, matchScores: newMatchScores })
+      if (mode === 'vs-ai' && get().difficulty === 'fair') {
+        set({ fairBotTracker: { knownInHand: [], unknownInHand: newRoundState.players[0].hand.length } })
+      }
       if (mode === 'vs-ai' && newRoundState.activePlayer === 1) {
         runAi(newRoundState, difficulty, set, get)
       }
