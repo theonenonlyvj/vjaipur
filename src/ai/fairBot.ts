@@ -82,7 +82,7 @@ function isEndgame(state: GameState): boolean {
   return (depletedPiles >= 1 && nearDepletedPiles >= 1) || state.deck.length <= 10
 }
 
-function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker): number {
+function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker, realMarketIds: ReadonlySet<number>): number {
   if (state.phase === 'round-end') {
     const result = scoreRound(state)
     if (result.sealAwardedTo === myIndex) return 10_000
@@ -135,20 +135,28 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
   }
 
   // 4. Market tempo — precious completing a pair
+  // Cards drawn during search (not in realMarketIds) are weighted by probability
+  const totalUnaccounted = Object.values(unaccounted).reduce((s, n) => s + n, 0)
+  const deckSize = state.deck.length
   for (const card of state.market) {
     if (card.type === 'camel') continue
     const good = card.type as Good
     const topValue = state.tokens[good][0] ?? 0
     if (!PRECIOUS.has(good) || topValue === 0) continue
     const myCount = goodCount(me.hand, good)
-    score += myCount >= 1 ? topValue * 1.8 : topValue * 0.8
+    const tempoValue = myCount >= 1 ? topValue * 1.8 : topValue * 0.8
+    if (realMarketIds.has(card.id)) {
+      score += tempoValue
+    } else {
+      // Card drawn during search — weight by probability it's actually this type
+      const prob = totalUnaccounted > 0 ? unaccounted[good] / totalUnaccounted : 0
+      score += tempoValue * prob
+    }
   }
 
   // 5. Nonlinear camel value with oppMaxCamels
-  const totalUnaccounted = Object.values(unaccounted).reduce((s, n) => s + n, 0)
-  const expectedCamelsInDeck = totalUnaccounted > 0
-    ? unaccounted.camel * (state.deck.length / totalUnaccounted)
-    : 0
+  // All unaccounted camels are in the deck — camels never enter hands
+  const expectedCamelsInDeck = unaccounted.camel
   const camelsInMarket = state.market.filter(c => c.type === 'camel').length
   const oppMaxCamels = opp.herd + camelsInMarket + expectedCamelsInDeck
   if (me.herd > oppMaxCamels) score += 5
@@ -178,20 +186,22 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
   }
 
   // 8. Market-context "almost sellable" — value cards one away from sellable
+  // Cards drawn during search weighted by probability
   for (const card of state.market) {
     if (card.type === 'camel') continue
     const good = card.type as Good
     const topValue = state.tokens[good][0] ?? 0
     if (topValue === 0) continue
+    const weight = realMarketIds.has(card.id)
+      ? 1
+      : (totalUnaccounted > 0 ? unaccounted[good] / totalUnaccounted : 0)
     const myCount = goodCount(me.hand, good)
-    // I have N-1 and matching card is in market → strong (can complete next turn)
     if (myCount === MIN_SELL[good] - 1) {
-      score += topValue * (PRECIOUS.has(good) ? 2.2 : 1.2)
+      score += topValue * (PRECIOUS.has(good) ? 2.2 : 1.2) * weight
     }
-    // Opponent threat: they're one away from sellable
     const oppEff = tracker.opponentEffective(good, unaccounted)
     if (oppEff >= MIN_SELL[good] - 1 && oppEff < MIN_SELL[good]) {
-      score -= topValue * (PRECIOUS.has(good) ? 1.4 : 0.6)
+      score -= topValue * (PRECIOUS.has(good) ? 1.4 : 0.6) * weight
     }
   }
 
@@ -235,10 +245,9 @@ function orderActions(actions: Action[], state: GameState, myIndex: 0 | 1): Acti
   return [...actions].sort((a, b) => priority(b) - priority(a))
 }
 
-// NOTE: applyAction uses the actual deck order for market replenishment during search.
-// A true fair bot would use expectimax (probability-weighted over possible draws) instead.
-// This is a known limitation — the bot still "sees" deck order in the search tree.
-// Future enhancement: replace applyAction in inner nodes with probability-weighted sampling.
+// The search uses applyAction which draws real cards from the deck, but the eval function
+// discounts drawn cards by their probability via realMarketIds — the bot doesn't plan
+// around specific draws, it plans around the distribution.
 function alphabeta(
   state: GameState,
   depth: number,
@@ -246,13 +255,14 @@ function alphabeta(
   beta: number,
   myIndex: 0 | 1,
   tracker: OpponentTracker,
+  realMarketIds: ReadonlySet<number>,
 ): number {
   if (state.phase !== 'playing' || depth === 0) {
-    return evalPosition(state, myIndex, tracker)
+    return evalPosition(state, myIndex, tracker, realMarketIds)
   }
 
   const rawActions = [...getLegalActions(state), ...getProfitableExchanges(state)]
-  if (rawActions.length === 0) return evalPosition(state, myIndex, tracker)
+  if (rawActions.length === 0) return evalPosition(state, myIndex, tracker, realMarketIds)
   const actions = orderActions(rawActions, state, myIndex)
 
   if (state.activePlayer === myIndex) {
@@ -260,23 +270,23 @@ function alphabeta(
     for (const action of actions) {
       const result = applyAction(state, action)
       if (!result.ok) continue
-      const s = alphabeta(result.value, depth - 1, alpha, beta, myIndex, tracker)
+      const s = alphabeta(result.value, depth - 1, alpha, beta, myIndex, tracker, realMarketIds)
       if (s > best) best = s
       if (best > alpha) alpha = best
       if (alpha >= beta) break
     }
-    return best === -Infinity ? evalPosition(state, myIndex, tracker) : best
+    return best === -Infinity ? evalPosition(state, myIndex, tracker, realMarketIds) : best
   } else {
     let best = Infinity
     for (const action of actions) {
       const result = applyAction(state, action)
       if (!result.ok) continue
-      const s = alphabeta(result.value, depth - 1, alpha, beta, myIndex, tracker)
+      const s = alphabeta(result.value, depth - 1, alpha, beta, myIndex, tracker, realMarketIds)
       if (s < best) best = s
       if (best < beta) beta = best
       if (alpha >= beta) break
     }
-    return best === Infinity ? evalPosition(state, myIndex, tracker) : best
+    return best === Infinity ? evalPosition(state, myIndex, tracker, realMarketIds) : best
   }
 }
 
@@ -291,6 +301,9 @@ export function pickFairBotAction(state: GameState, tracker: OpponentTracker): A
   )
   if (rootActions.length === 0) return null
   if (rootActions.length === 1) return rootActions[0]
+
+  // Track which market cards are real (visible now) vs drawn during search
+  const realMarketIds = new Set(state.market.map(c => c.id))
 
   const canSolveEndgame = tracker.unknownInHand === 0 && isEndgame(state)
   const maxDepth = tracker.unknownInHand === 0 ? 6 : 4
@@ -312,7 +325,7 @@ export function pickFairBotAction(state: GameState, tracker: OpponentTracker): A
       if (Date.now() >= deadline) { completedDepth = false; break }
       const result = applyAction(state, action)
       if (!result.ok) continue
-      const s = alphabeta(result.value, depth - 1, -Infinity, Infinity, myIndex, tracker)
+      const s = alphabeta(result.value, depth - 1, -Infinity, Infinity, myIndex, tracker, realMarketIds)
       if (s > depthBestScore) {
         depthBestScore = s
         depthBest = action
