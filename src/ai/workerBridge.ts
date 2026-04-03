@@ -11,7 +11,7 @@ export class WorkerBridge {
     this.timeoutMs = timeoutMs
   }
 
-  getAction(state: GameState): Promise<Action | null> {
+  getAction(data: unknown): Promise<Action | null> {
     return new Promise((resolve, reject) => {
       const worker = this.factory()
 
@@ -32,7 +32,7 @@ export class WorkerBridge {
         reject(e)
       }
 
-      worker.postMessage(state)
+      worker.postMessage(data)
     })
   }
 }
@@ -85,4 +85,21 @@ export function getWorkerBridge3(): WorkerBridge {
 
 export function setWorkerBridge3(bridge: WorkerBridge | null): void {
   _bridge3 = bridge
+}
+
+let _bridgeFair: WorkerBridge | null = null
+
+export function getFairBotWorkerBridge(): WorkerBridge {
+  if (!_bridgeFair) {
+    _bridgeFair = new WorkerBridge(
+      // @ts-ignore
+      () => new Worker(new URL('./fairBotWorker.ts', import.meta.url), { type: 'module' }),
+      15000,
+    )
+  }
+  return _bridgeFair
+}
+
+export function setFairBotWorkerBridge(bridge: WorkerBridge | null): void {
+  _bridgeFair = bridge
 }
