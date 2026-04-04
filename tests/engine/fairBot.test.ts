@@ -240,3 +240,40 @@ describe('Fair Bot — endgame solver', () => {
     expect(action).toMatchObject({ type: 'SELL', good: 'gold' })
   })
 })
+
+describe('Fair Bot — expectimax chance nodes', () => {
+  it('does not cheat: same decision regardless of actual deck order', () => {
+    // Create two identical visible states but with different deck orders.
+    // The fair bot should make the same decision for both since it doesn't see the deck.
+    const state1 = makeState(
+      [
+        { id: 1, type: 'cloth' }, { id: 2, type: 'spice' },
+        { id: 3, type: 'leather' }, { id: 4, type: 'gold' },
+        { id: 5, type: 'diamond' },
+      ],
+      [{ id: 6, type: 'diamond' }, { id: 7, type: 'leather' }],
+      FULL_TOKENS,
+    )
+    // Deck with diamond first
+    const deckA: Card[] = [
+      { id: 50, type: 'diamond' }, { id: 51, type: 'leather' },
+      { id: 52, type: 'cloth' }, { id: 53, type: 'spice' },
+      { id: 54, type: 'leather' }, { id: 55, type: 'cloth' },
+    ]
+    // Deck with leather first
+    const deckB: Card[] = [
+      { id: 50, type: 'leather' }, { id: 51, type: 'diamond' },
+      { id: 52, type: 'cloth' }, { id: 53, type: 'spice' },
+      { id: 54, type: 'leather' }, { id: 55, type: 'cloth' },
+    ]
+    const stateA = { ...state1, deck: deckA }
+    const stateB = { ...state1, deck: deckB }
+
+    const tracker = new OpponentTracker(0)
+    const actionA = pickFairBotAction(stateA, tracker)
+    const actionB = pickFairBotAction(stateB, tracker)
+
+    // Both should make the same decision — the bot is blind to deck order
+    expect(actionA).toEqual(actionB)
+  })
+})
