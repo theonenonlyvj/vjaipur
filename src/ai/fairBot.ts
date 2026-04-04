@@ -126,7 +126,7 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
   // 2. Bonus token differential (x1.5) — own exact, opponent estimated by tier midpoint
   const myBonus = me.bonusTokens.reduce((s, t) => s + t.value, 0)
   const TIER_MIDPOINT: Record<number, number> = { 3: 2, 4: 5, 5: 9 }
-  const oppBonus = opp.bonusTokens.reduce((s, t) => s + (TIER_MIDPOINT[t.tier] ?? t.value), 0)
+  const oppBonus = opp.bonusTokens.reduce((s, t) => s + (TIER_MIDPOINT[t.tier] ?? 0), 0)
   score += (myBonus - oppBonus) * 1.5
 
   // 3. Sellable goods with urgency — uses opponentEffective
