@@ -135,29 +135,22 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
   }
 
   // 4. Market tempo — precious completing a pair
-  // Cards drawn during search (not in realMarketIds) are weighted by probability
-  const totalUnaccounted = Object.values(unaccounted).reduce((s, n) => s + n, 0)
-  const deckSize = state.deck.length
+  // Only evaluate market cards visible at search start — skip drawn cards entirely
   for (const card of state.market) {
+    if (!realMarketIds.has(card.id)) continue
     if (card.type === 'camel') continue
     const good = card.type as Good
     const topValue = state.tokens[good][0] ?? 0
     if (!PRECIOUS.has(good) || topValue === 0) continue
     const myCount = goodCount(me.hand, good)
-    const tempoValue = myCount >= 1 ? topValue * 1.8 : topValue * 0.8
-    if (realMarketIds.has(card.id)) {
-      score += tempoValue
-    } else {
-      // Card drawn during search — weight by probability it's actually this type
-      const prob = totalUnaccounted > 0 ? unaccounted[good] / totalUnaccounted : 0
-      score += tempoValue * prob
-    }
+    score += myCount >= 1 ? topValue * 1.8 : topValue * 0.8
   }
 
   // 5. Nonlinear camel value with oppMaxCamels
   // All unaccounted camels are in the deck — camels never enter hands
   const expectedCamelsInDeck = unaccounted.camel
-  const camelsInMarket = state.market.filter(c => c.type === 'camel').length
+  // Only count camels we can actually see in the market
+  const camelsInMarket = state.market.filter(c => c.type === 'camel' && realMarketIds.has(c.id)).length
   const oppMaxCamels = opp.herd + camelsInMarket + expectedCamelsInDeck
   if (me.herd > oppMaxCamels) score += 5
   else if (me.herd > opp.herd) score += 3
@@ -186,22 +179,20 @@ function evalPosition(state: GameState, myIndex: 0 | 1, tracker: OpponentTracker
   }
 
   // 8. Market-context "almost sellable" — value cards one away from sellable
-  // Cards drawn during search weighted by probability
+  // Only evaluate market cards visible at search start
   for (const card of state.market) {
+    if (!realMarketIds.has(card.id)) continue
     if (card.type === 'camel') continue
     const good = card.type as Good
     const topValue = state.tokens[good][0] ?? 0
     if (topValue === 0) continue
-    const weight = realMarketIds.has(card.id)
-      ? 1
-      : (totalUnaccounted > 0 ? unaccounted[good] / totalUnaccounted : 0)
     const myCount = goodCount(me.hand, good)
     if (myCount === MIN_SELL[good] - 1) {
-      score += topValue * (PRECIOUS.has(good) ? 2.2 : 1.2) * weight
+      score += topValue * (PRECIOUS.has(good) ? 2.2 : 1.2)
     }
     const oppEff = tracker.opponentEffective(good, unaccounted)
     if (oppEff >= MIN_SELL[good] - 1 && oppEff < MIN_SELL[good]) {
-      score -= topValue * (PRECIOUS.has(good) ? 1.4 : 0.6) * weight
+      score -= topValue * (PRECIOUS.has(good) ? 1.4 : 0.6)
     }
   }
 
@@ -250,8 +241,9 @@ function orderActions(actions: Action[], state: GameState, myIndex: 0 | 1): Acti
 //    opponent moves because getLegalActions reads their full hand. The eval uses probability-
 //    weighted opponent holdings instead. Future: hybrid approach — enumerate moves for known
 //    cards, probability-weight moves involving unknown cards.
-// 2. Market draws: applyAction draws deck[0] but eval discounts drawn cards via realMarketIds
-//    probability weighting. The bot plans around the distribution, not the specific draw.
+// 2. Market draws: applyAction draws deck[0] for mechanics, but the eval is completely blind
+//    to drawn cards — any market card not in realMarketIds is skipped entirely. The bot
+//    evaluates positions based only on what a human player could see.
 // 3. When unknownInHand === 0: full alpha-beta (both sides), opponent hand is fully known.
 function alphabeta(
   state: GameState,
