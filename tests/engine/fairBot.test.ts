@@ -125,13 +125,15 @@ describe('OpponentTracker', () => {
 
 describe('Fair Bot — decisions with known opponent hand', () => {
   it('takes diamond to complete a pair when opponent hand is known', () => {
+    // Market has one diamond among low-value goods; AI already holds one diamond.
+    // Taking diamond completes a precious pair — the best move with expectimax.
     const state = makeState(
       [
-        { id: 1, type: 'cloth' }, { id: 2, type: 'spice' },
-        { id: 3, type: 'leather' }, { id: 4, type: 'gold' },
+        { id: 1, type: 'leather' }, { id: 2, type: 'leather' },
+        { id: 3, type: 'leather' }, { id: 4, type: 'leather' },
         { id: 5, type: 'diamond' },
       ],
-      [{ id: 6, type: 'diamond' }, { id: 7, type: 'gold' }],
+      [{ id: 6, type: 'diamond' }, { id: 7, type: 'cloth' }],
       FULL_TOKENS,
     )
     const tracker = new OpponentTracker(0)
