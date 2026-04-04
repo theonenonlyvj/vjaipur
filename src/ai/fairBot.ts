@@ -245,9 +245,14 @@ function orderActions(actions: Action[], state: GameState, myIndex: 0 | 1): Acti
   return [...actions].sort((a, b) => priority(b) - priority(a))
 }
 
-// The search uses applyAction which draws real cards from the deck, but the eval function
-// discounts drawn cards by their probability via realMarketIds — the bot doesn't plan
-// around specific draws, it plans around the distribution.
+// FAIRNESS CONSTRAINTS:
+// 1. When unknownInHand > 0: search is depth-1 only (bot's own moves). We can't simulate
+//    opponent moves because getLegalActions reads their full hand. The eval uses probability-
+//    weighted opponent holdings instead. Future: hybrid approach — enumerate moves for known
+//    cards, probability-weight moves involving unknown cards.
+// 2. Market draws: applyAction draws deck[0] but eval discounts drawn cards via realMarketIds
+//    probability weighting. The bot plans around the distribution, not the specific draw.
+// 3. When unknownInHand === 0: full alpha-beta (both sides), opponent hand is fully known.
 function alphabeta(
   state: GameState,
   depth: number,
@@ -305,12 +310,29 @@ export function pickFairBotAction(state: GameState, tracker: OpponentTracker): A
   // Track which market cards are real (visible now) vs drawn during search
   const realMarketIds = new Set(state.market.map(c => c.id))
 
-  const canSolveEndgame = tracker.unknownInHand === 0 && isEndgame(state)
-  const maxDepth = tracker.unknownInHand === 0 ? 6 : 4
+  // When opponent hand is partially unknown, we can't simulate their moves
+  // (getLegalActions would read their actual hand). Use depth-1 eval only.
+  if (tracker.unknownInHand > 0) {
+    let bestAction = rootActions[0]
+    let bestScore = -Infinity
+    for (const action of rootActions) {
+      const result = applyAction(state, action)
+      if (!result.ok) continue
+      const s = evalPosition(result.value, myIndex, tracker, realMarketIds)
+      if (s > bestScore) {
+        bestScore = s
+        bestAction = action
+      }
+    }
+    return bestAction
+  }
+
+  // Opponent hand fully known — full alpha-beta search
+  const canSolveEndgame = isEndgame(state)
   const normalDeadline = Date.now() + 7000
   const endgameDeadline = Date.now() + 12000
   const deadline = canSolveEndgame ? endgameDeadline : normalDeadline
-  const depthCap = canSolveEndgame ? 99 : maxDepth
+  const depthCap = canSolveEndgame ? 99 : 6
 
   let bestAction = rootActions[0]
 
