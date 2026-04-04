@@ -62,6 +62,26 @@ export class OpponentTracker {
   }
 }
 
+export function combinations(n: number, k: number): number {
+  if (k < 0 || k > n) return 0
+  if (k === 0 || k === n) return 1
+  let result = 1
+  for (let i = 0; i < k; i++) {
+    result = result * (n - i) / (i + 1)
+  }
+  return result
+}
+
+export function hypergeoProbAtLeast(available: number, total: number, draws: number, needed: number): number {
+  if (needed <= 0) return 1
+  if (available < needed || draws < needed) return 0
+  let pFewer = 0
+  for (let k = 0; k < needed; k++) {
+    pFewer += combinations(available, k) * combinations(total - available, draws - k) / combinations(total, draws)
+  }
+  return 1 - pFewer
+}
+
 const GOOD_ORDER: Good[] = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
 const MIN_SELL: Record<Good, number> = {
   diamond: 2, gold: 2, silver: 2, cloth: 1, spice: 1, leather: 1,

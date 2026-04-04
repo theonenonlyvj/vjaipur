@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { OpponentTracker, pickFairBotAction } from '../../src/ai/fairBot'
+import { OpponentTracker, pickFairBotAction, combinations, hypergeoProbAtLeast } from '../../src/ai/fairBot'
 import type { Card, Good, GameState, TokenPiles } from '../../src/engine/types'
 import { setupRound, initialBonusPiles } from '../../src/engine/setup'
 
@@ -173,6 +173,41 @@ describe('Fair Bot — decisions with known opponent hand', () => {
     const action = pickFairBotAction(state, tracker)
     expect(action).not.toBeNull()
     expect(action!.type).toBeDefined()
+  })
+})
+
+describe('Math helpers', () => {
+  it('combinations(5, 2) = 10', () => {
+    expect(combinations(5, 2)).toBe(10)
+  })
+
+  it('combinations(10, 0) = 1', () => {
+    expect(combinations(10, 0)).toBe(1)
+  })
+
+  it('combinations(10, 10) = 1', () => {
+    expect(combinations(10, 10)).toBe(1)
+  })
+
+  it('combinations(3, 5) = 0 (k > n)', () => {
+    expect(combinations(3, 5)).toBe(0)
+  })
+
+  it('hypergeoProbAtLeast: 4 diamonds in pool of 20, draw 3, need 1', () => {
+    const prob = hypergeoProbAtLeast(4, 20, 3, 1)
+    expect(prob).toBeCloseTo(0.509, 2)
+  })
+
+  it('hypergeoProbAtLeast: need 0 → always 1', () => {
+    expect(hypergeoProbAtLeast(0, 20, 3, 0)).toBe(1)
+  })
+
+  it('hypergeoProbAtLeast: need more than available → 0', () => {
+    expect(hypergeoProbAtLeast(1, 20, 3, 2)).toBe(0)
+  })
+
+  it('hypergeoProbAtLeast: need more than draws → 0', () => {
+    expect(hypergeoProbAtLeast(10, 20, 1, 2)).toBe(0)
   })
 })
 
