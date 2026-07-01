@@ -149,3 +149,48 @@ export async function isUsernameAvailable(name: string, excludeFriendCode?: stri
   if (error) throw error
   return count === 0
 }
+
+export interface LeaderboardRow {
+  display_name: string
+  opponent_type: string
+  games: number
+  wins: number
+  avg_delta: number
+}
+
+export async function getLeaderboard(): Promise<LeaderboardRow[]> {
+  const { data: players, error: pe } = await supabase
+    .from('players')
+    .select('id, display_name')
+    .not('display_name', 'like', 'Guest%')
+    .not('display_name', 'is', null)
+  if (pe) throw pe
+  if (!players?.length) return []
+
+  const ids = players.map(p => p.id)
+  const { data: matches, error: me } = await supabase
+    .from('matches')
+    .select('player_id, opponent_type, won, player_score, opponent_score')
+    .in('player_id', ids)
+  if (me) throw me
+  if (!matches?.length) return []
+
+  const nameOf = new Map(players.map(p => [p.id, p.display_name as string]))
+  const agg = new Map<string, { games: number; wins: number; totalDelta: number }>()
+
+  for (const m of matches) {
+    const name = nameOf.get(m.player_id)
+    if (!name) continue
+    const key = `${name}\x00${m.opponent_type}`
+    const s = agg.get(key) ?? { games: 0, wins: 0, totalDelta: 0 }
+    s.games++
+    if (m.won) s.wins++
+    s.totalDelta += (m.player_score - m.opponent_score)
+    agg.set(key, s)
+  }
+
+  return Array.from(agg.entries()).map(([key, s]) => {
+    const [display_name, opponent_type] = key.split('\x00')
+    return { display_name, opponent_type, games: s.games, wins: s.wins, avg_delta: s.totalDelta / s.games }
+  })
+}

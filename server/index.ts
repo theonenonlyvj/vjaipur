@@ -4,9 +4,9 @@ import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
 import { 
-  getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch, 
+  getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch,
   getPlayerMatches, updatePlayerName, isUsernameAvailable, Player,
-  updatePlayerToSecured
+  updatePlayerToSecured, getLeaderboard
 } from './db.js'
 import { EVENTS } from '../src/shared/protocol.js'
 import type { 
@@ -243,6 +243,16 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error('UPDATE_PROFILE error:', error)
+    }
+  })
+
+  socket.on(EVENTS.GET_LEADERBOARD, async (cb: (ack: { ok: boolean; rows: any[] }) => void) => {
+    try {
+      const rows = await getLeaderboard()
+      cb({ ok: true, rows })
+    } catch (e) {
+      console.error('GET_LEADERBOARD error:', e)
+      cb({ ok: false, rows: [] })
     }
   })
 

@@ -15,6 +15,7 @@ export const EVENTS = {
   UPDATE_PROFILE: 'update_profile',
   SECURE_ACCOUNT: 'secure_account',
   FORCE_FORFEIT:  'force_forfeit',
+  GET_LEADERBOARD: 'get_leaderboard',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -79,6 +80,19 @@ export interface SecureAccountPayload {
 export interface SecureAccountAck {
   ok: boolean
   error?: string
+}
+
+export interface LeaderboardRow {
+  display_name: string
+  opponent_type: string
+  games: number
+  wins: number
+  avg_delta: number
+}
+
+export interface LeaderboardAck {
+  ok: boolean
+  rows: LeaderboardRow[]
 }
 
 export type { GameState }
