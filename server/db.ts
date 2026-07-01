@@ -162,7 +162,6 @@ export async function getLeaderboard(): Promise<LeaderboardRow[]> {
   const { data: players, error: pe } = await supabase
     .from('players')
     .select('id, display_name')
-    .not('display_name', 'like', 'Guest%')
     .not('display_name', 'is', null)
   if (pe) throw pe
   if (!players?.length) return []
