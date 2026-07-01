@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -138,6 +138,13 @@ export class SocketService {
 
   forceForfeit(): void {
     this.socket?.emit(EVENTS.FORCE_FORFEIT)
+  }
+
+  getLeaderboard(): Promise<LeaderboardAck> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) return reject(new Error('Not connected'))
+      this.socket.emit(EVENTS.GET_LEADERBOARD, (ack: LeaderboardAck) => resolve(ack))
+    })
   }
 
   // Callbacks — wired by gameStore
