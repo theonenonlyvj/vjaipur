@@ -120,6 +120,7 @@ export const useStatsStore = create<StatsStore>()(
         try {
           const { token, accountId } = await vgamesQuick(secretKey, displayName ?? undefined)
           set({ vgamesToken: token, vgamesAccountId: accountId })
+          socketService.setAuthToken(token)
           return { token, accountId }
         } catch (e) {
           console.warn('ensureVGamesAccount failed:', e)
@@ -170,6 +171,7 @@ export const useStatsStore = create<StatsStore>()(
               vgamesAccountId: result.accountId,
               displayName: username,
             })
+            socketService.setAuthToken(result.token)
             return { ok: true }
           }
           return { ok: false, error: result.error }

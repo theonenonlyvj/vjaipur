@@ -3,19 +3,21 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
-import { 
+import {
   getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch,
   getPlayerMatches, updatePlayerName, isUsernameAvailable, Player,
   updatePlayerToSecured, getLeaderboard
 } from './db.js'
+import { resolveSocketIdentity } from './vgamesAuth.js'
 import { EVENTS } from '../src/shared/protocol.js'
-import type { 
-  RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
+import type {
+  RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload,
   SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
   SecureAccountPayload, SecureAccountAck
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
+const VGAMES_URL = process.env.VGAMES_URL ?? 'https://viota-worker.theonenonlyvj.workers.dev'
 
 const app = express()
 app.use(cors({ origin: ALLOWED_ORIGIN }))
@@ -25,7 +27,15 @@ const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN } })
 const rm = new RoomManager()
 
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
+  // "Join"-time VGames Identity verification (see server/vgamesAuth.ts). A
+  // socket with no token, or an invalid/merged one, simply has no linked
+  // account — it can still play locally/online exactly as before (the room
+  // relay below is untouched); only account-bearing operations (SYNC_MATCH)
+  // require this to have resolved to a real accountId.
+  const handshakeToken = (socket.handshake.auth as { token?: string } | undefined)?.token
+  const identity = await resolveSocketIdentity(handshakeToken, VGAMES_URL)
+  ;(socket as any)._vgamesAccountId = identity?.accountId ?? null
 
   socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb: (code: string) => void) => {
     const code = rm.createRoom(socket.id, matchLength)
@@ -112,8 +122,20 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.SYNC_MATCH, async (data: SyncMatchPayload) => {
     try {
+      // Server-verified identity via VGames /auth/introspect (see
+      // server/vgamesAuth.ts). The old friendCode/secretKey/username/password
+      // fields below are no longer sent by the current client (see Task C2)
+      // and are NOT trusted for identity even if present — that was the
+      // claimable-account hole this migration closes. Provisioning the
+      // Supabase player row from this verified accountId lands in Task C4.
+      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
+      if (!identity) {
+        console.warn('SYNC_MATCH: missing or invalid vgamesToken; dropping match write')
+        return
+      }
+
       let player: Player | null = null
-      
+
       // Try username first if provided
       if (data.username && data.password) {
         player = await getPlayerByUsername(data.username)
@@ -135,7 +157,7 @@ io.on('connection', (socket) => {
       }
 
       if (!player) {
-        console.warn('SYNC_MATCH: No player found/created for identifying data')
+        console.warn('SYNC_MATCH: No player found/created for identifying data (VGames-provisioned lookup lands in Task C4)')
         return
       }
 

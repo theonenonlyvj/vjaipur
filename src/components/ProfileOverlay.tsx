@@ -9,7 +9,7 @@ interface ProfileOverlayProps {
 export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
   useEffect(() => {
     const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url)
+    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
   }, [])
 
   const { displayName, friendCode, secureAccount, restoreAccount, syncFullHistory, clearStats } = useStatsStore()

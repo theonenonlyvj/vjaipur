@@ -16,6 +16,7 @@ vi.mock('socket.io-client', () => ({
   io: vi.fn(() => mockSocket),
 }))
 
+import { io } from 'socket.io-client'
 import { SocketService } from '../../src/socket/socketService'
 import { EVENTS } from '../../src/shared/protocol'
 
@@ -93,5 +94,23 @@ describe('SocketService', () => {
     svc.disconnect()
     expect(mockDisconnect).toHaveBeenCalled()
     expect(svc.connected).toBe(false)
+  })
+
+  it('connect attaches a vgames auth token when provided', () => {
+    svc.connect('http://localhost:3001', 'vg-tok-1')
+    const [, opts] = vi.mocked(io).mock.calls[0]
+    expect((opts as any).auth).toEqual({ token: 'vg-tok-1' })
+  })
+
+  it('connect omits auth.token when no token is provided', () => {
+    svc.connect('http://localhost:3001')
+    const [, opts] = vi.mocked(io).mock.calls[0]
+    expect((opts as any).auth?.token).toBeUndefined()
+  })
+
+  it('setAuthToken updates the auth used for future (re)connections', () => {
+    svc.connect('http://localhost:3001')
+    svc.setAuthToken('vg-tok-2')
+    expect((mockSocket as any).auth).toEqual({ token: 'vg-tok-2' })
   })
 })

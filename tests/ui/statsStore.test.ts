@@ -29,6 +29,7 @@ vi.mock('../../src/socket/socketService', () => ({
     restoreAccount: vi.fn(),
     secureAccount: vi.fn(),
     updateProfile: vi.fn(),
+    setAuthToken: vi.fn(),
   },
 }))
 
