@@ -94,15 +94,20 @@ export async function getPlayerMatches(playerId: string) {
 // pair for match history + the leaderboard during the dual-run phase.
 //
 // Migration note — NOT applied here; apply at cutover (see
-// vgames-platform/docs/RUNBOOK-P1-cutover.md), gated on Vijay's go:
+// vgames-platform/docs/RUNBOOK-P1-cutover.md), gated on Vijay's go. Both
+// statements land in the SAME migration/deploy:
 //   ALTER TABLE players ADD COLUMN vgames_account_id text;
 //   CREATE UNIQUE INDEX IF NOT EXISTS idx_players_vgames_account_id
 //     ON players (vgames_account_id) WHERE vgames_account_id IS NOT NULL;
-// Until that column exists in production, the `.eq('vgames_account_id', ...)`
-// lookup below will error there (undefined column) — acceptable pre-cutover,
-// since live traffic doesn't reach this path until the migration + this
-// deploy both land together. Locally/in tests it's mocked, so this ships
-// ahead of the migration without risk.
+// ensurePlayerForVGames below is upsert-safe: it does a single
+// `.upsert(row, { onConflict: 'vgames_account_id' })` rather than
+// select-then-insert, so it's correct (no TOCTOU double-insert window) as
+// soon as the unique index above exists. Until that column+index exist in
+// production, this path isn't reached at all — live traffic doesn't hit it
+// until the migration + this deploy land together (and Postgres would error
+// resolving ON CONFLICT without the index anyway, which the fail-closed
+// catch below turns into a blocked write, not a bad one). Locally/in tests
+// it's mocked, so this ships ahead of the migration without risk.
 function syntheticFriendCode(accountId: string): string {
   // Cosmetic/legacy-shape only — vgames_account_id is the real key. Kept
   // deterministic (not random) so repeated provisioning of the same account
@@ -123,47 +128,32 @@ function syntheticSecretKey(): string {
 
 /**
  * Idempotently provisions (or finds) the Supabase `players` row for a
- * VGames-verified `accountId`, mirroring `display_name`. Fail-closed: on any
- * lookup/write error this returns null, and callers (SYNC_MATCH) must treat
- * that as "block the write" rather than orphan a match against a missing
- * player row.
+ * VGames-verified `accountId`, mirroring `display_name`. Race-safe: a single
+ * UPSERT keyed on `vgames_account_id` (not select-then-insert), so two
+ * concurrent SYNC_MATCH calls for the same accountId can't double-insert —
+ * correct even without an app-level lock, relying on the DB-level unique
+ * index (see migration note above) to resolve the conflict atomically.
+ * Fail-closed: on any error this returns null, and callers (SYNC_MATCH) must
+ * treat that as "block the write" rather than orphan a match against a
+ * missing player row.
  */
 export async function ensurePlayerForVGames(accountId: string, displayName: string): Promise<Player | null> {
   try {
-    const { data: existing, error: selErr } = await supabase
+    const { data, error } = await supabase
       .from('players')
-      .select('*')
-      .eq('vgames_account_id', accountId)
-      .single()
-
-    if (selErr && selErr.code !== 'PGRST116') throw selErr
-
-    if (existing) {
-      if (displayName && existing.display_name !== displayName) {
-        const { data: updated, error: updErr } = await supabase
-          .from('players')
-          .update({ display_name: displayName })
-          .eq('id', existing.id)
-          .select()
-          .single()
-        if (updErr) throw updErr
-        return updated
-      }
-      return existing
-    }
-
-    const { data: created, error: insErr } = await supabase
-      .from('players')
-      .insert([{
-        vgames_account_id: accountId,
-        display_name: displayName,
-        friend_code: syntheticFriendCode(accountId),
-        secret_key: syntheticSecretKey(),
-      }])
+      .upsert(
+        {
+          vgames_account_id: accountId,
+          display_name: displayName,
+          friend_code: syntheticFriendCode(accountId),
+          secret_key: syntheticSecretKey(),
+        },
+        { onConflict: 'vgames_account_id' },
+      )
       .select()
       .single()
-    if (insErr) throw insErr
-    return created
+    if (error) throw error
+    return data
   } catch (err) {
     console.error('db: ensurePlayerForVGames error:', err)
     return null
