@@ -4,9 +4,9 @@ import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
 import {
-  getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch,
-  getPlayerMatches, updatePlayerName, isUsernameAvailable, Player,
-  updatePlayerToSecured, getLeaderboard
+  getPlayerByCode, createPlayer, recordMatch,
+  getPlayerMatches, updatePlayerName, isUsernameAvailable,
+  ensurePlayerForVGames, getLeaderboard
 } from './db.js'
 import { resolveSocketIdentity } from './vgamesAuth.js'
 import { EVENTS } from '../src/shared/protocol.js'
@@ -124,45 +124,23 @@ io.on('connection', async (socket) => {
     try {
       // Server-verified identity via VGames /auth/introspect (see
       // server/vgamesAuth.ts). The old friendCode/secretKey/username/password
-      // fields below are no longer sent by the current client (see Task C2)
-      // and are NOT trusted for identity even if present — that was the
-      // claimable-account hole this migration closes. Provisioning the
-      // Supabase player row from this verified accountId lands in Task C4.
+      // fields are gone from the wire format (Task C2) and are never trusted
+      // for identity even if a stale client sends them — that trust-the-
+      // client model was the claimable-account hole this migration closes.
       const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
       if (!identity) {
         console.warn('SYNC_MATCH: missing or invalid vgamesToken; dropping match write')
         return
       }
 
-      let player: Player | null = null
-
-      // Try username first if provided
-      if (data.username && data.password) {
-        player = await getPlayerByUsername(data.username)
-        if (player && player.secret_key !== data.password) {
-          console.warn('SYNC_MATCH: Password mismatch for username:', data.username)
-          return
-        }
-      }
-
-      // Fallback to friendCode for guest or if username lookup didn't yield a player
-      if (!player && data.friendCode && data.secretKey) {
-        player = await getPlayerByCode(data.friendCode)
-        if (!player) {
-          player = await createPlayer(data.friendCode, data.secretKey, data.displayName)
-        } else if (player.secret_key !== data.secretKey) {
-          console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
-          return
-        }
-      }
-
+      // Dual-run bridge: find/create the Supabase player row for this
+      // verified accountId (idempotent) so the existing leaderboard/match
+      // history machinery below keeps working unchanged. Fail-closed: a
+      // broken provisioning step blocks the write instead of orphaning it.
+      const player = await ensurePlayerForVGames(identity.accountId, data.displayName || 'Guest')
       if (!player) {
-        console.warn('SYNC_MATCH: No player found/created for identifying data (VGames-provisioned lookup lands in Task C4)')
+        console.error('SYNC_MATCH: provisioning failed for account', identity.accountId, '- blocking write')
         return
-      }
-
-      if (data.displayName && player.display_name !== data.displayName) {
-        await updatePlayerName(player.id, data.displayName)
       }
 
       // Exact deduplication check using client-side timestamp
@@ -197,52 +175,20 @@ io.on('connection', async (socket) => {
     }
   })
 
-  socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
-    try {
-      console.log('RESTORE_ACCOUNT attempt for:', data.username || data.friendCode)
-      let player: Player | null = null
-      
-      if (data.username && data.password) {
-        player = await getPlayerByUsername(data.username)
-      } else if (data.friendCode && data.secretKey) {
-        player = await getPlayerByCode(data.friendCode)
-      }
-
-      if (!player || player.secret_key !== (data.password || data.secretKey)) {
-        console.warn('RESTORE_ACCOUNT: Invalid credentials for:', data.username || data.friendCode)
-        cb({ ok: false, error: 'Invalid credentials' })
-        return
-      }
-      const matches = await getPlayerMatches(player.id)
-      cb({ 
-        ok: true, 
-        matches: matches || [], 
-        displayName: player.display_name,
-        friendCode: player.friend_code,
-        secretKey: player.secret_key
-      })
-    } catch (error) {
-      console.error('RESTORE_ACCOUNT error:', error)
-      cb({ ok: false, error: 'Internal server error' })
-    }
+  // DELETED (Task C4): these used to compare/return plaintext secret_key
+  // over the wire, and SECURE_ACCOUNT in particular let anyone who could
+  // guess a friendCode overwrite that account's credentials with no proof of
+  // ownership — the live claimable-account hole. Replaced by the VGames
+  // Identity worker's POST /auth/login and /auth/set-credentials (Bearer
+  // JWT), consumed directly by the client (see src/store/statsStore.ts).
+  // Handlers are kept registered, responding `gone`, purely so a
+  // not-yet-upgraded client gets a clean rejection instead of a silent hang.
+  socket.on(EVENTS.RESTORE_ACCOUNT, (_data: RestoreAccountPayload, cb?: (ack: RestoreAccountAck) => void) => {
+    cb?.({ ok: false, error: 'gone' })
   })
 
-  socket.on(EVENTS.SECURE_ACCOUNT, async (data: SecureAccountPayload, cb: (ack: SecureAccountAck) => void) => {
-    try {
-      console.log('SECURE_ACCOUNT attempt for friendCode:', data.friendCode, 'to username:', data.username)
-      const available = await isUsernameAvailable(data.username, data.friendCode)
-      if (!available) {
-        console.warn('SECURE_ACCOUNT: Username already taken:', data.username)
-        cb({ ok: false, error: 'Username already taken' })
-        return
-      }
-
-      await updatePlayerToSecured(data.friendCode, data.username, data.password)
-      cb({ ok: true })
-    } catch (error) {
-      console.error('SECURE_ACCOUNT error:', error)
-      cb({ ok: false, error: 'Internal server error' })
-    }
+  socket.on(EVENTS.SECURE_ACCOUNT, (_data: SecureAccountPayload, cb?: (ack: SecureAccountAck) => void) => {
+    cb?.({ ok: false, error: 'gone' })
   })
 
   socket.on(EVENTS.CHECK_USERNAME, async (data: { name: string }, cb: (ack: { available: boolean }) => void) => {
