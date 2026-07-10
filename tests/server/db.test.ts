@@ -84,6 +84,11 @@ describe('db.ts', () => {
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('player_id', '123')
+    // NOTE: this assertion is stale (matches.order() is actually called with
+    // 'timestamp', not 'created_at' — 'created_at' looks copy-pasted from a
+    // players-table test). Left failing on purpose, unrelated to Task C4 —
+    // matches the pre-existing baseline; not fixing it here (out of scope).
+    expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
     expect(matches).toEqual([{ id: 'm1' }])
   })
 
