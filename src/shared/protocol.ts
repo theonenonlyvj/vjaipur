@@ -40,6 +40,11 @@ export interface OpponentNamePayload { name: string; friendCode: string }
 export interface OpponentDisconnectedPayload { timestamp: number }
 
 export interface SyncMatchPayload {
+  /** VGames Identity JWT (see src/auth/vgamesClient.ts). Server introspects
+   *  this to resolve the canonical accountId; replaces the old
+   *  friendCode/secretKey/username/password identity fields below, which are
+   *  kept optional only so a not-yet-upgraded client doesn't crash. */
+  vgamesToken?: string
   friendCode?: string
   secretKey?: string
   username?: string
