@@ -12,8 +12,10 @@ import { useStatsStore } from './store/statsStore'
 const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
 
-// Auto-pull stats from cloud on startup if an account exists
-useStatsStore.getState().pullFullHistory()
+// NOTE: cross-device history restore/merge (pullFullHistory) is deferred to a
+// later phase (P4). The server's RESTORE_ACCOUNT handler was removed in
+// Phase C, so calling it here would be a silent no-op that still transmits
+// the local secret_key over the socket for nothing. Do not call it on boot.
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

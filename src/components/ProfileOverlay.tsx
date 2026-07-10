@@ -12,13 +12,12 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
     socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
   }, [])
 
-  const { displayName, friendCode, secureAccount, restoreAccount, syncFullHistory, clearStats } = useStatsStore()
+  const { displayName, friendCode, secureAccount, restoreAccount, clearStats } = useStatsStore()
   const { totalMatches, wins, losses, winRate } = useStatsAggregates()
-  
+
   const [isRestoring, setIsRestoring] = useState(false)
   const [isSecuring, setIsSecuring] = useState(false)
-  const [isSyncing, setIsSyncing] = useState(false)
-  
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -70,12 +69,6 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
     } finally {
       setLoading(false)
     }
-  }
-
-  async function handleManualSync() {
-    setIsSyncing(true)
-    await syncFullHistory()
-    setIsSyncing(false)
   }
 
   return (
@@ -178,15 +171,7 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
 
           {!isSecuring && !isRestoring && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
-              <button 
-                onClick={handleManualSync}
-                disabled={isSyncing}
-                style={{ ...secondaryBtnStyle, color: '#60a0f0', borderColor: '#1a3050' }}
-              >
-                {isSyncing ? 'Syncing...' : 'Sync Data to Cloud'}
-              </button>
-
-              <button 
+              <button
                 onClick={() => { if(confirm('Erase all stats and start as a fresh guest?')) clearStats(); }}
                 style={{ ...secondaryBtnStyle, color: '#ff4060', borderColor: '#400000' }}
               >

@@ -12,7 +12,8 @@ import { EVENTS } from '../src/shared/protocol.js'
 import type {
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload,
   SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
-  SecureAccountPayload, SecureAccountAck, UpdateProfilePayload
+  SecureAccountPayload, SecureAccountAck, UpdateProfilePayload,
+  ActionPayload
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
