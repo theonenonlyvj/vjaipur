@@ -45,9 +45,12 @@ async function safeJson(res: Response): Promise<any> {
   }
 }
 
-/** POST /auth/quick — device-bound ghost mint/re-auth. Works for ghosts and migrated users alike. */
+/** POST /auth/quick — device-bound ghost mint/re-auth. Works for ghosts and migrated users alike.
+ *  `game: 'jaipur'` labels a NEWLY-minted account's origin_game correctly on the
+ *  worker (Fix M3); it's purely additive/cosmetic and ignored on re-auth of an
+ *  existing account. */
 export async function vgamesQuick(deviceCredential: string, displayName?: string): Promise<VGamesQuickResult> {
-  const res = await postJson('/auth/quick', { deviceCredential, displayName })
+  const res = await postJson('/auth/quick', { deviceCredential, displayName, game: 'jaipur' })
   if (!res.ok) throw new Error(`vgamesQuick failed: ${res.status}`)
   const data = await safeJson(res)
   return { token: data.token, accountId: data.accountId }
