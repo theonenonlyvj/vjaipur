@@ -27,15 +27,18 @@ const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN } })
 const rm = new RoomManager()
 
-io.on('connection', async (socket) => {
-  // "Join"-time VGames Identity verification (see server/vgamesAuth.ts). A
-  // socket with no token, or an invalid/merged one, simply has no linked
-  // account — it can still play locally/online exactly as before (the room
-  // relay below is untouched); only account-bearing operations (SYNC_MATCH)
-  // require this to have resolved to a real accountId.
-  const handshakeToken = (socket.handshake.auth as { token?: string } | undefined)?.token
-  const identity = await resolveSocketIdentity(handshakeToken, VGAMES_URL)
-  ;(socket as any)._vgamesAccountId = identity?.accountId ?? null
+io.on('connection', (socket) => {
+  // Listener registration below MUST stay synchronous (no `await` before
+  // `socket.on(...)` calls). Socket.IO delivers a client's packets to
+  // whatever listeners exist on the Socket the instant its 'connection'
+  // event is emitted; a client that emits immediately on connect (e.g.
+  // CREATE_ROOM, or REJOIN on auto-reconnect) has its packet silently
+  // dropped — no listener yet, no error, no ack — if this handler awaits a
+  // network call (e.g. VGames introspection) before registering handlers.
+  // See tests/server/index.test.ts for the regression coverage. Per-event
+  // identity verification (SYNC_MATCH, UPDATE_PROFILE) each call
+  // resolveSocketIdentity(...) themselves, inside their own handler, which
+  // is fine — that await happens after this handler has already returned.
 
   socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb: (code: string) => void) => {
     const code = rm.createRoom(socket.id, matchLength)
@@ -271,7 +274,15 @@ io.on('connection', async (socket) => {
   })
 })
 
-const PORT = Number(process.env.PORT ?? 3001)
-httpServer.listen(PORT, () => {
-  console.log(`VJaipur server on port ${PORT}`)
-})
+// Guarded so tests can `import` this module (to exercise the real io
+// connection-handler wiring against an ephemeral port) without also binding
+// the fixed production PORT. Vitest sets process.env.VITEST='true' for every
+// test run — see tests/server/index.test.ts.
+if (!process.env.VITEST) {
+  const PORT = Number(process.env.PORT ?? 3001)
+  httpServer.listen(PORT, () => {
+    console.log(`VJaipur server on port ${PORT}`)
+  })
+}
+
+export { app, httpServer, io, rm }
