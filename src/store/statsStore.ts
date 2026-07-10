@@ -199,10 +199,15 @@ export const useStatsStore = create<StatsStore>()(
 
       setDisplayName: async (name) => {
         set({ displayName: name })
-        const { friendCode, secretKey } = get().ensureAccount()
+        // VGames-token-gated, same bridge as addMatch/secureAccount — no
+        // plaintext secret round-trips to the game server for this.
+        // (ensureVGamesAccount calls ensureAccount() internally, minting a
+        // friendCode/secretKey device credential first if needed.)
+        const account = await get().ensureVGamesAccount()
+        if (!account) return // fail-closed: no verified identity, don't sync
         try {
           await waitForConnection()
-          socketService.updateProfile({ friendCode, secretKey, displayName: name })
+          socketService.updateProfile({ vgamesToken: account.token, displayName: name })
         } catch (e) {
           console.warn('Could not sync profile name: connection timeout')
         }

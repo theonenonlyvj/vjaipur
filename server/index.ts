@@ -4,8 +4,7 @@ import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
 import {
-  getPlayerByCode, createPlayer, recordMatch,
-  getPlayerMatches, updatePlayerName, isUsernameAvailable,
+  recordMatch, getPlayerMatches, isUsernameAvailable,
   ensurePlayerForVGames, getLeaderboard
 } from './db.js'
 import { resolveSocketIdentity } from './vgamesAuth.js'
@@ -13,7 +12,7 @@ import { EVENTS } from '../src/shared/protocol.js'
 import type {
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload,
   SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
-  SecureAccountPayload, SecureAccountAck
+  SecureAccountPayload, SecureAccountAck, UpdateProfilePayload
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
@@ -204,14 +203,20 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on(EVENTS.UPDATE_PROFILE, async (data: { friendCode: string, secretKey: string, displayName: string }) => {
+  socket.on(EVENTS.UPDATE_PROFILE, async (data: UpdateProfilePayload) => {
     try {
-      let player = await getPlayerByCode(data.friendCode)
-      if (!player) {
-        await createPlayer(data.friendCode, data.secretKey, data.displayName)
-      } else if (player.secret_key === data.secretKey) {
-        await updatePlayerName(player.id, data.displayName)
+      // Server-verified identity, same as SYNC_MATCH (see
+      // server/vgamesAuth.ts) — the old friendCode/secretKey plaintext
+      // comparison is gone. This handler used to be reachable on every
+      // lobby name-edit and would compare `player.secret_key === secretKey`
+      // (or create an unlinked row outright), which contradicted the
+      // account flip's whole point: no more trust-the-client identity.
+      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
+      if (!identity) {
+        console.warn('UPDATE_PROFILE: missing or invalid vgamesToken; ignoring')
+        return
       }
+      await ensurePlayerForVGames(identity.accountId, data.displayName)
     } catch (error) {
       console.error('UPDATE_PROFILE error:', error)
     }

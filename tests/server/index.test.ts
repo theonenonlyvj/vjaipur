@@ -25,6 +25,8 @@ vi.mock('../../server/db.js', () => mockDb)
 // server/vgamesAuth.ts introspects over `fetch`. Stub it globally and add
 // ~50ms of latency so any await-before-listener-registration bug at
 // connection time has a wide, reliable window to manifest in — see Fix 1.
+// Token 'good-token' resolves to a valid identity; anything else (including
+// undefined) fails introspection, matching resolveSocketIdentity's contract.
 const mockFetch = vi.fn(async (_url: string, init?: any) => {
   await new Promise((resolve) => setTimeout(resolve, 50))
   const body = init?.body ? JSON.parse(init.body) : {}
@@ -62,6 +64,7 @@ beforeAll(async () => {
 afterEach(() => {
   while (clients.length) clients.pop()?.close()
   mockFetch.mockClear()
+  mockDb.ensurePlayerForVGames.mockClear()
 })
 
 afterAll(() => {
@@ -116,5 +119,29 @@ describe('io connection handler does not drop early packets', () => {
 
     const ack = await ackPromise
     expect(ack.ok).toBe(true)
+  })
+})
+
+describe('UPDATE_PROFILE is gated on a verified VGames identity', () => {
+  it('mirrors the display name via ensurePlayerForVGames when the token is valid', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+
+    client.emit(EVENTS.UPDATE_PROFILE, { vgamesToken: 'good-token', displayName: 'Vee' })
+
+    await vi.waitFor(() => {
+      expect(mockDb.ensurePlayerForVGames).toHaveBeenCalledWith('acc-good', 'Vee')
+    })
+  })
+
+  it('does not touch the player mirror when the token is missing or invalid', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+
+    client.emit(EVENTS.UPDATE_PROFILE, { vgamesToken: 'bad-token', displayName: 'Mallory' })
+    // Give the async handler (introspect + potential db call) time to run.
+    await new Promise((r) => setTimeout(r, 150))
+
+    expect(mockDb.ensurePlayerForVGames).not.toHaveBeenCalled()
   })
 })
