@@ -47,7 +47,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   useEffect(() => {
     if (view !== 'global') return
     const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url)
+    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
     setLbLoading(true)
     setLbError('')
     // Give socket a moment to connect before emitting
