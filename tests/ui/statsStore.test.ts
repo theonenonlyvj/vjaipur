@@ -167,6 +167,34 @@ describe('statsStore', () => {
     })
   })
 
+  describe('setDisplayName', () => {
+    it('mints/reuses a VGames token and updates the profile by token — no plaintext secret round-trip', async () => {
+      useStatsStore.getState().ensureAccount()
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-6', accountId: 'vg-acc-6' })
+
+      await useStatsStore.getState().setDisplayName('NewName')
+
+      expect(useStatsStore.getState().displayName).toBe('NewName')
+      expect(socketService.updateProfile).toHaveBeenCalledWith({
+        vgamesToken: 'vg-tok-6',
+        displayName: 'NewName',
+      })
+      const payload = vi.mocked(socketService.updateProfile).mock.calls[0][0] as any
+      expect(payload.friendCode).toBeUndefined()
+      expect(payload.secretKey).toBeUndefined()
+    })
+
+    it('does not call updateProfile if minting a VGames account fails (fail-closed)', async () => {
+      useStatsStore.getState().ensureAccount()
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
+
+      await useStatsStore.getState().setDisplayName('NewName')
+
+      expect(useStatsStore.getState().displayName).toBe('NewName') // local state still updates
+      expect(socketService.updateProfile).not.toHaveBeenCalled()
+    })
+  })
+
   describe('restoreAccount', () => {
     it('logs in via VGames using the local secretKey as the device credential and adopts the returned identity', async () => {
       useStatsStore.getState().ensureAccount()

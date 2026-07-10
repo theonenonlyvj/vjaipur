@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -147,7 +147,7 @@ export class SocketService {
     })
   }
 
-  updateProfile(payload: { friendCode: string; secretKey: string; displayName: string }): void {
+  updateProfile(payload: UpdateProfilePayload): void {
     this.socket?.emit(EVENTS.UPDATE_PROFILE, payload)
   }
 
