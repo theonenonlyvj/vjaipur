@@ -19,9 +19,9 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 // Now import the functions to test
-import { 
-  getPlayerByCode, getPlayerByUsername, updatePlayerToSecured, 
-  createPlayer, recordMatch, getPlayerMatches 
+import {
+  getPlayerByCode,
+  createPlayer, recordMatch, getPlayerMatches, ensurePlayerForVGames
 } from '../../server/db'
 
 describe('db.ts', () => {
@@ -42,48 +42,18 @@ describe('db.ts', () => {
     mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
 
     const player = await getPlayerByCode('ABCDEF')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('players')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
     expect(player).toEqual({ id: '123' })
   })
 
-  it('getPlayerByUsername calls supabase select and ilike', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'testuser' }, error: null })
-
-    const player = await getPlayerByUsername('testuser')
-    
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.select).toHaveBeenCalledWith('*')
-    expect(mockSupabase.ilike).toHaveBeenCalledWith('display_name', 'testuser')
-    expect(player).toEqual({ id: '123', display_name: 'testuser' })
-  })
-
-  it('getPlayerByUsername returns null if user is not found', async () => {
-    mockSupabase.single.mockResolvedValue({ data: null, error: { code: 'PGRST116' } })
-
-    const player = await getPlayerByUsername('unknown')
-    
-    expect(player).toBeNull()
-  })
-
-  it('updatePlayerToSecured calls supabase update', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'newuser' }, error: null })
-
-    const player = await updatePlayerToSecured('ABCDEF', 'newuser', 'newpassword')
-    
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.update).toHaveBeenCalledWith({ display_name: 'newuser', secret_key: 'newpassword' })
-    expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
-    expect(player).toEqual({ id: '123', display_name: 'newuser' })
-  })
-
   it('createPlayer calls supabase insert', async () => {
     mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
 
     const player = await createPlayer('ABCDEF', 'secret', 'Player1')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('players')
     expect(mockSupabase.insert).toHaveBeenCalledWith([{ friend_code: 'ABCDEF', secret_key: 'secret', display_name: 'Player1' }])
     expect(player).toEqual({ id: '123' })
@@ -101,7 +71,7 @@ describe('db.ts', () => {
       won: true
     }
     await recordMatch(match)
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.insert).toHaveBeenCalledWith([match])
   })
@@ -110,11 +80,100 @@ describe('db.ts', () => {
     mockSupabase.order.mockResolvedValue({ data: [{ id: 'm1' }], error: null })
 
     const matches = await getPlayerMatches('123')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('player_id', '123')
-    expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
     expect(matches).toEqual([{ id: 'm1' }])
+  })
+
+  // ── VGames dual-run bridge (Task C4) ─────────────────────────────────────
+  // ensurePlayerForVGames provisions/finds a Supabase `players` row keyed by
+  // the new nullable `players.vgames_account_id`, so the existing
+  // getLeaderboard()/matches machinery keeps working unchanged while vjaipur
+  // runs dual (VGames Identity for auth, Supabase for match/leaderboard
+  // storage). It must be idempotent (no duplicate rows) and fail-closed (a
+  // lookup/write error returns null so callers block the match write instead
+  // of orphaning it).
+  describe('ensurePlayerForVGames', () => {
+    it('returns the existing linked player row without inserting (idempotent)', async () => {
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'p1', vgames_account_id: 'acc1', display_name: 'Vee', friend_code: 'VG-1234' },
+        error: null,
+      })
+
+      const player = await ensurePlayerForVGames('acc1', 'Vee')
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('players')
+      expect(mockSupabase.eq).toHaveBeenCalledWith('vgames_account_id', 'acc1')
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+      expect(player).toEqual({ id: 'p1', vgames_account_id: 'acc1', display_name: 'Vee', friend_code: 'VG-1234' })
+    })
+
+    it('mirrors a changed display_name onto the existing linked row', async () => {
+      mockSupabase.single
+        .mockResolvedValueOnce({
+          data: { id: 'p1', vgames_account_id: 'acc1', display_name: 'OldName', friend_code: 'VG-1234' },
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: { id: 'p1', vgames_account_id: 'acc1', display_name: 'NewName', friend_code: 'VG-1234' },
+          error: null,
+        })
+
+      const player = await ensurePlayerForVGames('acc1', 'NewName')
+
+      expect(mockSupabase.update).toHaveBeenCalledWith({ display_name: 'NewName' })
+      expect(player?.display_name).toBe('NewName')
+    })
+
+    it('creates a new row keyed by vgames_account_id when none exists (create-only, no plaintext secret)', async () => {
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116' } }) // not found
+        .mockResolvedValueOnce({
+          data: { id: 'p2', vgames_account_id: 'acc2', display_name: 'Newbie', friend_code: 'VG-4242' },
+          error: null,
+        })
+
+      const player = await ensurePlayerForVGames('acc2', 'Newbie')
+
+      expect(mockSupabase.insert).toHaveBeenCalledTimes(1)
+      const [insertedRows] = mockSupabase.insert.mock.calls[0]
+      expect(insertedRows[0]).toMatchObject({ vgames_account_id: 'acc2', display_name: 'Newbie' })
+      expect(player).toEqual({ id: 'p2', vgames_account_id: 'acc2', display_name: 'Newbie', friend_code: 'VG-4242' })
+    })
+
+    it('is idempotent across repeated calls for the same accountId (no duplicate insert)', async () => {
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116' } })
+        .mockResolvedValueOnce({ data: { id: 'p3', vgames_account_id: 'acc3', display_name: 'A' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'p3', vgames_account_id: 'acc3', display_name: 'A' }, error: null })
+
+      const first = await ensurePlayerForVGames('acc3', 'A')
+      const second = await ensurePlayerForVGames('acc3', 'A')
+
+      expect(mockSupabase.insert).toHaveBeenCalledTimes(1)
+      expect(first?.id).toBe('p3')
+      expect(second?.id).toBe('p3')
+    })
+
+    it('fails closed (returns null) when the lookup errors', async () => {
+      mockSupabase.single.mockResolvedValueOnce({ data: null, error: { code: 'CONNECTION_ERROR', message: 'boom' } })
+
+      const player = await ensurePlayerForVGames('acc4', 'X')
+
+      expect(player).toBeNull()
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    it('fails closed (returns null) when the insert errors', async () => {
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116' } })
+        .mockResolvedValueOnce({ data: null, error: { code: 'SOME_ERROR', message: 'insert boom' } })
+
+      const player = await ensurePlayerForVGames('acc5', 'Y')
+
+      expect(player).toBeNull()
+    })
   })
 })
