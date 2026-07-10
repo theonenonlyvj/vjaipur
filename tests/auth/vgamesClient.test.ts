@@ -19,7 +19,7 @@ describe('vgamesClient', () => {
   })
 
   describe('vgamesQuick', () => {
-    it('POSTs to /auth/quick with deviceCredential + displayName and returns token/accountId', async () => {
+    it('POSTs to /auth/quick with deviceCredential + displayName + game:"jaipur" and returns token/accountId', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(200, { token: 'tok123', accountId: 'acc1' }))
 
       const result = await vgamesQuick('cred-aaaa', 'Neo')
@@ -28,7 +28,10 @@ describe('vgamesClient', () => {
       const [url, init] = mockFetch.mock.calls[0]
       expect(String(url)).toMatch(/\/auth\/quick$/)
       expect(init.method).toBe('POST')
-      expect(JSON.parse(init.body)).toEqual({ deviceCredential: 'cred-aaaa', displayName: 'Neo' })
+      // Fix M3: stamps origin_game correctly for NEWLY-minted accounts on the
+      // worker (cosmetic/analytics only — the worker defaults to 'iota' when
+      // this field is absent or unrecognized).
+      expect(JSON.parse(init.body)).toEqual({ deviceCredential: 'cred-aaaa', displayName: 'Neo', game: 'jaipur' })
       expect(result).toEqual({ token: 'tok123', accountId: 'acc1' })
     })
 
