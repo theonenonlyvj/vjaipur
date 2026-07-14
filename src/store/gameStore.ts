@@ -295,7 +295,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   joinOnline: async (variant, code) => {
     set({ onlineStatus: 'connecting' })
     const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url)
+    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
 
     socketService.onRoomReady = (playerIndex, seed, serverMatchLength) => {
       const rng = mulberry32(seed)

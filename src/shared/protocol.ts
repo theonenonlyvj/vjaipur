@@ -40,6 +40,11 @@ export interface OpponentNamePayload { name: string; friendCode: string }
 export interface OpponentDisconnectedPayload { timestamp: number }
 
 export interface SyncMatchPayload {
+  /** VGames Identity JWT (see src/auth/vgamesClient.ts). Server introspects
+   *  this to resolve the canonical accountId; replaces the old
+   *  friendCode/secretKey/username/password identity fields below, which are
+   *  kept optional only so a not-yet-upgraded client doesn't crash. */
+  vgamesToken?: string
   friendCode?: string
   secretKey?: string
   username?: string
@@ -80,6 +85,17 @@ export interface SecureAccountPayload {
 export interface SecureAccountAck {
   ok: boolean
   error?: string
+}
+
+export interface UpdateProfilePayload {
+  /** VGames Identity JWT — see SyncMatchPayload. Server introspects this to
+   *  resolve the canonical accountId and mirrors displayName onto that
+   *  account's Supabase row (ensurePlayerForVGames); an invalid/missing
+   *  token is a no-op. Replaces the old friendCode/secretKey plaintext
+   *  comparison, which let anyone who could guess a friendCode overwrite
+   *  that account's display name with no proof of ownership. */
+  vgamesToken?: string
+  displayName: string
 }
 
 export interface LeaderboardRow {

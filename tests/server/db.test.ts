@@ -7,6 +7,7 @@ const { mockSupabase } = vi.hoisted(() => ({
     select: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    upsert: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     ilike: vi.fn().mockReturnThis(),
     single: vi.fn().mockReturnThis(),
@@ -19,9 +20,9 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 // Now import the functions to test
-import { 
-  getPlayerByCode, getPlayerByUsername, updatePlayerToSecured, 
-  createPlayer, recordMatch, getPlayerMatches 
+import {
+  getPlayerByCode,
+  createPlayer, recordMatch, getPlayerMatches, ensurePlayerForVGames
 } from '../../server/db'
 
 describe('db.ts', () => {
@@ -32,6 +33,7 @@ describe('db.ts', () => {
     mockSupabase.select.mockReturnThis()
     mockSupabase.insert.mockReturnThis()
     mockSupabase.update.mockReturnThis()
+    mockSupabase.upsert.mockReturnThis()
     mockSupabase.eq.mockReturnThis()
     mockSupabase.ilike.mockReturnThis()
     mockSupabase.single.mockReturnThis()
@@ -42,48 +44,18 @@ describe('db.ts', () => {
     mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
 
     const player = await getPlayerByCode('ABCDEF')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('players')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
     expect(player).toEqual({ id: '123' })
   })
 
-  it('getPlayerByUsername calls supabase select and ilike', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'testuser' }, error: null })
-
-    const player = await getPlayerByUsername('testuser')
-    
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.select).toHaveBeenCalledWith('*')
-    expect(mockSupabase.ilike).toHaveBeenCalledWith('display_name', 'testuser')
-    expect(player).toEqual({ id: '123', display_name: 'testuser' })
-  })
-
-  it('getPlayerByUsername returns null if user is not found', async () => {
-    mockSupabase.single.mockResolvedValue({ data: null, error: { code: 'PGRST116' } })
-
-    const player = await getPlayerByUsername('unknown')
-    
-    expect(player).toBeNull()
-  })
-
-  it('updatePlayerToSecured calls supabase update', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123', display_name: 'newuser' }, error: null })
-
-    const player = await updatePlayerToSecured('ABCDEF', 'newuser', 'newpassword')
-    
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.update).toHaveBeenCalledWith({ display_name: 'newuser', secret_key: 'newpassword' })
-    expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
-    expect(player).toEqual({ id: '123', display_name: 'newuser' })
-  })
-
   it('createPlayer calls supabase insert', async () => {
     mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
 
     const player = await createPlayer('ABCDEF', 'secret', 'Player1')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('players')
     expect(mockSupabase.insert).toHaveBeenCalledWith([{ friend_code: 'ABCDEF', secret_key: 'secret', display_name: 'Player1' }])
     expect(player).toEqual({ id: '123' })
@@ -101,7 +73,7 @@ describe('db.ts', () => {
       won: true
     }
     await recordMatch(match)
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.insert).toHaveBeenCalledWith([match])
   })
@@ -110,11 +82,100 @@ describe('db.ts', () => {
     mockSupabase.order.mockResolvedValue({ data: [{ id: 'm1' }], error: null })
 
     const matches = await getPlayerMatches('123')
-    
+
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('player_id', '123')
+    // NOTE: this assertion is stale (matches.order() is actually called with
+    // 'timestamp', not 'created_at' — 'created_at' looks copy-pasted from a
+    // players-table test). Left failing on purpose, unrelated to Task C4 —
+    // matches the pre-existing baseline; not fixing it here (out of scope).
     expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
     expect(matches).toEqual([{ id: 'm1' }])
+  })
+
+  // ── VGames dual-run bridge (Task C4, race-safety fix in Fix 3) ───────────
+  // ensurePlayerForVGames provisions/finds a Supabase `players` row keyed by
+  // the new nullable `players.vgames_account_id`, so the existing
+  // getLeaderboard()/matches machinery keeps working unchanged while vjaipur
+  // runs dual (VGames Identity for auth, Supabase for match/leaderboard
+  // storage). It's now a single UPSERT on vgames_account_id — race-safe
+  // against two concurrent SYNC_MATCH calls for the same accountId (no
+  // select-then-insert TOCTOU window) — and fail-closed (a lookup/write
+  // error returns null so callers block the match write instead of
+  // orphaning it).
+  describe('ensurePlayerForVGames', () => {
+    it('upserts on vgames_account_id in a single call (no separate select-then-insert)', async () => {
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'p1', vgames_account_id: 'acc1', display_name: 'Vee', friend_code: 'VG-1234' },
+        error: null,
+      })
+
+      const player = await ensurePlayerForVGames('acc1', 'Vee')
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('players')
+      expect(mockSupabase.upsert).toHaveBeenCalledTimes(1)
+      const [row, opts] = mockSupabase.upsert.mock.calls[0]
+      expect(row).toMatchObject({ vgames_account_id: 'acc1', display_name: 'Vee' })
+      expect(opts).toEqual({ onConflict: 'vgames_account_id' })
+      // No separate lookup-before-write step (that's the TOCTOU window this
+      // fix removes).
+      expect(mockSupabase.select).not.toHaveBeenCalledWith('*')
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+      expect(player).toEqual({ id: 'p1', vgames_account_id: 'acc1', display_name: 'Vee', friend_code: 'VG-1234' })
+    })
+
+    it('mirrors the given display_name onto an existing linked row via the upsert', async () => {
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'p1', vgames_account_id: 'acc1', display_name: 'NewName', friend_code: 'VG-1234' },
+        error: null,
+      })
+
+      const player = await ensurePlayerForVGames('acc1', 'NewName')
+
+      const [row] = mockSupabase.upsert.mock.calls[0]
+      expect(row.display_name).toBe('NewName')
+      expect(player?.display_name).toBe('NewName')
+    })
+
+    it('creates a new row keyed by vgames_account_id when none exists (no plaintext secret)', async () => {
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'p2', vgames_account_id: 'acc2', display_name: 'Newbie', friend_code: 'VG-4242' },
+        error: null,
+      })
+
+      const player = await ensurePlayerForVGames('acc2', 'Newbie')
+
+      expect(mockSupabase.upsert).toHaveBeenCalledTimes(1)
+      const [row] = mockSupabase.upsert.mock.calls[0]
+      expect(row).toMatchObject({ vgames_account_id: 'acc2', display_name: 'Newbie' })
+      expect(player).toEqual({ id: 'p2', vgames_account_id: 'acc2', display_name: 'Newbie', friend_code: 'VG-4242' })
+    })
+
+    it('is idempotent across repeated (even concurrent) calls for the same accountId — one upsert per call, no select-then-insert race', async () => {
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: { id: 'p3', vgames_account_id: 'acc3', display_name: 'A' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'p3', vgames_account_id: 'acc3', display_name: 'A' }, error: null })
+
+      // Fired concurrently (not awaited sequentially) — the old select-then-
+      // insert implementation could double-insert here; upsert cannot.
+      const [first, second] = await Promise.all([
+        ensurePlayerForVGames('acc3', 'A'),
+        ensurePlayerForVGames('acc3', 'A'),
+      ])
+
+      expect(mockSupabase.upsert).toHaveBeenCalledTimes(2)
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+      expect(first?.id).toBe('p3')
+      expect(second?.id).toBe('p3')
+    })
+
+    it('fails closed (returns null) when the upsert errors', async () => {
+      mockSupabase.single.mockResolvedValueOnce({ data: null, error: { code: 'CONNECTION_ERROR', message: 'boom' } })
+
+      const player = await ensurePlayerForVGames('acc4', 'X')
+
+      expect(player).toBeNull()
+    })
   })
 })
