@@ -332,8 +332,16 @@ export const useStatsStore = create<StatsStore>()(
       pullVGamesHistory: async () => {
         const { vgamesToken } = get()
         if (!vgamesToken) return
+        // Render free-tier servers cold-start (~50s), which can exceed
+        // waitForConnection's 10s window on a fresh boot. Retry the connect
+        // wait (bounded) so the pull still lands once the socket comes up.
+        let connected = false
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try { await waitForConnection(); connected = true; break }
+          catch { await new Promise((r) => setTimeout(r, 8000)) }
+        }
+        if (!connected) { console.warn('pullVGamesHistory: server unreachable after retries'); return }
         try {
-          await waitForConnection()
           const ack = await socketService.pullHistory({ vgamesToken })
           if (!ack || !ack.ok || !ack.matches) return
           const cloud: MatchRecord[] = ack.matches.map((m) => ({
