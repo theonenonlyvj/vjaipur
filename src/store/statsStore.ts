@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
+import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
 import type { SyncMatchPayload, RestoreAccountAck } from '../shared/protocol'
 
 export interface MatchRecord {
@@ -17,11 +18,17 @@ interface StatsState {
   secretKey: string | null
   displayName: string | null
   matches: MatchRecord[]
+  // VGames Identity (see src/auth/vgamesClient.ts). `secretKey` above doubles as
+  // the device credential passed to /auth/quick — the legacy-guest bridge, so
+  // existing local installs resolve to their VGames account automatically.
+  vgamesToken: string | null
+  vgamesAccountId: string | null
 }
 
 interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
-  addMatch: (match: Omit<MatchRecord, 'timestamp'>) => void
+  ensureVGamesAccount: () => Promise<{ token: string; accountId: string } | null>
+  addMatch: (match: Omit<MatchRecord, 'timestamp'>) => Promise<void>
   restoreAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
@@ -73,6 +80,8 @@ export const useStatsStore = create<StatsStore>()(
       secretKey: null,
       displayName: null,
       matches: [],
+      vgamesToken: null,
+      vgamesAccountId: null,
 
       ensureAccount: () => {
         const { friendCode, secretKey, displayName } = get()
@@ -97,8 +106,30 @@ export const useStatsStore = create<StatsStore>()(
         return { friendCode: newFriendCode, secretKey: newSecretKey, displayName: guestName }
       },
 
-      addMatch: (matchData) => {
-        const { friendCode, secretKey, displayName } = get().ensureAccount()
+      // Mints (or reuses) a VGames Identity account for this device. The local
+      // secretKey IS the device credential — reusing it means an existing
+      // install resolves to the same VGames account it would have under the
+      // old friendCode/secretKey scheme. Never round-trips a plaintext secret
+      // to the vjaipur game server itself.
+      ensureVGamesAccount: async () => {
+        const { vgamesToken, vgamesAccountId } = get()
+        if (vgamesToken && vgamesAccountId) {
+          return { token: vgamesToken, accountId: vgamesAccountId }
+        }
+        const { secretKey, displayName } = get().ensureAccount()
+        try {
+          const { token, accountId } = await vgamesQuick(secretKey, displayName ?? undefined)
+          set({ vgamesToken: token, vgamesAccountId: accountId })
+          socketService.setAuthToken(token)
+          return { token, accountId }
+        } catch (e) {
+          console.warn('ensureVGamesAccount failed:', e)
+          return null
+        }
+      },
+
+      addMatch: async (matchData) => {
+        const { displayName } = get().ensureAccount()
         const newMatch: MatchRecord = {
           ...matchData,
           timestamp: Date.now(),
@@ -108,14 +139,11 @@ export const useStatsStore = create<StatsStore>()(
           matches: [newMatch, ...state.matches],
         }))
 
-        const isGuest = displayName?.startsWith('Guest_')
+        const account = await get().ensureVGamesAccount()
+        if (!account) return // fail-closed: no verified identity, don't sync
 
-        // Sync with server
         const payload: SyncMatchPayload = {
-          friendCode,
-          secretKey,
-          username: !isGuest ? displayName! : undefined,
-          password: !isGuest ? secretKey : undefined,
+          vgamesToken: account.token,
           displayName: displayName || undefined,
           match: {
             opponent_type: newMatch.opponent_type,
@@ -129,34 +157,39 @@ export const useStatsStore = create<StatsStore>()(
         socketService.syncMatch(payload)
       },
 
+      // Binds this device to an existing username+password VGames account
+      // (POST /auth/login). Device credential = the local secretKey, same
+      // bridge as ensureVGamesAccount. No plaintext secret is ever sent back
+      // by the server — only a JWT.
       restoreAccount: async (username, password) => {
         try {
-          await waitForConnection()
-          const ack = await socketService.restoreAccount({ username, password })
-          if (ack.ok && ack.friendCode && ack.secretKey) {
+          const { secretKey } = get().ensureAccount()
+          const result = await vgamesLogin(username, password, secretKey)
+          if (result.ok && result.token && result.accountId) {
             set({
-              matches: ack.matches || [],
-              friendCode: ack.friendCode,
-              secretKey: ack.secretKey,
-              displayName: ack.displayName || null,
+              vgamesToken: result.token,
+              vgamesAccountId: result.accountId,
+              displayName: username,
             })
+            socketService.setAuthToken(result.token)
+            return { ok: true }
           }
-          return ack
+          return { ok: false, error: result.error }
         } catch (e) {
           return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
         }
       },
 
+      // Claims a username+password on the current (ghost) VGames account, in
+      // place (POST /auth/set-credentials). Never stores the plaintext
+      // password locally — only the display name changes.
       secureAccount: async (username, password) => {
         try {
-          await waitForConnection()
-          const { friendCode } = get().ensureAccount()
-          const ack = await socketService.secureAccount({ friendCode, username, password })
+          const account = await get().ensureVGamesAccount()
+          if (!account) return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
+          const ack = await vgamesSetCredentials(account.token, username, password)
           if (ack.ok) {
-            set({
-              displayName: username,
-              secretKey: password,
-            })
+            set({ displayName: username })
           }
           return ack
         } catch (e) {
@@ -166,10 +199,15 @@ export const useStatsStore = create<StatsStore>()(
 
       setDisplayName: async (name) => {
         set({ displayName: name })
-        const { friendCode, secretKey } = get().ensureAccount()
+        // VGames-token-gated, same bridge as addMatch/secureAccount — no
+        // plaintext secret round-trips to the game server for this.
+        // (ensureVGamesAccount calls ensureAccount() internally, minting a
+        // friendCode/secretKey device credential first if needed.)
+        const account = await get().ensureVGamesAccount()
+        if (!account) return // fail-closed: no verified identity, don't sync
         try {
           await waitForConnection()
-          socketService.updateProfile({ friendCode, secretKey, displayName: name })
+          socketService.updateProfile({ vgamesToken: account.token, displayName: name })
         } catch (e) {
           console.warn('Could not sync profile name: connection timeout')
         }
@@ -292,6 +330,8 @@ export const useStatsStore = create<StatsStore>()(
           secretKey: null,
           displayName: null,
           matches: [],
+          vgamesToken: null,
+          vgamesAccountId: null,
         })
       },
     }),

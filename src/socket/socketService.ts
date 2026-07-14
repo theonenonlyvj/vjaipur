@@ -1,20 +1,24 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
 
-  connect(url: string): void {
+  connect(url: string, vgamesToken?: string): void {
     if (this.socket?.connected) return
     if (this.socket && !this.socket.disconnected) return // Already connecting
-    
+
     console.log('Connecting to socket server at:', url)
-    this.socket = io(url, { 
+    this.socket = io(url, {
       autoConnect: true,
       reconnectionAttempts: 5,
       timeout: 10000,
+      // VGames Identity JWT, sent at connect/join so the server can verify it
+      // via /auth/introspect (see server/vgamesAuth.ts). Absent for anonymous
+      // pre-account connections — the server treats those as unauthenticated.
+      ...(vgamesToken ? { auth: { token: vgamesToken } } : {}),
     })
 
     this.socket.on('connect_error', (err) => {
@@ -50,6 +54,17 @@ export class SocketService {
   disconnect(): void {
     this.socket?.disconnect()
     this.socket = null
+  }
+
+  /**
+   * Updates the VGames auth token the socket presents on its next (re)connect.
+   * Does not force an immediate reconnect of an already-open socket — just
+   * keeps the handshake current so a later drop/reconnect (or a fresh
+   * connect() call) re-joins as the now-known account instead of anonymous.
+   */
+  setAuthToken(vgamesToken: string | null): void {
+    if (!this.socket) return
+    ;(this.socket as any).auth = vgamesToken ? { token: vgamesToken } : {}
   }
 
   get connected(): boolean {
@@ -132,7 +147,7 @@ export class SocketService {
     })
   }
 
-  updateProfile(payload: { friendCode: string; secretKey: string; displayName: string }): void {
+  updateProfile(payload: UpdateProfilePayload): void {
     this.socket?.emit(EVENTS.UPDATE_PROFILE, payload)
   }
 

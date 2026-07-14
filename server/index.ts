@@ -3,19 +3,21 @@ import express from 'express'
 import { Server } from 'socket.io'
 import cors from 'cors'
 import { RoomManager } from './roomManager.js'
-import { 
-  getPlayerByCode, getPlayerByUsername, createPlayer, recordMatch,
-  getPlayerMatches, updatePlayerName, isUsernameAvailable, Player,
-  updatePlayerToSecured, getLeaderboard
+import {
+  recordMatch, getPlayerMatches, isUsernameAvailable,
+  ensurePlayerForVGames, getLeaderboard
 } from './db.js'
+import { resolveSocketIdentity } from './vgamesAuth.js'
 import { EVENTS } from '../src/shared/protocol.js'
-import type { 
-  RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload, 
+import type {
+  RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload,
   SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
-  SecureAccountPayload, SecureAccountAck
+  SecureAccountPayload, SecureAccountAck, UpdateProfilePayload,
+  ActionPayload
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
+const VGAMES_URL = process.env.VGAMES_URL ?? 'https://viota-worker.theonenonlyvj.workers.dev'
 
 const app = express()
 app.use(cors({ origin: ALLOWED_ORIGIN }))
@@ -26,6 +28,17 @@ const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN } })
 const rm = new RoomManager()
 
 io.on('connection', (socket) => {
+  // Listener registration below MUST stay synchronous (no `await` before
+  // `socket.on(...)` calls). Socket.IO delivers a client's packets to
+  // whatever listeners exist on the Socket the instant its 'connection'
+  // event is emitted; a client that emits immediately on connect (e.g.
+  // CREATE_ROOM, or REJOIN on auto-reconnect) has its packet silently
+  // dropped — no listener yet, no error, no ack — if this handler awaits a
+  // network call (e.g. VGames introspection) before registering handlers.
+  // See tests/server/index.test.ts for the regression coverage. Per-event
+  // identity verification (SYNC_MATCH, UPDATE_PROFILE) each call
+  // resolveSocketIdentity(...) themselves, inside their own handler, which
+  // is fine — that await happens after this handler has already returned.
 
   socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb: (code: string) => void) => {
     const code = rm.createRoom(socket.id, matchLength)
@@ -112,35 +125,25 @@ io.on('connection', (socket) => {
 
   socket.on(EVENTS.SYNC_MATCH, async (data: SyncMatchPayload) => {
     try {
-      let player: Player | null = null
-      
-      // Try username first if provided
-      if (data.username && data.password) {
-        player = await getPlayerByUsername(data.username)
-        if (player && player.secret_key !== data.password) {
-          console.warn('SYNC_MATCH: Password mismatch for username:', data.username)
-          return
-        }
-      }
-
-      // Fallback to friendCode for guest or if username lookup didn't yield a player
-      if (!player && data.friendCode && data.secretKey) {
-        player = await getPlayerByCode(data.friendCode)
-        if (!player) {
-          player = await createPlayer(data.friendCode, data.secretKey, data.displayName)
-        } else if (player.secret_key !== data.secretKey) {
-          console.warn('SYNC_MATCH: Secret key mismatch for friendCode:', data.friendCode)
-          return
-        }
-      }
-
-      if (!player) {
-        console.warn('SYNC_MATCH: No player found/created for identifying data')
+      // Server-verified identity via VGames /auth/introspect (see
+      // server/vgamesAuth.ts). The old friendCode/secretKey/username/password
+      // fields are gone from the wire format (Task C2) and are never trusted
+      // for identity even if a stale client sends them — that trust-the-
+      // client model was the claimable-account hole this migration closes.
+      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
+      if (!identity) {
+        console.warn('SYNC_MATCH: missing or invalid vgamesToken; dropping match write')
         return
       }
 
-      if (data.displayName && player.display_name !== data.displayName) {
-        await updatePlayerName(player.id, data.displayName)
+      // Dual-run bridge: find/create the Supabase player row for this
+      // verified accountId (idempotent) so the existing leaderboard/match
+      // history machinery below keeps working unchanged. Fail-closed: a
+      // broken provisioning step blocks the write instead of orphaning it.
+      const player = await ensurePlayerForVGames(identity.accountId, data.displayName || 'Guest')
+      if (!player) {
+        console.error('SYNC_MATCH: provisioning failed for account', identity.accountId, '- blocking write')
+        return
       }
 
       // Exact deduplication check using client-side timestamp
@@ -175,52 +178,20 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on(EVENTS.RESTORE_ACCOUNT, async (data: RestoreAccountPayload, cb: (ack: RestoreAccountAck) => void) => {
-    try {
-      console.log('RESTORE_ACCOUNT attempt for:', data.username || data.friendCode)
-      let player: Player | null = null
-      
-      if (data.username && data.password) {
-        player = await getPlayerByUsername(data.username)
-      } else if (data.friendCode && data.secretKey) {
-        player = await getPlayerByCode(data.friendCode)
-      }
-
-      if (!player || player.secret_key !== (data.password || data.secretKey)) {
-        console.warn('RESTORE_ACCOUNT: Invalid credentials for:', data.username || data.friendCode)
-        cb({ ok: false, error: 'Invalid credentials' })
-        return
-      }
-      const matches = await getPlayerMatches(player.id)
-      cb({ 
-        ok: true, 
-        matches: matches || [], 
-        displayName: player.display_name,
-        friendCode: player.friend_code,
-        secretKey: player.secret_key
-      })
-    } catch (error) {
-      console.error('RESTORE_ACCOUNT error:', error)
-      cb({ ok: false, error: 'Internal server error' })
-    }
+  // DELETED (Task C4): these used to compare/return plaintext secret_key
+  // over the wire, and SECURE_ACCOUNT in particular let anyone who could
+  // guess a friendCode overwrite that account's credentials with no proof of
+  // ownership — the live claimable-account hole. Replaced by the VGames
+  // Identity worker's POST /auth/login and /auth/set-credentials (Bearer
+  // JWT), consumed directly by the client (see src/store/statsStore.ts).
+  // Handlers are kept registered, responding `gone`, purely so a
+  // not-yet-upgraded client gets a clean rejection instead of a silent hang.
+  socket.on(EVENTS.RESTORE_ACCOUNT, (_data: RestoreAccountPayload, cb?: (ack: RestoreAccountAck) => void) => {
+    cb?.({ ok: false, error: 'gone' })
   })
 
-  socket.on(EVENTS.SECURE_ACCOUNT, async (data: SecureAccountPayload, cb: (ack: SecureAccountAck) => void) => {
-    try {
-      console.log('SECURE_ACCOUNT attempt for friendCode:', data.friendCode, 'to username:', data.username)
-      const available = await isUsernameAvailable(data.username, data.friendCode)
-      if (!available) {
-        console.warn('SECURE_ACCOUNT: Username already taken:', data.username)
-        cb({ ok: false, error: 'Username already taken' })
-        return
-      }
-
-      await updatePlayerToSecured(data.friendCode, data.username, data.password)
-      cb({ ok: true })
-    } catch (error) {
-      console.error('SECURE_ACCOUNT error:', error)
-      cb({ ok: false, error: 'Internal server error' })
-    }
+  socket.on(EVENTS.SECURE_ACCOUNT, (_data: SecureAccountPayload, cb?: (ack: SecureAccountAck) => void) => {
+    cb?.({ ok: false, error: 'gone' })
   })
 
   socket.on(EVENTS.CHECK_USERNAME, async (data: { name: string }, cb: (ack: { available: boolean }) => void) => {
@@ -233,14 +204,20 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on(EVENTS.UPDATE_PROFILE, async (data: { friendCode: string, secretKey: string, displayName: string }) => {
+  socket.on(EVENTS.UPDATE_PROFILE, async (data: UpdateProfilePayload) => {
     try {
-      let player = await getPlayerByCode(data.friendCode)
-      if (!player) {
-        await createPlayer(data.friendCode, data.secretKey, data.displayName)
-      } else if (player.secret_key === data.secretKey) {
-        await updatePlayerName(player.id, data.displayName)
+      // Server-verified identity, same as SYNC_MATCH (see
+      // server/vgamesAuth.ts) — the old friendCode/secretKey plaintext
+      // comparison is gone. This handler used to be reachable on every
+      // lobby name-edit and would compare `player.secret_key === secretKey`
+      // (or create an unlinked row outright), which contradicted the
+      // account flip's whole point: no more trust-the-client identity.
+      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
+      if (!identity) {
+        console.warn('UPDATE_PROFILE: missing or invalid vgamesToken; ignoring')
+        return
       }
+      await ensurePlayerForVGames(identity.accountId, data.displayName)
     } catch (error) {
       console.error('UPDATE_PROFILE error:', error)
     }
@@ -303,7 +280,15 @@ io.on('connection', (socket) => {
   })
 })
 
-const PORT = Number(process.env.PORT ?? 3001)
-httpServer.listen(PORT, () => {
-  console.log(`VJaipur server on port ${PORT}`)
-})
+// Guarded so tests can `import` this module (to exercise the real io
+// connection-handler wiring against an ephemeral port) without also binding
+// the fixed production PORT. Vitest sets process.env.VITEST='true' for every
+// test run — see tests/server/index.test.ts.
+if (!process.env.VITEST) {
+  const PORT = Number(process.env.PORT ?? 3001)
+  httpServer.listen(PORT, () => {
+    console.log(`VJaipur server on port ${PORT}`)
+  })
+}
+
+export { app, httpServer, io, rm }
