@@ -16,6 +16,7 @@ export const EVENTS = {
   SECURE_ACCOUNT: 'secure_account',
   FORCE_FORFEIT:  'force_forfeit',
   GET_LEADERBOARD: 'get_leaderboard',
+  PULL_HISTORY: 'pull_history',
   // Server → Client
   ROOM_READY:            'room_ready',
   OPPONENT_ACTION:       'opponent_action',
@@ -109,6 +110,30 @@ export interface LeaderboardRow {
 export interface LeaderboardAck {
   ok: boolean
   rows: LeaderboardRow[]
+}
+
+export interface PullHistoryPayload {
+  /** VGames Identity JWT — the server introspects it to resolve the caller's
+   *  canonical accountId, then returns ONLY that account's own match history
+   *  (see server/index.ts PULL_HISTORY). Powers cross-device stat restore. */
+  vgamesToken?: string
+}
+
+export interface PullHistoryMatch {
+  opponent_type: string
+  opponent_id?: string | null
+  player_score: number
+  opponent_score: number
+  won: boolean
+  timestamp: number | string
+}
+
+export interface PullHistoryAck {
+  ok: boolean
+  matches?: PullHistoryMatch[]
+  displayName?: string | null
+  friendCode?: string | null
+  error?: string
 }
 
 export type { GameState }

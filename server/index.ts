@@ -5,7 +5,7 @@ import cors from 'cors'
 import { RoomManager } from './roomManager.js'
 import {
   recordMatch, getPlayerMatches, isUsernameAvailable,
-  ensurePlayerForVGames, getLeaderboard
+  ensurePlayerForVGames, getLeaderboard, getPlayerByVGamesAccountId
 } from './db.js'
 import { resolveSocketIdentity } from './vgamesAuth.js'
 import { EVENTS } from '../src/shared/protocol.js'
@@ -13,7 +13,7 @@ import type {
   RejoinPayload, JoinRoomAck, RejoinAck, SetNamePayload,
   SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck,
   SecureAccountPayload, SecureAccountAck, UpdateProfilePayload,
-  ActionPayload
+  ActionPayload, PullHistoryPayload, PullHistoryAck
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
@@ -230,6 +230,38 @@ io.on('connection', (socket) => {
     } catch (e) {
       console.error('GET_LEADERBOARD error:', e)
       cb({ ok: false, rows: [] })
+    }
+  })
+
+  socket.on(EVENTS.PULL_HISTORY, async (data: PullHistoryPayload, cb?: (ack: PullHistoryAck) => void) => {
+    try {
+      // Cross-device history restore. Same server-verified identity as
+      // SYNC_MATCH (introspect the token → canonical accountId), then return
+      // ONLY the caller's own matches, resolved via the dual-run
+      // vgames_account_id bridge. READ-ONLY: it must not provision/mutate the
+      // player row (that would clobber a real friend_code), so an account with
+      // no Supabase row yet simply gets an empty history.
+      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
+      if (!identity) { cb?.({ ok: false, error: 'unauthorized' }); return }
+      const player = await getPlayerByVGamesAccountId(identity.accountId)
+      if (!player) { cb?.({ ok: true, matches: [] }); return }
+      const matches = await getPlayerMatches(player.id)
+      cb?.({
+        ok: true,
+        matches: (matches ?? []).map((m) => ({
+          opponent_type: m.opponent_type,
+          opponent_id: m.opponent_id,
+          player_score: m.player_score,
+          opponent_score: m.opponent_score,
+          won: m.won,
+          timestamp: m.timestamp,
+        })),
+        displayName: player.display_name,
+        friendCode: player.friend_code,
+      })
+    } catch (error) {
+      console.error('PULL_HISTORY error:', error)
+      cb?.({ ok: false, error: 'server_error' })
     }
   })
 

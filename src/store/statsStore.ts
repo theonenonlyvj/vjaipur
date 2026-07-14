@@ -34,6 +34,7 @@ interface StatsActions {
   setDisplayName: (name: string) => void
   syncFullHistory: () => Promise<void>
   pullFullHistory: () => Promise<void>
+  pullVGamesHistory: () => Promise<void>
   clearHistory: () => void
   clearStats: () => void
 }
@@ -172,6 +173,10 @@ export const useStatsStore = create<StatsStore>()(
               displayName: username,
             })
             socketService.setAuthToken(result.token)
+            // Pull this account's match history so the career-stats panel
+            // populates on a new device right after login. Fire-and-forget:
+            // the store updates reactively; login itself returns immediately.
+            void get().pullVGamesHistory()
             return { ok: true }
           }
           return { ok: false, error: result.error }
@@ -317,6 +322,50 @@ export const useStatsStore = create<StatsStore>()(
           }
         } catch (e) {
           console.warn('pullFullHistory failed (likely offline or server waking up)')
+        }
+      },
+
+      // Cross-device history restore over the VGames-authenticated socket
+      // (replaces the dead pullFullHistory RESTORE_ACCOUNT path). Fetches THIS
+      // account's own matches from the server (Supabase, dual-run) and merges
+      // them into the local career-stats panel. No-op without a VGames token.
+      pullVGamesHistory: async () => {
+        const { vgamesToken } = get()
+        if (!vgamesToken) return
+        try {
+          await waitForConnection()
+          const ack = await socketService.pullHistory({ vgamesToken })
+          if (!ack || !ack.ok || !ack.matches) return
+          const cloud: MatchRecord[] = ack.matches.map((m) => ({
+            opponent_type: m.opponent_type,
+            opponent_id: m.opponent_id ?? null,
+            player_score: m.player_score,
+            opponent_score: m.opponent_score,
+            won: m.won,
+            timestamp: typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp,
+          }))
+          // Merge server history with any local matches not yet synced up,
+          // de-duped by timestamp, newest first.
+          const cloudTs = new Set(cloud.map((m) => m.timestamp))
+          const localUnsynced = get().matches.filter((m) => {
+            const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
+            return !cloudTs.has(ts)
+          })
+          const merged = [...localUnsynced, ...cloud].sort((a, b) => {
+            const ta = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp
+            const tb = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp
+            return tb - ta
+          })
+          // Only restore MATCHES here. displayName is already authoritative
+          // locally (login sets it to the username; boot restores it from
+          // persistence), and the server's Supabase display_name can lag a
+          // fresh "Create Account" (still the old guest name) — adopting it
+          // would flip a secured account back to "guest". friendCode likewise
+          // stays local: the server row holds only the synthetic cosmetic
+          // VG-#### code, never the user's real VJ-####.
+          set({ matches: merged })
+        } catch (e) {
+          console.warn('pullVGamesHistory failed (offline or server waking up)')
         }
       },
 

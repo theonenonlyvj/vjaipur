@@ -17,6 +17,7 @@ const { mockDb } = vi.hoisted(() => ({
     isUsernameAvailable: vi.fn().mockResolvedValue(true),
     ensurePlayerForVGames: vi.fn().mockResolvedValue({ id: 'p1', display_name: 'Vee' }),
     getLeaderboard: vi.fn().mockResolvedValue([]),
+    getPlayerByVGamesAccountId: vi.fn().mockResolvedValue(null),
   },
 }))
 vi.mock('../../server/db', () => mockDb)
@@ -65,6 +66,10 @@ afterEach(() => {
   while (clients.length) clients.pop()?.close()
   mockFetch.mockClear()
   mockDb.ensurePlayerForVGames.mockClear()
+  mockDb.getPlayerByVGamesAccountId.mockReset()
+  mockDb.getPlayerByVGamesAccountId.mockResolvedValue(null)
+  mockDb.getPlayerMatches.mockReset()
+  mockDb.getPlayerMatches.mockResolvedValue([])
 })
 
 afterAll(() => {
@@ -143,5 +148,55 @@ describe('UPDATE_PROFILE is gated on a verified VGames identity', () => {
     await new Promise((r) => setTimeout(r, 150))
 
     expect(mockDb.ensurePlayerForVGames).not.toHaveBeenCalled()
+  })
+})
+
+describe('PULL_HISTORY returns only the caller\'s own matches, gated on identity', () => {
+  const emitPull = (client: ClientSocket, token: string) =>
+    new Promise<any>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('no PULL_HISTORY ack')), 2000)
+      client.emit(EVENTS.PULL_HISTORY, { vgamesToken: token }, (a: any) => { clearTimeout(t); resolve(a) })
+    })
+
+  it("returns the account's matches (resolved via vgames_account_id) for a valid token", async () => {
+    mockDb.getPlayerByVGamesAccountId.mockResolvedValueOnce({ id: 'p1', display_name: 'Vee', friend_code: 'VJ-7064' })
+    mockDb.getPlayerMatches.mockResolvedValueOnce([
+      { opponent_type: 'ai_easy', opponent_id: null, player_score: 10, opponent_score: 5, won: true, timestamp: '2026-01-01T00:00:00.000Z' },
+    ])
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+
+    const ack = await emitPull(client, 'good-token')
+
+    expect(mockDb.getPlayerByVGamesAccountId).toHaveBeenCalledWith('acc-good')
+    expect(mockDb.getPlayerMatches).toHaveBeenCalledWith('p1')
+    expect(ack.ok).toBe(true)
+    expect(ack.matches).toHaveLength(1)
+    expect(ack.matches[0]).toMatchObject({ opponent_type: 'ai_easy', won: true })
+    expect(ack.displayName).toBe('Vee')
+    expect(ack.friendCode).toBe('VJ-7064')
+  })
+
+  it('rejects a missing/invalid token as unauthorized and never queries the db', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+
+    const ack = await emitPull(client, 'bad-token')
+
+    expect(ack.ok).toBe(false)
+    expect(ack.error).toBe('unauthorized')
+    expect(mockDb.getPlayerByVGamesAccountId).not.toHaveBeenCalled()
+  })
+
+  it('returns an empty history (ok) when the account has no Supabase row yet', async () => {
+    mockDb.getPlayerByVGamesAccountId.mockResolvedValueOnce(null)
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+
+    const ack = await emitPull(client, 'good-token')
+
+    expect(ack.ok).toBe(true)
+    expect(ack.matches).toEqual([])
+    expect(mockDb.getPlayerMatches).not.toHaveBeenCalled()
   })
 })

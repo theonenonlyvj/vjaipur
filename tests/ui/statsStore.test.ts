@@ -30,6 +30,7 @@ vi.mock('../../src/socket/socketService', () => ({
     secureAccount: vi.fn(),
     updateProfile: vi.fn(),
     setAuthToken: vi.fn(),
+    pullHistory: vi.fn(),
   },
 }))
 
@@ -226,6 +227,46 @@ describe('statsStore', () => {
 
       expect(result).toEqual({ ok: false, error: 'invalid_credentials' })
       expect(useStatsStore.getState().vgamesToken).toBeNull()
+    })
+  })
+
+  describe('pullVGamesHistory', () => {
+    it('restores matches without clobbering a secured displayName or the local friendCode', async () => {
+      // A signed-in secured account whose Supabase row still lags behind
+      // (guest display_name + synthetic friend_code) — the exact state a fresh
+      // "Create Account" leaves. The pull must restore matches but must NOT
+      // revert the identity (which would flip the account back to "guest").
+      useStatsStore.setState({
+        displayName: 'Alice',
+        friendCode: 'VJ-1234',
+        secretKey: 'sk',
+        vgamesToken: 'vg-tok',
+        vgamesAccountId: 'vg-acc',
+        matches: [],
+      })
+      vi.mocked(socketService.pullHistory).mockResolvedValueOnce({
+        ok: true,
+        matches: [
+          { opponent_type: 'ai_easy', opponent_id: null, player_score: 10, opponent_score: 5, won: true, timestamp: '2026-01-01T00:00:00.000Z' },
+        ],
+        displayName: 'Guest_9999', // lagging server name — must be ignored
+        friendCode: 'VG-5678', // synthetic cosmetic code — must be ignored
+      })
+
+      await useStatsStore.getState().pullVGamesHistory()
+
+      const s = useStatsStore.getState()
+      expect(s.matches).toHaveLength(1)
+      expect(s.matches[0]).toMatchObject({ opponent_type: 'ai_easy', won: true })
+      expect(s.displayName).toBe('Alice') // NOT reverted to the guest name
+      expect(s.friendCode).toBe('VJ-1234') // NOT replaced by the synthetic code
+    })
+
+    it('is a no-op without a VGames token', async () => {
+      vi.mocked(socketService.pullHistory).mockClear()
+      useStatsStore.setState({ vgamesToken: null, matches: [] })
+      await useStatsStore.getState().pullVGamesHistory()
+      expect(socketService.pullHistory).not.toHaveBeenCalled()
     })
   })
 })
