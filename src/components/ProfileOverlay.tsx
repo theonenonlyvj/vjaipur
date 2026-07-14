@@ -116,7 +116,7 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
               onClick={() => { setIsSecuring(true); setError(''); }}
               style={primaryBtnStyle}
             >
-              Secure Account
+              Create Account
             </button>
           )}
 
@@ -125,14 +125,14 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
               onClick={() => { setIsRestoring(true); setError(''); }}
               style={secondaryBtnStyle}
             >
-              Restore Account
+              Log In
             </button>
           )}
 
           {(isSecuring || isRestoring) && (
             <div style={formStyle}>
               <h3 style={{ margin: '0 0 12px 0', fontSize: 16, color: '#f0c030' }}>
-                {isSecuring ? 'Secure Account' : 'Restore Account'}
+                {isSecuring ? 'Create Account' : 'Log In'}
               </h3>
               <input 
                 value={username}
@@ -163,7 +163,7 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
                   style={{ ...primaryBtnStyle, flex: 1, margin: 0 }}
                   disabled={loading || !username || !password}
                 >
-                  {loading ? 'Processing...' : (isSecuring ? 'Secure' : 'Restore')}
+                  {loading ? 'Processing...' : (isSecuring ? 'Create Account' : 'Log In')}
                 </button>
               </div>
             </div>
