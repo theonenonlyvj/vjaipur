@@ -88,6 +88,29 @@ export async function getPlayerMatches(playerId: string) {
   }
 }
 
+/**
+ * Read-only lookup of the Supabase `players` row for a VGames-verified
+ * accountId (the dual-run `vgames_account_id` bridge column back-written at
+ * cutover). Unlike ensurePlayerForVGames this NEVER writes — used by
+ * PULL_HISTORY to fetch a signed-in account's own match history on a fresh
+ * device without mutating the row (a write would clobber the real
+ * friend_code/secret_key). Returns null when the account has no Supabase row.
+ */
+export async function getPlayerByVGamesAccountId(accountId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('players')
+      .select('*')
+      .eq('vgames_account_id', accountId)
+      .limit(1)
+    if (error) throw error
+    return data && data.length > 0 ? data[0] : null
+  } catch (err) {
+    console.error('db: getPlayerByVGamesAccountId error:', err)
+    throw err
+  }
+}
+
 // ── VGames dual-run bridge (Task C4) ────────────────────────────────────────
 // vjaipur now authenticates against the shared VGames Identity worker (see
 // server/vgamesAuth.ts) but keeps using this Supabase `players`/`matches`

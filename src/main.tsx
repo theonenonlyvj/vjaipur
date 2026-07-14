@@ -12,10 +12,14 @@ import { useStatsStore } from './store/statsStore'
 const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
 
-// NOTE: cross-device history restore/merge (pullFullHistory) is deferred to a
-// later phase (P4). The server's RESTORE_ACCOUNT handler was removed in
-// Phase C, so calling it here would be a silent no-op that still transmits
-// the local secret_key over the socket for nothing. Do not call it on boot.
+// If a VGames account is already signed in (persisted token), pull this
+// account's own match history from the server so the career-stats panel is
+// populated on a fresh device or reload (cross-device restore, replacing the
+// removed RESTORE_ACCOUNT path). Fire-and-forget: it merges into the local
+// store reactively and no-ops when offline or signed out.
+if (useStatsStore.getState().vgamesToken) {
+  void useStatsStore.getState().pullVGamesHistory()
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

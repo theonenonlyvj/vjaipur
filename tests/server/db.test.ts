@@ -12,6 +12,7 @@ const { mockSupabase } = vi.hoisted(() => ({
     ilike: vi.fn().mockReturnThis(),
     single: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
   }
 }))
 
@@ -22,7 +23,8 @@ vi.mock('@supabase/supabase-js', () => ({
 // Now import the functions to test
 import {
   getPlayerByCode,
-  createPlayer, recordMatch, getPlayerMatches, ensurePlayerForVGames
+  createPlayer, recordMatch, getPlayerMatches, ensurePlayerForVGames,
+  getPlayerByVGamesAccountId
 } from '../../server/db'
 
 describe('db.ts', () => {
@@ -38,6 +40,7 @@ describe('db.ts', () => {
     mockSupabase.ilike.mockReturnThis()
     mockSupabase.single.mockReturnThis()
     mockSupabase.order.mockReturnThis()
+    mockSupabase.limit.mockReturnThis()
   })
 
   it('getPlayerByCode calls supabase select and eq', async () => {
@@ -92,6 +95,26 @@ describe('db.ts', () => {
     // matches the pre-existing baseline; not fixing it here (out of scope).
     expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
     expect(matches).toEqual([{ id: 'm1' }])
+  })
+
+  it('getPlayerByVGamesAccountId queries players by vgames_account_id (read-only)', async () => {
+    mockSupabase.limit.mockResolvedValueOnce({ data: [{ id: 'p9', friend_code: 'VJ-7064' }], error: null })
+
+    const player = await getPlayerByVGamesAccountId('acc-abc')
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('players')
+    expect(mockSupabase.eq).toHaveBeenCalledWith('vgames_account_id', 'acc-abc')
+    // read-only: it must never write (a write would clobber the real friend_code)
+    expect(mockSupabase.upsert).not.toHaveBeenCalled()
+    expect(mockSupabase.insert).not.toHaveBeenCalled()
+    expect(mockSupabase.update).not.toHaveBeenCalled()
+    expect(player).toEqual({ id: 'p9', friend_code: 'VJ-7064' })
+  })
+
+  it('getPlayerByVGamesAccountId returns null when no row matches', async () => {
+    mockSupabase.limit.mockResolvedValueOnce({ data: [], error: null })
+    const player = await getPlayerByVGamesAccountId('acc-none')
+    expect(player).toBeNull()
   })
 
   // ── VGames dual-run bridge (Task C4, race-safety fix in Fix 3) ───────────

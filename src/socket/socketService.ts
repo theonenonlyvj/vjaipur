@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload, PullHistoryPayload, PullHistoryAck } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -159,6 +159,18 @@ export class SocketService {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error('Not connected'))
       this.socket.emit(EVENTS.GET_LEADERBOARD, (ack: LeaderboardAck) => resolve(ack))
+    })
+  }
+
+  /**
+   * Fetch the signed-in VGames account's own match history from the server
+   * (cross-device restore). The token in the payload is what the server
+   * introspects, so this works over an anonymous-handshake socket too.
+   */
+  pullHistory(payload: PullHistoryPayload): Promise<PullHistoryAck> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) return reject(new Error('Not connected'))
+      this.socket.emit(EVENTS.PULL_HISTORY, payload, (ack: PullHistoryAck) => resolve(ack))
     })
   }
 
