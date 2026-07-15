@@ -23,6 +23,14 @@ interface StatsState {
   // existing local installs resolve to their VGames account automatically.
   vgamesToken: string | null
   vgamesAccountId: string | null
+  // Explicit account claim state, authoritative over the old
+  // `displayName.startsWith('Guest_')` heuristic (which broke when a guest
+  // renamed themselves — see ProfileOverlay). Intentionally OPTIONAL with NO
+  // initial value: legacy installs rehydrate WITHOUT this key, so `undefined`
+  // is distinguishable from a real false and lets the UI fall back to the name
+  // heuristic until the next auth (or an explicit claim) sets it authoritatively.
+  //   undefined = unknown (legacy) · false = ghost/guest · true = claimed
+  claimed?: boolean
 }
 
 interface StatsActions {
@@ -102,6 +110,7 @@ export const useStatsStore = create<StatsStore>()(
           friendCode: newFriendCode,
           secretKey: newSecretKey,
           displayName: guestName,
+          claimed: false, // freshly minted ghost — not yet claimed
         })
 
         return { friendCode: newFriendCode, secretKey: newSecretKey, displayName: guestName }
@@ -119,8 +128,14 @@ export const useStatsStore = create<StatsStore>()(
         }
         const { secretKey, displayName } = get().ensureAccount()
         try {
-          const { token, accountId } = await vgamesQuick(secretKey, displayName ?? undefined)
-          set({ vgamesToken: token, vgamesAccountId: accountId })
+          const { token, accountId, status } = await vgamesQuick(secretKey, displayName ?? undefined)
+          // Adopt the authoritative claim state when the worker reports one.
+          // This self-heals legacy installs on their next silent re-auth. An
+          // absent status leaves `claimed` untouched (never assume ghost).
+          const patch: Partial<StatsState> = { vgamesToken: token, vgamesAccountId: accountId }
+          if (status === 'claimed') patch.claimed = true
+          else if (status === 'ghost') patch.claimed = false
+          set(patch)
           socketService.setAuthToken(token)
           return { token, accountId }
         } catch (e) {
@@ -171,6 +186,7 @@ export const useStatsStore = create<StatsStore>()(
               vgamesToken: result.token,
               vgamesAccountId: result.accountId,
               displayName: username,
+              claimed: true, // logged into an existing username+password account
             })
             socketService.setAuthToken(result.token)
             // Pull this account's match history so the career-stats panel
@@ -194,7 +210,7 @@ export const useStatsStore = create<StatsStore>()(
           if (!account) return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
           const ack = await vgamesSetCredentials(account.token, username, password)
           if (ack.ok) {
-            set({ displayName: username })
+            set({ displayName: username, claimed: true }) // just claimed a username+password
           }
           return ack
         } catch (e) {
@@ -389,6 +405,7 @@ export const useStatsStore = create<StatsStore>()(
           matches: [],
           vgamesToken: null,
           vgamesAccountId: null,
+          claimed: false, // reset to a fresh, unclaimed guest
         })
       },
     }),
