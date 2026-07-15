@@ -26,21 +26,6 @@ export interface Match {
   timestamp?: number
 }
 
-export async function createPlayer(friendCode: string, secretKey: string, displayName?: string) {
-  try {
-    const { data, error } = await supabase
-      .from('players')
-      .insert([{ friend_code: friendCode, secret_key: secretKey, display_name: displayName }])
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  } catch (err) {
-    console.error('db: createPlayer error:', err)
-    throw err
-  }
-}
-
 export async function recordMatch(match: Match) {
   const payload: any = {
     player_id: match.player_id,
@@ -55,22 +40,6 @@ export async function recordMatch(match: Match) {
   }
   const { error } = await supabase.from('matches').insert([payload])
   if (error) throw error
-}
-
-export async function getPlayerByCode(friendCode: string) {
-  try {
-    const { data, error } = await supabase
-      .from('players')
-      .select('*')
-      .eq('friend_code', friendCode)
-      .limit(1)
-    
-    if (error) throw error
-    return data && data.length > 0 ? data[0] : null
-  } catch (err) {
-    console.error('db: getPlayerByCode error:', err)
-    throw err
-  }
 }
 
 export async function getPlayerMatches(playerId: string) {
@@ -181,14 +150,6 @@ export async function ensurePlayerForVGames(accountId: string, displayName: stri
     console.error('db: ensurePlayerForVGames error:', err)
     return null
   }
-}
-
-export async function updatePlayerName(playerId: string, displayName: string) {
-  const { error } = await supabase
-    .from('players')
-    .update({ display_name: displayName })
-    .eq('id', playerId)
-  if (error) throw error
 }
 
 export async function isUsernameAvailable(name: string, excludeFriendCode?: string) {

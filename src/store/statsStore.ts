@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
-import type { SyncMatchPayload, RestoreAccountAck } from '../shared/protocol'
+import type { SyncMatchPayload } from '../shared/protocol'
 
 export interface MatchRecord {
   opponent_type: string
@@ -40,8 +40,6 @@ interface StatsActions {
   restoreAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
-  syncFullHistory: () => Promise<void>
-  pullFullHistory: () => Promise<void>
   pullVGamesHistory: () => Promise<void>
   clearHistory: () => void
   clearStats: () => void
@@ -234,115 +232,8 @@ export const useStatsStore = create<StatsStore>()(
         }
       },
 
-      syncFullHistory: async () => {
-        const { matches, friendCode, secretKey, displayName } = get()
-        if (!friendCode || !secretKey) return
-
-        try {
-          await waitForConnection()
-          
-          // First, get the current cloud record to see what's already there
-          let cloudMatches: MatchRecord[] = []
-          const isGuest = displayName?.startsWith('Guest_')
-          let ack: RestoreAccountAck
-          if (!isGuest && displayName) {
-            ack = await socketService.restoreAccount({ username: displayName, password: secretKey })
-          } else {
-            ack = await socketService.restoreAccount({ friendCode, secretKey })
-          }
-          if (ack.ok && ack.matches) cloudMatches = ack.matches
-
-          const cloudTimestamps = new Set(cloudMatches.map(m => 
-            typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
-          ))
-
-          // Only sync matches that DON'T exist in the cloud
-          const toSync = matches.filter(m => {
-            const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
-            return !cloudTimestamps.has(ts)
-          }).reverse()
-          for (const m of toSync) {
-            socketService.syncMatch({
-              friendCode,
-              secretKey,
-              username: !isGuest ? displayName! : undefined,
-              password: !isGuest ? secretKey : undefined,
-              displayName: displayName || undefined,
-              match: {
-                opponent_type: m.opponent_type,
-                opponent_id: m.opponent_id,
-                player_score: m.player_score,
-                opponent_score: m.opponent_score,
-                won: m.won,
-                timestamp: m.timestamp,
-              }
-            })
-            // Small delay to avoid flooding socket if there are many matches
-            await new Promise(r => setTimeout(r, 50))
-          }
-
-          // Wait a bit to ensure DB inserts are processed
-          await new Promise(r => setTimeout(r, 1000))
-          // Refresh local state with the final merged set from cloud
-          await get().pullFullHistory()
-        } catch (e) {
-          console.error('syncFullHistory failed:', e)
-        }
-      },
-
-      pullFullHistory: async () => {
-        const { displayName, secretKey, friendCode } = get()
-        if (!secretKey) return
-
-        try {
-          await waitForConnection()
-          
-          let ack: RestoreAccountAck
-          const isGuest = displayName?.startsWith('Guest_')
-          
-          if (!isGuest && displayName) {
-            // Secured account: pull by username
-            ack = await socketService.restoreAccount({ username: displayName, password: secretKey })
-          } else if (friendCode) {
-            // Guest account: pull by friendCode + secretKey (the long auto-gen one)
-            // We'll need to update restoreAccount to handle this on the server
-            ack = await socketService.restoreAccount({ friendCode, secretKey })
-          } else {
-            return
-          }
-
-          if (ack.ok && ack.matches) {
-            const cloudMatches = ack.matches
-            const cloudTimestamps = new Set(cloudMatches.map(m => 
-              typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
-            ))
-            
-            const localMatches = get().matches
-            const unsyncedLocal = localMatches.filter(m => {
-               const localTs = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
-               return !cloudTimestamps.has(localTs)
-            })
-
-            const merged = [...unsyncedLocal, ...cloudMatches].sort((a, b) => {
-                 const tA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp
-                 const tB = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp
-                 return tB - tA
-            })
-
-            set({ 
-              matches: merged,
-              displayName: ack.displayName || get().displayName,
-              friendCode: ack.friendCode || get().friendCode,
-              secretKey: ack.secretKey || get().secretKey,
-            })
-          }
-        } catch (e) {
-          console.warn('pullFullHistory failed (likely offline or server waking up)')
-        }
-      },
-
       // Cross-device history restore over the VGames-authenticated socket
-      // (replaces the dead pullFullHistory RESTORE_ACCOUNT path). Fetches THIS
+      // (superseded the removed legacy RESTORE_ACCOUNT path). Fetches THIS
       // account's own matches from the server (Supabase, dual-run) and merges
       // them into the local career-stats panel. No-op without a VGames token.
       pullVGamesHistory: async () => {

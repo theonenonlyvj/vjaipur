@@ -22,8 +22,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 // Now import the functions to test
 import {
-  getPlayerByCode,
-  createPlayer, recordMatch, getPlayerMatches, ensurePlayerForVGames,
+  recordMatch, getPlayerMatches, ensurePlayerForVGames,
   getPlayerByVGamesAccountId
 } from '../../server/db'
 
@@ -41,27 +40,6 @@ describe('db.ts', () => {
     mockSupabase.single.mockReturnThis()
     mockSupabase.order.mockReturnThis()
     mockSupabase.limit.mockReturnThis()
-  })
-
-  it('getPlayerByCode calls supabase select and eq', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
-
-    const player = await getPlayerByCode('ABCDEF')
-
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.select).toHaveBeenCalledWith('*')
-    expect(mockSupabase.eq).toHaveBeenCalledWith('friend_code', 'ABCDEF')
-    expect(player).toEqual({ id: '123' })
-  })
-
-  it('createPlayer calls supabase insert', async () => {
-    mockSupabase.single.mockResolvedValue({ data: { id: '123' }, error: null })
-
-    const player = await createPlayer('ABCDEF', 'secret', 'Player1')
-
-    expect(mockSupabase.from).toHaveBeenCalledWith('players')
-    expect(mockSupabase.insert).toHaveBeenCalledWith([{ friend_code: 'ABCDEF', secret_key: 'secret', display_name: 'Player1' }])
-    expect(player).toEqual({ id: '123' })
   })
 
   it('recordMatch calls supabase insert', async () => {
