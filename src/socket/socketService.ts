@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, RestoreAccountPayload, RestoreAccountAck, SecureAccountPayload, SecureAccountAck, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload, PullHistoryPayload, PullHistoryAck } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload, PullHistoryPayload, PullHistoryAck } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null
@@ -118,24 +118,6 @@ export class SocketService {
 
   syncMatch(payload: SyncMatchPayload): void {
     this.socket?.emit(EVENTS.SYNC_MATCH, payload)
-  }
-
-  restoreAccount(payload: RestoreAccountPayload): Promise<RestoreAccountAck> {
-    return new Promise((resolve, reject) => {
-      if (!this.socket) return reject(new Error('Not connected'))
-      this.socket.emit(EVENTS.RESTORE_ACCOUNT, payload, (ack: RestoreAccountAck) => {
-        resolve(ack)
-      })
-    })
-  }
-
-  secureAccount(payload: SecureAccountPayload): Promise<SecureAccountAck> {
-    return new Promise((resolve, reject) => {
-      if (!this.socket) return reject(new Error('Not connected'))
-      this.socket.emit(EVENTS.SECURE_ACCOUNT, payload, (ack: SecureAccountAck) => {
-        resolve(ack)
-      })
-    })
   }
 
   checkUsername(name: string): Promise<{ available: boolean }> {

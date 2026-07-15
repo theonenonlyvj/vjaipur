@@ -9,11 +9,8 @@ import { EVENTS } from '../../src/shared/protocol'
 // here never touches Supabase.
 const { mockDb } = vi.hoisted(() => ({
   mockDb: {
-    getPlayerByCode: vi.fn(),
-    createPlayer: vi.fn(),
     recordMatch: vi.fn(),
     getPlayerMatches: vi.fn().mockResolvedValue([]),
-    updatePlayerName: vi.fn(),
     isUsernameAvailable: vi.fn().mockResolvedValue(true),
     ensurePlayerForVGames: vi.fn().mockResolvedValue({ id: 'p1', display_name: 'Vee' }),
     getLeaderboard: vi.fn().mockResolvedValue([]),
