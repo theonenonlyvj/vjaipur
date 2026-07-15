@@ -6,10 +6,12 @@ interface ProfileIconProps {
 }
 
 export function ProfileIcon({ onClick }: ProfileIconProps) {
-  const { displayName } = useStatsStore()
-  
+  const { displayName, claimed } = useStatsStore()
+
   const initial = displayName ? displayName[0].toUpperCase() : '?'
-  const isGuest = displayName?.startsWith('Guest_')
+  // Mirror ProfileOverlay: explicit claim state wins; legacy installs
+  // (claimed === undefined) fall back to the old name-prefix heuristic.
+  const isGuest = claimed === undefined ? displayName?.startsWith('Guest_') : !claimed
 
   return (
     <button 

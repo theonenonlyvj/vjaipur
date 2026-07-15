@@ -48,4 +48,48 @@ describe('ProfileOverlay', () => {
     expect(screen.getByPlaceholderText('Password')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Log In' })).toBeDefined()
   })
+
+  // ── Claim state (the renamed-guest dead-end bug) ───────────────────────────
+  it('keeps Create Account + GUEST badge for a renamed-but-unclaimed account', () => {
+    // The bug: a guest who renamed to a real name (non-Guest_) used to lose
+    // "Create Account" forever and falsely show "SECURED ACCOUNT". With explicit
+    // claim state (claimed === false) they must still read as a guest.
+    useStatsStore.getState().clearStats()
+    useStatsStore.setState({ displayName: 'Veera', friendCode: 'VJ-1234', claimed: false })
+
+    render(<ProfileOverlay onClose={() => {}} />)
+
+    expect(screen.getByText('GUEST ACCOUNT')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Create Account' })).toBeDefined()
+  })
+
+  it('hides Create Account + shows SECURED badge for a claimed account', () => {
+    useStatsStore.getState().clearStats()
+    useStatsStore.setState({ displayName: 'Veera', friendCode: 'VJ-1234', claimed: true })
+
+    render(<ProfileOverlay onClose={() => {}} />)
+
+    expect(screen.getByText('SECURED ACCOUNT')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Create Account' })).toBeNull()
+  })
+
+  it('legacy fallback (claimed undefined): a Guest_ name still reads as a guest', () => {
+    useStatsStore.getState().clearStats()
+    useStatsStore.setState({ displayName: 'Guest_1234', friendCode: 'VJ-1234', claimed: undefined })
+
+    render(<ProfileOverlay onClose={() => {}} />)
+
+    expect(screen.getByText('GUEST ACCOUNT')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Create Account' })).toBeDefined()
+  })
+
+  it("legacy fallback (claimed undefined): a real name reads as secured (today's behavior preserved)", () => {
+    useStatsStore.getState().clearStats()
+    useStatsStore.setState({ displayName: 'Veera', friendCode: 'VJ-1234', claimed: undefined })
+
+    render(<ProfileOverlay onClose={() => {}} />)
+
+    expect(screen.getByText('SECURED ACCOUNT')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Create Account' })).toBeNull()
+  })
 })

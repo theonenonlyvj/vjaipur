@@ -3,14 +3,22 @@
 // device-bound ghost accounts + username/password auth. Replaces vjaipur's old
 // plaintext-secret Socket.IO SECURE_ACCOUNT/RESTORE_ACCOUNT flow (see Task C4).
 
+// Account claim state as reported by the VGames worker's auth responses.
+// 'ghost' = device-bound, never claimed; 'claimed' = has a username+password.
+// Optional because older worker builds may omit it — callers must treat an
+// absent status as "unknown" and fall back to their own signal, never as ghost.
+export type VGamesStatus = 'ghost' | 'claimed'
+
 export interface VGamesQuickResult {
   token: string
   accountId: string
+  status?: VGamesStatus
 }
 
 export interface VGamesSetCredentialsResult {
   ok: boolean
   error?: string
+  status?: VGamesStatus
 }
 
 export interface VGamesLoginResult {
@@ -19,6 +27,7 @@ export interface VGamesLoginResult {
   accountId?: string
   mustChangePassword?: boolean
   error?: string
+  status?: VGamesStatus
 }
 
 const DEFAULT_VGAMES_URL = 'https://viota-worker.theonenonlyvj.workers.dev'
@@ -53,7 +62,7 @@ export async function vgamesQuick(deviceCredential: string, displayName?: string
   const res = await postJson('/auth/quick', { deviceCredential, displayName, game: 'jaipur' })
   if (!res.ok) throw new Error(`vgamesQuick failed: ${res.status}`)
   const data = await safeJson(res)
-  return { token: data.token, accountId: data.accountId }
+  return { token: data.token, accountId: data.accountId, status: data.status }
 }
 
 /** POST /auth/set-credentials (Bearer) — claim the current ghost with a username+password, in place. */
@@ -64,7 +73,7 @@ export async function vgamesSetCredentials(
 ): Promise<VGamesSetCredentialsResult> {
   const res = await postJson('/auth/set-credentials', { username, password }, token)
   const data = await safeJson(res)
-  if (res.ok) return { ok: true }
+  if (res.ok) return { ok: true, status: data.status }
   return { ok: false, error: data.error ?? `http_${res.status}` }
 }
 
@@ -77,5 +86,5 @@ export async function vgamesLogin(
   const res = await postJson('/auth/login', { username, password, deviceCredential })
   const data = await safeJson(res)
   if (!res.ok) return { ok: false, error: data.error ?? `http_${res.status}` }
-  return { ok: true, token: data.token, accountId: data.accountId, mustChangePassword: data.mustChangePassword }
+  return { ok: true, token: data.token, accountId: data.accountId, mustChangePassword: data.mustChangePassword, status: data.status }
 }

@@ -269,4 +269,75 @@ describe('statsStore', () => {
       expect(socketService.pullHistory).not.toHaveBeenCalled()
     })
   })
+
+  describe('claimed (account claim state)', () => {
+    it('is false immediately after a fresh ghost is minted', () => {
+      useStatsStore.getState().ensureAccount()
+      expect(useStatsStore.getState().claimed).toBe(false)
+    })
+
+    it('persists true after a successful secureAccount (claim)', async () => {
+      useStatsStore.getState().ensureAccount()
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' })
+      vi.mocked(vgamesSetCredentials).mockResolvedValueOnce({ ok: true })
+
+      await useStatsStore.getState().secureAccount('vee', 'hunter2')
+
+      expect(useStatsStore.getState().claimed).toBe(true)
+    })
+
+    it('does not flip claimed to true when secureAccount fails', async () => {
+      useStatsStore.getState().ensureAccount() // claimed=false
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' })
+      vi.mocked(vgamesSetCredentials).mockResolvedValueOnce({ ok: false, error: 'username_taken' })
+
+      await useStatsStore.getState().secureAccount('taken', 'pw123456')
+
+      expect(useStatsStore.getState().claimed).toBe(false)
+    })
+
+    it('persists true after a successful restoreAccount (login)', async () => {
+      useStatsStore.getState().ensureAccount()
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: 't', accountId: 'a', mustChangePassword: false })
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      expect(useStatsStore.getState().claimed).toBe(true)
+    })
+
+    it('is reset to false by clearStats', () => {
+      useStatsStore.setState({ claimed: true })
+      useStatsStore.getState().clearStats()
+      expect(useStatsStore.getState().claimed).toBe(false)
+    })
+
+    it('self-heals from the auth status on silent re-auth: status "claimed" sets claimed true', async () => {
+      useStatsStore.getState().ensureAccount() // claimed=false, no cached token yet
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc', status: 'claimed' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(useStatsStore.getState().claimed).toBe(true)
+    })
+
+    it('self-heals from the auth status on silent re-auth: status "ghost" downgrades claimed to false', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ claimed: true, vgamesToken: null, vgamesAccountId: null }) // pretend a stale true
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc', status: 'ghost' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(useStatsStore.getState().claimed).toBe(false)
+    })
+
+    it('leaves claimed untouched when the auth response omits a status (legacy worker)', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ claimed: undefined, vgamesToken: null, vgamesAccountId: null })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' }) // no status
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(useStatsStore.getState().claimed).toBeUndefined()
+    })
+  })
 })

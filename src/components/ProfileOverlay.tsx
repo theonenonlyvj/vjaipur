@@ -12,7 +12,7 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
     socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
   }, [])
 
-  const { displayName, friendCode, secureAccount, restoreAccount, clearStats } = useStatsStore()
+  const { displayName, friendCode, claimed, secureAccount, restoreAccount, clearStats } = useStatsStore()
   const { totalMatches, wins, losses, winRate } = useStatsAggregates()
 
   const [isRestoring, setIsRestoring] = useState(false)
@@ -23,7 +23,12 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const isGuest = displayName?.startsWith('Guest_')
+  // Explicit claim state is authoritative. Only fall back to the legacy
+  // name-prefix heuristic when it's unknown (undefined) — i.e. a legacy install
+  // that hasn't re-authed since claim tracking landed. This is what fixes the
+  // renamed-guest dead-end: a renamed-but-unclaimed account now has
+  // claimed === false, so it still reads as a guest and keeps "Create Account".
+  const isGuest = claimed === undefined ? displayName?.startsWith('Guest_') : !claimed
 
   async function handleSecure() {
     if (!username || !password) {
