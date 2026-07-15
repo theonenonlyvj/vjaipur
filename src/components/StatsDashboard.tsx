@@ -1,6 +1,7 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
 import { socketService } from '../socket/socketService'
+import { rankBySkill } from './leaderboardRank'
 import type { LeaderboardRow } from '../shared/protocol'
 
 interface StatsDashboardProps {
@@ -98,12 +99,12 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   })
   const overallRows = Array.from(overallMap.entries())
     .map(([name, s]) => ({ display_name: name, games: s.games, wins: s.wins, avg_delta: s.games > 0 ? s.totalDelta / s.games : 0 }))
-    .sort((a, b) => b.games - a.games)
+    .sort(rankBySkill)
 
   // Rows for a specific opponent_type tab
   const filteredRows = leaderboard
     .filter((r) => r.opponent_type === opponentTab)
-    .sort((a, b) => b.games - a.games)
+    .sort(rankBySkill)
 
   const activeRows = opponentTab === 'overall' ? overallRows : filteredRows
 
