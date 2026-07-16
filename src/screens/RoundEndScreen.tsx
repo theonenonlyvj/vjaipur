@@ -7,7 +7,7 @@ import { GameScreen } from './GameScreen'
 
 export function RoundEndScreen() {
   const navigate = useNavigate()
-  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName, matchLength } = useGameStore()
+  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName, matchLength, onlineStatus } = useGameStore()
   const [showBoard, setShowBoard] = useState(false)
 
   useEffect(() => {
@@ -33,6 +33,11 @@ export function RoundEndScreen() {
     }
     // In online mode, navigation is triggered by the useEffect above
     // when startNextRound updates state.phase to 'playing' or 'game-over'
+  }
+
+  function handleBackToMenu() {
+    useGameStore.getState().leaveOnline()
+    navigate('/')
   }
 
   const myIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
@@ -127,7 +132,35 @@ export function RoundEndScreen() {
       }}>
         Continue
       </button>
-      
+
+      {onlineStatus === 'forfeited' && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1500,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 24, padding: 24,
+          background: 'rgba(5, 5, 5, 0.94)',
+        }}>
+          <div style={{
+            fontSize: 26, fontWeight: 900, color: '#60c040', textAlign: 'center',
+            textTransform: 'uppercase', letterSpacing: 1, maxWidth: 400,
+          }}>
+            Opponent left — you win the match
+          </div>
+          <button
+            onClick={handleBackToMenu}
+            style={{
+              padding: '16px 48px', fontSize: 18, fontWeight: 900,
+              background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
+              color: '#f0e8d8',
+              border: '2px solid #f0c030', borderRadius: 12, cursor: 'pointer',
+              textTransform: 'uppercase', letterSpacing: 1,
+            }}
+          >
+            Back to Menu
+          </button>
+        </div>
+      )}
+
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }

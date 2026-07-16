@@ -6,7 +6,7 @@ import { GameScreen } from './GameScreen'
 
 export function GameOverScreen() {
   const navigate = useNavigate()
-  const { state, mode, difficulty, matchScores, opponentName, opponentFriendCode, disconnectOnline, lastMoveDescription, matchLength } = useGameStore()
+  const { state, mode, difficulty, matchScores, opponentName, opponentFriendCode, lastMoveDescription, matchLength } = useGameStore()
   const matches = useStatsStore(s => s.matches)
   const [showBoard, setShowBoard] = useState(false)
 
@@ -30,8 +30,8 @@ export function GameOverScreen() {
   )
   const allTimeDelta = relevantMatches.reduce((acc, m) => acc + (m.player_score - m.opponent_score), 0)
 
-  function handlePlayAgain() {
-    disconnectOnline()
+  function handleBackToMenu() {
+    useGameStore.getState().leaveOnline()
     navigate('/')
   }
 
@@ -152,7 +152,7 @@ export function GameOverScreen() {
         </>
       )}
 
-      <button onClick={handlePlayAgain} style={{
+      <button onClick={handleBackToMenu} style={{
         padding: '16px 48px', fontSize: 18, fontWeight: 900,
         background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
         color: '#f0e8d8',

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { MarketRow } from '../components/MarketRow'
 import { HandRow } from '../components/HandRow'
@@ -21,7 +21,8 @@ export interface GameScreenProps {
 }
 
 export function GameScreen({ frozen = false }: GameScreenProps) {
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
+  const navigate = useNavigate()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, onlineStatus, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
 
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
@@ -157,6 +158,11 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
     dispatch({ type: 'SELL', good, quantity })
   }
 
+  function handleBackToMenu() {
+    useGameStore.getState().leaveOnline()
+    navigate('/')
+  }
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 12,
@@ -260,8 +266,38 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
 
       {!frozen && <Toast message={error?.message ?? null} onDismiss={clearError} />}
 
+      {!frozen && <BonusReveal show={showBonusReveal} onDone={() => setShowBonusReveal(false)} />}
+
       {!frozen && tutorial && <TutorialOverlay onDone={endTutorial} />}
       {!frozen && showRules && <RulesModal onClose={() => setShowRules(false)} />}
+
+      {!frozen && onlineStatus === 'forfeited' && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1500,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 24, padding: 24,
+          background: 'rgba(5, 5, 5, 0.94)',
+        }}>
+          <div style={{
+            fontSize: 26, fontWeight: 900, color: '#60c040', textAlign: 'center',
+            textTransform: 'uppercase', letterSpacing: 1, maxWidth: 400,
+          }}>
+            Opponent left — you win the match
+          </div>
+          <button
+            onClick={handleBackToMenu}
+            style={{
+              padding: '16px 48px', fontSize: 18, fontWeight: 900,
+              background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
+              color: '#f0e8d8',
+              border: '2px solid #f0c030', borderRadius: 12, cursor: 'pointer',
+              textTransform: 'uppercase', letterSpacing: 1,
+            }}
+          >
+            Back to Menu
+          </button>
+        </div>
+      )}
     </div>
   )
 }
