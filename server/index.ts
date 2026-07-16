@@ -27,6 +27,23 @@ const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: ALLOWED_ORIGIN } })
 const rm = new RoomManager()
 
+// Fix 1 (DoS hardening) — last-resort process-level nets. Every socket event
+// handler below is individually wrapped in try/catch, and every ack callback
+// is guarded with `typeof cb === 'function'` before being invoked — but
+// Socket.IO's own dispatch does NOT try/catch listener bodies, and Node's
+// default behavior on an uncaught exception / unhandled promise rejection is
+// to terminate the process, which would drop every room and every connected
+// player over a single malformed message. These are the unconditional
+// backstop so that can never happen: any stray throw or rejection anywhere
+// in the process gets logged instead of killing it. See
+// tests/server/index.test.ts "Fix 1" for regression coverage.
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException (process kept alive):', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection (process kept alive):', reason)
+})
+
 io.on('connection', (socket) => {
   // Listener registration below MUST stay synchronous (no `await` before
   // `socket.on(...)` calls). Socket.IO delivers a client's packets to
@@ -40,87 +57,134 @@ io.on('connection', (socket) => {
   // resolveSocketIdentity(...) themselves, inside their own handler, which
   // is fine — that await happens after this handler has already returned.
 
-  socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb: (code: string) => void) => {
-    const code = rm.createRoom(socket.id, matchLength)
-    socket.join(code)
-    cb(code)
+  socket.on(EVENTS.CREATE_ROOM, (matchLength: number, cb?: (code: string) => void) => {
+    try {
+      const code = rm.createRoom(socket.id, matchLength)
+      socket.join(code)
+      if (typeof cb === 'function') cb(code)
+    } catch (err) {
+      console.error('CREATE_ROOM error:', err)
+    }
   })
 
-  socket.on(EVENTS.JOIN_ROOM, (code: string, cb: (ack: JoinRoomAck) => void) => {
-    const result = rm.joinRoom(socket.id, code)
-    if ('error' in result) { cb({ ok: false, error: result.error }); return }
-    socket.join(code.toUpperCase())
-    cb({ ok: true, playerIndex: 1 })
-    // Emit ROOM_READY to each player individually with their playerIndex
-    const seed = (Math.random() * 2 ** 32) >>> 0
-    const room = rm.getRoomBySocket(socket.id)!
-    const player0Id = room.players[0]!
-    const player0Socket = io.sockets.sockets.get(player0Id)
-    io.to(player0Id).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
-    socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
-    // Exchange names if already set
-    const name0 = (player0Socket as any)?._playerName as string | undefined
-    const name1 = (socket as any)._playerName as string | undefined
-    if (name0) socket.emit(EVENTS.OPPONENT_NAME, { name: name0 })
-    if (name1) io.to(player0Id).emit(EVENTS.OPPONENT_NAME, { name: name1 })
+  socket.on(EVENTS.JOIN_ROOM, (code: string, cb?: (ack: JoinRoomAck) => void) => {
+    try {
+      if (typeof code !== 'string' || !code) {
+        if (typeof cb === 'function') cb({ ok: false, error: 'Invalid room code' })
+        return
+      }
+      const result = rm.joinRoom(socket.id, code)
+      if ('error' in result) {
+        if (typeof cb === 'function') cb({ ok: false, error: result.error })
+        return
+      }
+      socket.join(code.toUpperCase())
+      if (typeof cb === 'function') cb({ ok: true, playerIndex: 1 })
+      // Emit ROOM_READY to each player individually with their playerIndex
+      const seed = (Math.random() * 2 ** 32) >>> 0
+      const room = rm.getRoomBySocket(socket.id)
+      if (!room) return
+      const player0Id = room.players[0]
+      if (!player0Id) return
+      const player0Socket = io.sockets.sockets.get(player0Id)
+      io.to(player0Id).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
+      socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
+      // Exchange names if already set
+      const name0 = (player0Socket as any)?._playerName as string | undefined
+      const name1 = (socket as any)._playerName as string | undefined
+      if (name0) socket.emit(EVENTS.OPPONENT_NAME, { name: name0 })
+      if (name1) io.to(player0Id).emit(EVENTS.OPPONENT_NAME, { name: name1 })
+    } catch (err) {
+      console.error('JOIN_ROOM error:', err)
+    }
   })
 
   socket.on(EVENTS.QUICK_MATCH, (matchLength: number) => {
-    const result = rm.quickMatch(socket.id, matchLength)
-    if (result.matched) {
-      const { code, opponentId } = result
-      const room = rm.rooms.get(code)!
-      const opponentSocket = io.sockets.sockets.get(opponentId)
-      if (!opponentSocket) {
-        rm.removeRoom(code)
-        return
+    try {
+      const result = rm.quickMatch(socket.id, matchLength)
+      if (result.matched) {
+        const { code, opponentId } = result
+        const room = rm.rooms.get(code)
+        if (!room) return
+        const opponentSocket = io.sockets.sockets.get(opponentId)
+        if (!opponentSocket) {
+          rm.removeRoom(code)
+          return
+        }
+        socket.join(code)
+        opponentSocket.join(code)
+        const seed = (Math.random() * 2 ** 32) >>> 0
+        io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
+        socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
+        // Exchange names if already set
+        const nameOpp = (opponentSocket as any)._playerName as string | undefined
+        const nameMe = (socket as any)._playerName as string | undefined
+        if (nameOpp) socket.emit(EVENTS.OPPONENT_NAME, { name: nameOpp })
+        if (nameMe) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name: nameMe })
       }
-      socket.join(code)
-      opponentSocket.join(code)
-      const seed = (Math.random() * 2 ** 32) >>> 0
-      io.to(opponentId).emit(EVENTS.ROOM_READY, { playerIndex: 0, seed, matchLength: room.matchLength })
-      socket.emit(EVENTS.ROOM_READY, { playerIndex: 1, seed, matchLength: room.matchLength })
-      // Exchange names if already set
-      const nameOpp = (opponentSocket as any)._playerName as string | undefined
-      const nameMe = (socket as any)._playerName as string | undefined
-      if (nameOpp) socket.emit(EVENTS.OPPONENT_NAME, { name: nameOpp })
-      if (nameMe) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name: nameMe })
+    } catch (err) {
+      console.error('QUICK_MATCH error:', err)
     }
   })
 
   socket.on(EVENTS.ACTION, (data: ActionPayload) => {
-    const room = rm.getRoomBySocket(socket.id)
-    if (!room) return
-    room.state = data.state
-    socket.to(room.code).emit(EVENTS.OPPONENT_ACTION, { action: data.action, state: data.state })
-  })
-
-  socket.on(EVENTS.NEXT_ROUND, (round: number) => {
-    const room = rm.getRoomBySocket(socket.id)
-    if (!room) return
-    const seed = rm.tryGetRoundSeed(room.code, round)
-    if (seed !== null) {
-      io.to(room.code).emit(EVENTS.ROUND_START, { seed })
+    try {
+      if (!data || data.state === undefined || data.state === null) {
+        console.warn('ACTION: missing data/state; ignoring')
+        return
+      }
+      const room = rm.getRoomBySocket(socket.id)
+      if (!room) return
+      room.state = data.state
+      socket.to(room.code).emit(EVENTS.OPPONENT_ACTION, { action: data.action, state: data.state })
+    } catch (err) {
+      console.error('ACTION error:', err)
     }
   })
 
-  socket.on(EVENTS.REJOIN, (data: RejoinPayload, cb: (ack: RejoinAck) => void) => {
-    const code = data.code.toUpperCase()
-    const room = rm.rooms.get(code)
-    if (!room) { cb({ ok: false }); return }
-    const ok = rm.rejoinRoom(socket.id, code, data.playerIndex)
-    if (!ok) { cb({ ok: false }); return }
-    socket.join(code)
-    cb({ ok: true, playerIndex: data.playerIndex, state: room.state })
-    socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
+  socket.on(EVENTS.NEXT_ROUND, (round: number) => {
+    try {
+      if (typeof round !== 'number' || !Number.isFinite(round)) {
+        console.warn('NEXT_ROUND: missing/invalid round; ignoring')
+        return
+      }
+      const room = rm.getRoomBySocket(socket.id)
+      if (!room) return
+      const seed = rm.tryGetRoundSeed(room.code, round)
+      if (seed !== null) {
+        io.to(room.code).emit(EVENTS.ROUND_START, { seed })
+      }
+    } catch (err) {
+      console.error('NEXT_ROUND error:', err)
+    }
+  })
+
+  socket.on(EVENTS.REJOIN, (data: RejoinPayload, cb?: (ack: RejoinAck) => void) => {
+    try {
+      const code = typeof data?.code === 'string' ? data.code.toUpperCase() : null
+      if (!code) { if (typeof cb === 'function') cb({ ok: false }); return }
+      const room = rm.rooms.get(code)
+      if (!room) { if (typeof cb === 'function') cb({ ok: false }); return }
+      const ok = rm.rejoinRoom(socket.id, code, data.playerIndex)
+      if (!ok) { if (typeof cb === 'function') cb({ ok: false }); return }
+      socket.join(code)
+      if (typeof cb === 'function') cb({ ok: true, playerIndex: data.playerIndex, state: room.state })
+      socket.to(code).emit(EVENTS.OPPONENT_RECONNECTED)
+    } catch (err) {
+      console.error('REJOIN error:', err)
+    }
   })
 
   socket.on(EVENTS.SET_NAME, (data: SetNamePayload) => {
-    const name = String(data?.name ?? '').trim().slice(0, 24)
-    if (!name) return
-    ;(socket as any)._playerName = name
-    const opponentId = rm.getOpponentId(socket.id)
-    if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name })
+    try {
+      const name = String(data?.name ?? '').trim().slice(0, 24)
+      if (!name) return
+      ;(socket as any)._playerName = name
+      const opponentId = rm.getOpponentId(socket.id)
+      if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_NAME, { name })
+    } catch (err) {
+      console.error('SET_NAME error:', err)
+    }
   })
 
   socket.on(EVENTS.SYNC_MATCH, async (data: SyncMatchPayload) => {
@@ -187,20 +251,28 @@ io.on('connection', (socket) => {
   // Handlers are kept registered, responding `gone`, purely so a
   // not-yet-upgraded client gets a clean rejection instead of a silent hang.
   socket.on(EVENTS.RESTORE_ACCOUNT, (_data: RestoreAccountPayload, cb?: (ack: RestoreAccountAck) => void) => {
-    cb?.({ ok: false, error: 'gone' })
+    try {
+      if (typeof cb === 'function') cb({ ok: false, error: 'gone' })
+    } catch (err) {
+      console.error('RESTORE_ACCOUNT error:', err)
+    }
   })
 
   socket.on(EVENTS.SECURE_ACCOUNT, (_data: SecureAccountPayload, cb?: (ack: SecureAccountAck) => void) => {
-    cb?.({ ok: false, error: 'gone' })
+    try {
+      if (typeof cb === 'function') cb({ ok: false, error: 'gone' })
+    } catch (err) {
+      console.error('SECURE_ACCOUNT error:', err)
+    }
   })
 
-  socket.on(EVENTS.CHECK_USERNAME, async (data: { name: string }, cb: (ack: { available: boolean }) => void) => {
+  socket.on(EVENTS.CHECK_USERNAME, async (data: { name: string }, cb?: (ack: { available: boolean }) => void) => {
     try {
-      const available = await isUsernameAvailable(data.name)
-      cb({ available })
+      const available = await isUsernameAvailable(data?.name)
+      if (typeof cb === 'function') cb({ available })
     } catch (error) {
       console.error('CHECK_USERNAME error:', error)
-      cb({ available: false })
+      if (typeof cb === 'function') cb({ available: false })
     }
   })
 
@@ -223,13 +295,13 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on(EVENTS.GET_LEADERBOARD, async (cb: (ack: { ok: boolean; rows: any[] }) => void) => {
+  socket.on(EVENTS.GET_LEADERBOARD, async (cb?: (ack: { ok: boolean; rows: any[] }) => void) => {
     try {
       const rows = await getLeaderboard()
-      cb({ ok: true, rows })
+      if (typeof cb === 'function') cb({ ok: true, rows })
     } catch (e) {
       console.error('GET_LEADERBOARD error:', e)
-      cb({ ok: false, rows: [] })
+      if (typeof cb === 'function') cb({ ok: false, rows: [] })
     }
   })
 
@@ -241,74 +313,88 @@ io.on('connection', (socket) => {
       // vgames_account_id bridge. READ-ONLY: it must not provision/mutate the
       // player row (that would clobber a real friend_code), so an account with
       // no Supabase row yet simply gets an empty history.
-      const identity = await resolveSocketIdentity(data.vgamesToken, VGAMES_URL)
-      if (!identity) { cb?.({ ok: false, error: 'unauthorized' }); return }
+      const identity = await resolveSocketIdentity(data?.vgamesToken, VGAMES_URL)
+      if (!identity) { if (typeof cb === 'function') cb({ ok: false, error: 'unauthorized' }); return }
       const player = await getPlayerByVGamesAccountId(identity.accountId)
-      if (!player) { cb?.({ ok: true, matches: [] }); return }
+      if (!player) { if (typeof cb === 'function') cb({ ok: true, matches: [] }); return }
       const matches = await getPlayerMatches(player.id)
-      cb?.({
-        ok: true,
-        matches: (matches ?? []).map((m) => ({
-          opponent_type: m.opponent_type,
-          opponent_id: m.opponent_id,
-          player_score: m.player_score,
-          opponent_score: m.opponent_score,
-          won: m.won,
-          timestamp: m.timestamp,
-        })),
-        displayName: player.display_name,
-        friendCode: player.friend_code,
-      })
+      if (typeof cb === 'function') {
+        cb({
+          ok: true,
+          matches: (matches ?? []).map((m) => ({
+            opponent_type: m.opponent_type,
+            opponent_id: m.opponent_id,
+            player_score: m.player_score,
+            opponent_score: m.opponent_score,
+            won: m.won,
+            timestamp: m.timestamp,
+          })),
+          displayName: player.display_name,
+          friendCode: player.friend_code,
+        })
+      }
     } catch (error) {
       console.error('PULL_HISTORY error:', error)
-      cb?.({ ok: false, error: 'server_error' })
+      if (typeof cb === 'function') cb({ ok: false, error: 'server_error' })
     }
   })
 
   socket.on(EVENTS.FORCE_FORFEIT, () => {
-    const room = rm.getRoomBySocket(socket.id)
-    if (!room) return
-    const myIndex = rm.getPlayerIndex(socket.id)
-    if (myIndex === null) return
-    const opponentIndex = 1 - myIndex
-    
-    // Safety check: is the opponent actually disconnected?
-    if (room.players[opponentIndex] === null) {
-      socket.emit(EVENTS.FORFEIT)
-      rm.removeRoom(room.code)
+    try {
+      const room = rm.getRoomBySocket(socket.id)
+      if (!room) return
+      const myIndex = rm.getPlayerIndex(socket.id)
+      if (myIndex === null) return
+      const opponentIndex = 1 - myIndex
+
+      // Safety check: is the opponent actually disconnected?
+      if (room.players[opponentIndex] === null) {
+        socket.emit(EVENTS.FORFEIT)
+        rm.removeRoom(room.code)
+      }
+    } catch (err) {
+      console.error('FORCE_FORFEIT error:', err)
     }
   })
 
   socket.on('disconnect', () => {
-    const room = rm.getRoomBySocket(socket.id)
-    if (!room) return
-    const code = room.code
-    const playerIndex = rm.getPlayerIndex(socket.id)
-    const opponentId = rm.getOpponentId(socket.id)
-    
-    // Notify opponent immediately
-    if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_DISCONNECTED, { timestamp: Date.now() })
-    
-    if (playerIndex !== null) {
-      rm.startDisconnectTimer(code, playerIndex, () => {
-        // TIMER EXPIRED: Check if opponent is still there to receive the win
-        const currentRoom = rm.rooms.get(code)
-        if (!currentRoom) return
+    try {
+      const room = rm.getRoomBySocket(socket.id)
+      if (!room) return
+      const code = room.code
+      const playerIndex = rm.getPlayerIndex(socket.id)
+      const opponentId = rm.getOpponentId(socket.id)
 
-        const opponentIndex = 1 - playerIndex
-        const actualOpponentId = currentRoom.players[opponentIndex]
-        
-        // Only declare forfeit if the opponent is actually connected!
-        if (actualOpponentId) {
-          io.to(actualOpponentId).emit(EVENTS.FORFEIT)
-        }
-        
-        rm.removeRoom(code)
-      })
+      // Notify opponent immediately
+      if (opponentId) io.to(opponentId).emit(EVENTS.OPPONENT_DISCONNECTED, { timestamp: Date.now() })
+
+      if (playerIndex !== null) {
+        rm.startDisconnectTimer(code, playerIndex, () => {
+          try {
+            // TIMER EXPIRED: Check if opponent is still there to receive the win
+            const currentRoom = rm.rooms.get(code)
+            if (!currentRoom) return
+
+            const opponentIndex = 1 - playerIndex
+            const actualOpponentId = currentRoom.players[opponentIndex]
+
+            // Only declare forfeit if the opponent is actually connected!
+            if (actualOpponentId) {
+              io.to(actualOpponentId).emit(EVENTS.FORFEIT)
+            }
+
+            rm.removeRoom(code)
+          } catch (err) {
+            console.error('disconnect-timer forfeit callback error:', err)
+          }
+        })
+      }
+
+      // Mark this specific socket as gone AFTER starting timer
+      rm.markDisconnected(socket.id)
+    } catch (err) {
+      console.error('disconnect handler error:', err)
     }
-    
-    // Mark this specific socket as gone AFTER starting timer
-    rm.markDisconnected(socket.id)
   })
 })
 

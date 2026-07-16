@@ -1,9 +1,36 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { randomUUID } from 'node:crypto'
 
 const supabaseUrl = process.env.SUPABASE_URL || ''
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-export const supabase = createClient(supabaseUrl, supabaseKey)
+
+// Fix 2 (boot hardening) — @supabase/supabase-js throws SYNCHRONOUSLY at
+// construction time if the URL/key is missing or blank. server/index.ts
+// imports this module before it starts listening, so an unguarded throw here
+// used to take down the ENTIRE relay at boot — including plain room
+// create/join/play, which don't touch Supabase at all. Guard the
+// construction so a missing/blank Supabase credential only degrades stats
+// (match history, leaderboard, profiles) instead of the whole process; every
+// function below checks `supabase` and no-ops/returns an empty result with a
+// logged warning when it's null. When Supabase IS configured (as in every
+// existing db.test.ts mock, which always succeeds), this is a no-op wrapper
+// around the exact same createClient(...) call — module shape, exports, and
+// behavior are unchanged.
+function buildSupabaseClient(): SupabaseClient | null {
+  try {
+    return createClient(supabaseUrl, supabaseKey)
+  } catch (err) {
+    console.error(
+      'db: failed to construct Supabase client (missing/blank SUPABASE_URL or ' +
+      'SUPABASE_SERVICE_ROLE_KEY?) — stats features (match history, leaderboard, ' +
+      'profiles) are DISABLED, but the room relay will still boot:',
+      err,
+    )
+    return null
+  }
+}
+
+export const supabase = buildSupabaseClient()
 
 export interface Player {
   id: string
@@ -27,6 +54,7 @@ export interface Match {
 }
 
 export async function recordMatch(match: Match) {
+  if (!supabase) { console.warn('db: recordMatch skipped — Supabase not configured'); return }
   const payload: any = {
     player_id: match.player_id,
     opponent_type: match.opponent_type,
@@ -43,6 +71,7 @@ export async function recordMatch(match: Match) {
 }
 
 export async function getPlayerMatches(playerId: string) {
+  if (!supabase) { console.warn('db: getPlayerMatches skipped — Supabase not configured'); return [] }
   try {
     const { data, error } = await supabase
       .from('matches')
@@ -66,6 +95,7 @@ export async function getPlayerMatches(playerId: string) {
  * friend_code/secret_key). Returns null when the account has no Supabase row.
  */
 export async function getPlayerByVGamesAccountId(accountId: string) {
+  if (!supabase) { console.warn('db: getPlayerByVGamesAccountId skipped — Supabase not configured'); return null }
   try {
     const { data, error } = await supabase
       .from('players')
@@ -130,6 +160,7 @@ function syntheticSecretKey(): string {
  * missing player row.
  */
 export async function ensurePlayerForVGames(accountId: string, displayName: string): Promise<Player | null> {
+  if (!supabase) { console.warn('db: ensurePlayerForVGames skipped — Supabase not configured'); return null }
   try {
     const { data, error } = await supabase
       .from('players')
@@ -154,6 +185,7 @@ export async function ensurePlayerForVGames(accountId: string, displayName: stri
 
 export async function isUsernameAvailable(name: string, excludeFriendCode?: string) {
   if (!name || name.trim() === '') return false
+  if (!supabase) { console.warn('db: isUsernameAvailable skipped — Supabase not configured'); return false }
 
   let query = supabase
     .from('players')
@@ -178,6 +210,7 @@ export interface LeaderboardRow {
 }
 
 export async function getLeaderboard(): Promise<LeaderboardRow[]> {
+  if (!supabase) { console.warn('db: getLeaderboard skipped — Supabase not configured'); return [] }
   const { data: players, error: pe } = await supabase
     .from('players')
     .select('id, display_name')

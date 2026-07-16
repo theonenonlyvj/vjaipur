@@ -75,23 +75,40 @@ describe('RoomManager', () => {
     expect(rm.tryGetRoundSeed(code, 1)).toBeNull()
   })
 
-  it('startDisconnectTimer calls forfeit callback after 60s', () => {
+  // Production value is 180_000ms (3 minutes) — see roomManager.ts
+  // startDisconnectTimer. The UI's disconnect-grace-period messaging is being
+  // aligned to 180s by another agent; do not change the production value.
+  it('startDisconnectTimer does not call the forfeit callback before 180s', () => {
     vi.useFakeTimers()
     const code = rm.createRoom('s1')
     const cb = vi.fn()
     rm.startDisconnectTimer(code, 0, cb)
-    vi.advanceTimersByTime(60_000)
+    vi.advanceTimersByTime(179_999)
+    expect(cb).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('startDisconnectTimer calls forfeit callback after 180s', () => {
+    vi.useFakeTimers()
+    const code = rm.createRoom('s1')
+    const cb = vi.fn()
+    rm.startDisconnectTimer(code, 0, cb)
+    vi.advanceTimersByTime(180_000)
     expect(cb).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
 
-  it('cancelDisconnectTimer prevents the callback', () => {
+  it('cancelDisconnectTimer prevents the callback even once the 180s timer would have fired', () => {
     vi.useFakeTimers()
     const code = rm.createRoom('s1')
     const cb = vi.fn()
     rm.startDisconnectTimer(code, 0, cb)
     rm.cancelDisconnectTimer(code, 0)
-    vi.advanceTimersByTime(60_000)
+    // Advance well past the real 180s duration — a weaker advance (e.g. 60s,
+    // less than the real timer) would pass even if cancellation were broken,
+    // since the timer wouldn't have fired yet regardless. This must stay
+    // past 180_000 to actually exercise the cancellation.
+    vi.advanceTimersByTime(200_000)
     expect(cb).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
