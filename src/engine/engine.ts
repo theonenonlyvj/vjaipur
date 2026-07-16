@@ -54,7 +54,7 @@ function checkRoundEnd(state: GameState): GameState {
 }
 
 function takeSingle(state: GameState, marketIndex: number): Result<GameState> {
-  if (marketIndex < 0 || marketIndex >= state.market.length) {
+  if (!Number.isInteger(marketIndex) || marketIndex < 0 || marketIndex >= state.market.length) {
     return { ok: false, error: Errors.MARKET_INDEX_OOB }
   }
   const card = state.market[marketIndex]
@@ -127,7 +127,7 @@ function takeExchange(
 
   // Validate market indices and reject camels
   for (const i of marketIndices) {
-    if (i < 0 || i >= state.market.length) {
+    if (!Number.isInteger(i) || i < 0 || i >= state.market.length) {
       return { ok: false, error: Errors.MARKET_INDEX_OOB }
     }
     if (state.market[i].type === 'camel') {
@@ -148,7 +148,7 @@ function takeExchange(
 
   // Validate non-camel hand indices
   for (const i of handIndices) {
-    if (i !== -1 && (i < 0 || i >= player.hand.length)) {
+    if (i !== -1 && (!Number.isInteger(i) || i < 0 || i >= player.hand.length)) {
       return { ok: false, error: Errors.HAND_INDEX_OOB }
     }
   }
