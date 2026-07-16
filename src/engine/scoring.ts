@@ -26,6 +26,10 @@ export function scoreRound(state: GameState): RoundResult {
   else if (scores[1] > scores[0]) sealAwardedTo = 1
   else if (bonusTokenCounts[0] > bonusTokenCounts[1]) sealAwardedTo = 0
   else if (bonusTokenCounts[1] > bonusTokenCounts[0]) sealAwardedTo = 1
+  // Rulebook's 3rd tiebreaker: most goods tokens (count, not value — value is
+  // already reflected in `scores`). Only a genuine 3-way tie stays null.
+  else if (p0.tokens.length > p1.tokens.length) sealAwardedTo = 0
+  else if (p1.tokens.length > p0.tokens.length) sealAwardedTo = 1
   // Complete tie: sealAwardedTo stays null
 
   return { camelWinner, scores, bonusTokenCounts, sealAwardedTo }

@@ -80,4 +80,21 @@ describe('scoreRound', () => {
     const result = scoreRound(makeRoundEnd([10], [10], 0, 0, [3, 3, 3], [2]))
     expect(result.bonusTokenCounts).toEqual([3, 1])
   })
+
+  it('seal uses goods token count as third tiebreaker when score and bonus count both tie', () => {
+    // Both score 5 (p0: 3+2, p1: 5), no bonus tokens for either (count 0-0 tie),
+    // but p0 holds 2 goods tokens vs p1's 1 — rulebook's 3rd tiebreaker.
+    const result = scoreRound(makeRoundEnd([3, 2], [5], 0, 0))
+    expect(result.sealAwardedTo).toBe(0)
+  })
+
+  it('seal uses goods token count as third tiebreaker, reversed', () => {
+    const result = scoreRound(makeRoundEnd([5], [3, 2], 0, 0))
+    expect(result.sealAwardedTo).toBe(1)
+  })
+
+  it('seal stays null on a true tie across score, bonus count, and goods token count', () => {
+    const result = scoreRound(makeRoundEnd([5], [5], 0, 0))
+    expect(result.sealAwardedTo).toBeNull()
+  })
 })
