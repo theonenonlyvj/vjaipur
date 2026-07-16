@@ -208,19 +208,26 @@ function fairifyState(state: GameState, myIndex: 0 | 1): GameState {
   
   // pool = cards that are either in the deck or were dealt to opponent at start (never revealed)
   const unknownPool = ALL_CARDS.filter(c => !knownIds.has(c.id) && !oppRevealedIds.has(c.id))
-  const shuffledPool = shuffle(unknownPool)
-  
+
+  // Opponent hand entries must be goods-only: PlayerState.hand is documented and
+  // enforced everywhere in the engine as "goods only" — camels are tracked purely
+  // via `herd: number` and never appear as Card[] hand entries. So only non-camel
+  // cards may ever be dealt into the reconstructed hand below; camels stay in the
+  // shared pool and settle back into the reconstructed deck.
+  const shuffledGoodsPool = shuffle(unknownPool.filter(c => c.type !== 'camel'))
+  const unknownCamels = unknownPool.filter(c => c.type === 'camel')
+
   // 3. Reconstruct opponent's hand
   // Start with cards we KNOW they have
   const confirmedOppHand = ALL_CARDS.filter(c => oppRevealedIds.has(c.id))
-  
-  // Fill the rest of their hand with random cards from the unknown pool
+
+  // Fill the rest of their hand with random (non-camel) cards from the unknown pool
   const missingCount = opp.hand.length - confirmedOppHand.length
-  const randomOppHand = shuffledPool.slice(0, missingCount)
+  const randomOppHand = shuffledGoodsPool.slice(0, missingCount)
   const fairOppHand = sortHand([...confirmedOppHand, ...randomOppHand])
-  
-  // 4. Reconstruct the deck with whatever is left
-  const fairDeck = shuffledPool.slice(missingCount)
+
+  // 4. Reconstruct the deck with whatever is left (remaining goods + all unknown camels)
+  const fairDeck = shuffle([...shuffledGoodsPool.slice(missingCount), ...unknownCamels])
 
   return {
     ...state,
