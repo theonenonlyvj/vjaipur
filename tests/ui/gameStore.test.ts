@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useGameStore } from '../../src/store/gameStore'
 import { getLegalActions } from '../../src/engine'
 import type { Action } from '../../src/engine'
 import { setWorkerBridge, WorkerBridge } from '../../src/ai/workerBridge'
+
+// Fix 3 needs to force the medium-AI fallback (used inside runAi's worker
+// .catch()) to throw on demand, while leaving it real for every other test.
+vi.mock('../../src/ai/mediumAi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/ai/mediumAi')>()
+  return { ...actual, pickMediumAction: vi.fn(actual.pickMediumAction) }
+})
+import { pickMediumAction } from '../../src/ai/mediumAi'
 
 beforeEach(() => {
   useGameStore.setState({ state: null, mode: null, error: null })
@@ -133,6 +141,35 @@ describe('aiThinking', () => {
     expect(useGameStore.getState().aiThinking).toBe(true)
 
     resolveWorker({ type: 'TAKE_CAMELS' })
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(useGameStore.getState().aiThinking).toBe(false)
+    setWorkerBridge(null)
+  })
+
+  // FIX 3: the worker .then/.catch chain had no terminal .catch(), so if the
+  // synchronous medium-AI fallback ALSO threw (a second failure), the
+  // resulting rejected promise had nothing downstream to reset aiThinking —
+  // "AI is thinking..." would hang forever with no recovery.
+  it('recovers aiThinking to false when both the worker AND the medium-AI fallback fail (no permanent stall)', async () => {
+    useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+    mockBridge.getAction = () => Promise.reject(new Error('worker crashed'))
+    setWorkerBridge(mockBridge)
+    vi.mocked(pickMediumAction).mockImplementationOnce(() => { throw new Error('fallback crashed') })
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+
+    expect(useGameStore.getState().aiThinking).toBe(true)
+
+    // Flush the rejected promise chain: getAction() rejects -> the .catch's
+    // pickMediumAction fallback throws -> a terminal .catch must still
+    // resolve aiThinking back to false instead of leaving it stuck forever.
+    await new Promise(r => setTimeout(r, 0))
     await new Promise(r => setTimeout(r, 0))
 
     expect(useGameStore.getState().aiThinking).toBe(false)

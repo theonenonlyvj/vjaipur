@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockEmit = vi.fn()
 const mockOn = vi.fn()
+const mockIoOn = vi.fn()
 const mockConnect = vi.fn()
 const mockDisconnect = vi.fn()
 const mockSocket = {
@@ -10,6 +11,9 @@ const mockSocket = {
   disconnect: mockDisconnect,
   emit: mockEmit,
   on: mockOn,
+  // socket.io-client v4: reconnection-exhaustion events fire on the Manager
+  // (`socket.io`), not on the Socket instance itself.
+  io: { on: mockIoOn },
 }
 
 vi.mock('socket.io-client', () => ({
@@ -112,5 +116,32 @@ describe('SocketService', () => {
     svc.connect('http://localhost:3001')
     svc.setAuthToken('vg-tok-2')
     expect((mockSocket as any).auth).toEqual({ token: 'vg-tok-2' })
+  })
+
+  // FIX 4: the client never listened for its OWN socket disconnect or for
+  // reconnection exhaustion, so a local network drop left the app believing
+  // it was still 'playing' while the server ran a forfeit timer.
+  it('connect attaches disconnect and reconnect_failed handlers', () => {
+    svc.connect('http://localhost:3001')
+    expect(mockOn).toHaveBeenCalledWith('disconnect', expect.any(Function))
+    expect(mockIoOn).toHaveBeenCalledWith('reconnect_failed', expect.any(Function))
+  })
+
+  it('onSelfDisconnected callback fires with the reason when the socket disconnects', () => {
+    svc.connect('http://localhost:3001')
+    const cb = vi.fn()
+    svc.onSelfDisconnected = cb
+    const call = mockOn.mock.calls.find(([event]) => event === 'disconnect')!
+    call[1]('transport close')
+    expect(cb).toHaveBeenCalledWith('transport close')
+  })
+
+  it('onReconnectFailed callback fires when reconnection attempts are exhausted', () => {
+    svc.connect('http://localhost:3001')
+    const cb = vi.fn()
+    svc.onReconnectFailed = cb
+    const call = mockIoOn.mock.calls.find(([event]) => event === 'reconnect_failed')!
+    call[1]()
+    expect(cb).toHaveBeenCalled()
   })
 })

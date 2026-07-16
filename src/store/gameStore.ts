@@ -10,7 +10,7 @@ import { soundService } from '../audio/soundService'
 import { useStatsStore } from './statsStore'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
-export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited'
+export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited' | 'reconnecting' | 'connection-lost'
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3' | 'fair'
 export type MatchLength = 1 | 3 | 5
 
@@ -45,6 +45,7 @@ export interface GameStore {
   startNextRound: (seed: number) => void
   setOnlineStatus: (status: OnlineStatus) => void
   disconnectOnline: () => void
+  leaveOnline: () => void
   forceForfeit: () => void
   setDifficulty: (d: Difficulty) => void
   setMatchLength: (l: MatchLength) => void
@@ -130,6 +131,31 @@ function runAi(
         if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', aiAction, cur) })
         else set({ aiThinking: false })
       })
+      .catch((err) => {
+        // Both the worker AND the synchronous medium-AI fallback failed (the
+        // fallback itself threw). Without a terminal .catch() here the
+        // rejected promise chain has nothing downstream to reset aiThinking —
+        // "AI is thinking..." would hang forever with no recovery. Recover:
+        // clear the flag and attempt one last-resort move so the game never
+        // stalls permanently on the AI's turn.
+        console.error('runAi: unrecoverable AI failure', err)
+        set({ aiThinking: false })
+        try {
+          const cur = get().state
+          if (cur && cur.phase === 'playing' && cur.activePlayer === 1) {
+            const fallbackAction = pickMediumAction(cur)
+            if (fallbackAction) {
+              const aiResult = applyAction(cur, fallbackAction)
+              if (aiResult.ok) {
+                set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', fallbackAction, cur) })
+              }
+            }
+          }
+        } catch (fallbackErr) {
+          console.error('runAi: last-resort fallback move also failed', fallbackErr)
+          set({ aiThinking: false })
+        }
+      })
     return
   }
 
@@ -176,6 +202,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dispatch: (action) => {
     const { state, mode, onlinePlayerIndex, difficulty } = get()
     if (!state) return
+    // If our own socket is down, don't silently apply the move locally as
+    // if it were authoritative — the server never sees it, and the player
+    // would keep "playing" into the void while a forfeit timer runs against
+    // them. Surface it instead of dropping it with no feedback.
+    if (mode === 'online' && !socketService.connected) {
+      set({ error: { code: 'NOT_CONNECTED', message: "You're disconnected — your move wasn't sent." } })
+      return
+    }
     if (mode === 'online' && state.activePlayer !== onlinePlayerIndex) return
 
     const playerDesc = describeAction('YOU', action, state)
@@ -317,7 +351,43 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onRoundStart = (seed) => get().startNextRound(seed)
     socketService.onOpponentDisconnected = (data) => set({ onlineStatus: 'opponent-disconnected', disconnectTimestamp: data.timestamp })
     socketService.onOpponentReconnected = () => set({ onlineStatus: 'playing', disconnectTimestamp: null })
-    socketService.onForfeit = () => set({ onlineStatus: 'forfeited', disconnectTimestamp: null })
+    socketService.onForfeit = () => {
+      const { onlineStatus, onlinePlayerIndex, opponentFriendCode, matchScores } = get()
+      // Guard against double-recording (e.g. a stray repeat FORFEIT emit).
+      if (onlineStatus === 'forfeited') return
+      set({ onlineStatus: 'forfeited', disconnectTimestamp: null })
+      // Receiving FORFEIT always means WE won — the server only sends it to
+      // the surviving/connected player once the opponent's disconnect timer
+      // expires. This is the only way a forfeit win reaches game-over, since
+      // every addMatch() call site otherwise requires a normal scoreRound()
+      // transition. Use whatever matchScores we have so far (best available —
+      // may be [0,0] if the forfeit lands before any round finished).
+      if (onlinePlayerIndex !== null) {
+        const opponentIndex: 0 | 1 = onlinePlayerIndex === 0 ? 1 : 0
+        useStatsStore.getState().addMatch({
+          opponent_type: 'online',
+          opponent_id: opponentFriendCode,
+          player_score: matchScores[onlinePlayerIndex],
+          opponent_score: matchScores[opponentIndex],
+          won: true,
+        })
+      }
+    }
+    socketService.onSelfDisconnected = () => {
+      // Our OWN connection dropped. Make it visible instead of silently
+      // staying 'playing' while the server runs a forfeit timer against us.
+      // Don't clobber a terminal/inactive status (e.g. we already forfeited,
+      // or we're not in a game at all).
+      const { mode, onlineStatus } = get()
+      if (mode !== 'online') return
+      if (onlineStatus === 'forfeited' || onlineStatus === 'idle') return
+      set({ onlineStatus: 'reconnecting' })
+    }
+    socketService.onReconnectFailed = () => {
+      const { mode } = get()
+      if (mode !== 'online') return
+      set({ onlineStatus: 'connection-lost' })
+    }
     socketService.onConnect = () => {
       const { mode, roomCode, onlinePlayerIndex } = get()
       // Reconnect: only attempt rejoin when a game is active
@@ -350,14 +420,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
   receiveOpponentAction: (action: Action, syncedState?: GameState) => {
     const { state, opponentName } = get()
     if (!state) return
+
+    if (syncedState) {
+      // The server always relays the sender's authoritative post-move state
+      // alongside the action. Trust it unconditionally — do NOT gate on a
+      // local applyAction() replay, which can spuriously fail if our local
+      // state has drifted (e.g. a delayed/lost frame during a blip). Gating
+      // on it discarded the correct incoming state and left the store
+      // un-set, freezing every subsequent opponent action the same way.
+      const oppDesc = describeAction(opponentName || 'Opponent', action, state)
+      set({ state: syncedState, error: null, lastMoveDescription: oppDesc })
+      return
+    }
+
+    // No syncedState (older/degraded relay path) — fall back to local replay.
     const result = applyAction(state, action)
     if (result.ok) {
       const oppDesc = describeAction(opponentName || 'Opponent', action, state)
-      set({ 
-        state: syncedState || result.value, 
-        error: null, 
-        lastMoveDescription: oppDesc 
-      })
+      set({ state: result.value, error: null, lastMoveDescription: oppDesc })
+    } else {
+      // Surface a visible error instead of silently doing nothing, which
+      // would otherwise look like a permanent freeze.
+      set({ error: result.error })
     }
   },
 
@@ -434,7 +518,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socketService.onForfeit = null
     socketService.onConnect = null
     socketService.onOpponentName = null
+    socketService.onSelfDisconnected = null
+    socketService.onReconnectFailed = null
     set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, opponentFriendCode: null, disconnectTimestamp: null, lastMoveDescription: null })
+  },
+
+  // Contract for the exit-to-Home flow: disconnects the socket and resets
+  // every online session field back to a clean idle state. Same reset as
+  // disconnectOnline (kept as a distinct name/action since screens call it
+  // explicitly to leave an online match) — delegates to it rather than
+  // duplicating the callback-teardown/state-reset list.
+  leaveOnline: () => {
+    get().disconnectOnline()
   },
 
   forceForfeit: () => {
