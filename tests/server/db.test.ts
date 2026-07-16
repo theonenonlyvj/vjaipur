@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 // Use vi.hoisted to ensure the mock object is available during vi.mock hoisting
 const { mockSupabase } = vi.hoisted(() => ({
@@ -67,11 +70,10 @@ describe('db.ts', () => {
     expect(mockSupabase.from).toHaveBeenCalledWith('matches')
     expect(mockSupabase.select).toHaveBeenCalledWith('*')
     expect(mockSupabase.eq).toHaveBeenCalledWith('player_id', '123')
-    // NOTE: this assertion is stale (matches.order() is actually called with
-    // 'timestamp', not 'created_at' — 'created_at' looks copy-pasted from a
-    // players-table test). Left failing on purpose, unrelated to Task C4 —
-    // matches the pre-existing baseline; not fixing it here (out of scope).
-    expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
+    // Real column is 'timestamp' (see server/db.ts getPlayerMatches). This
+    // assertion used to say 'created_at' — stale, copy-pasted from a
+    // players-table test — and was left red on purpose (Fix 3).
+    expect(mockSupabase.order).toHaveBeenCalledWith('timestamp', { ascending: false })
     expect(matches).toEqual([{ id: 'm1' }])
   })
 
@@ -179,4 +181,36 @@ describe('db.ts', () => {
       expect(player).toBeNull()
     })
   })
+})
+
+// Fix 2 (boot hardening): @supabase/supabase-js throws SYNCHRONOUSLY at
+// construction time when the URL/key are blank — every test above mocks
+// createClient() to always succeed, so it can't catch a regression of the
+// guard in server/db.ts (buildSupabaseClient). This spawns a real subprocess
+// with the REAL (unmocked) @supabase/supabase-js package and blank env vars,
+// which is the only reliable way to exercise the actual throw-at-construction
+// behavior the fix guards against.
+describe('supabase client construction degrades gracefully when unconfigured (Fix 2)', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+  const tsxBin = path.join(repoRoot, 'node_modules/.bin/tsx')
+
+  it('importing server/db.ts with blank SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY does not throw, and db functions degrade to empty/null instead of crashing', () => {
+    const script = `
+      import('./server/db.ts').then((db) => {
+        if (db.supabase !== null) { console.error('EXPECTED_NULL_SUPABASE'); process.exit(1); return }
+        return db.getPlayerMatches('p1')
+      }).then((matches) => {
+        if (!Array.isArray(matches) || matches.length !== 0) { console.error('EXPECTED_EMPTY_MATCHES'); process.exit(1); return }
+        console.log('FIX_2_OK')
+        process.exit(0)
+      }).catch((e) => { console.error('IMPORT_OR_CALL_FAILED', e); process.exit(1) })
+    `
+    const output = execFileSync(tsxBin, ['-e', script], {
+      cwd: repoRoot,
+      env: { ...process.env, SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '' },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    })
+    expect(output).toContain('FIX_2_OK')
+  }, 20_000)
 })

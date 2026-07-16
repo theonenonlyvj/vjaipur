@@ -38,6 +38,8 @@ const mockFetch = vi.fn(async (_url: string, init?: any) => {
 vi.stubGlobal('fetch', mockFetch)
 
 let httpServer: import('node:http').Server
+let io: import('socket.io').Server
+let rm: import('../../server/roomManager').RoomManager
 let port: number
 const clients: ClientSocket[] = []
 
@@ -52,9 +54,21 @@ function connectClient(auth?: { token?: string }): ClientSocket {
   return client
 }
 
+// Captured BEFORE importing server/index.ts so the Fix 1 process-net test
+// below can assert *this module* added a listener, rather than just "some
+// listener exists" — the test harness (Vitest) already registers its own
+// uncaughtException/unhandledRejection listeners in this worker, so a bare
+// `> 0` check would pass even without Fix 1's process.on(...) calls.
+let uncaughtExceptionListenersBeforeImport = 0
+let unhandledRejectionListenersBeforeImport = 0
+
 beforeAll(async () => {
+  uncaughtExceptionListenersBeforeImport = process.listenerCount('uncaughtException')
+  unhandledRejectionListenersBeforeImport = process.listenerCount('unhandledRejection')
   const mod = await import('../../server/index')
   httpServer = mod.httpServer
+  io = mod.io
+  rm = mod.rm
   await new Promise<void>((resolve) => httpServer.listen(0, resolve))
   port = (httpServer.address() as AddressInfo).port
 })
@@ -195,5 +209,87 @@ describe('PULL_HISTORY returns only the caller\'s own matches, gated on identity
     expect(ack.ok).toBe(true)
     expect(ack.matches).toEqual([])
     expect(mockDb.getPlayerMatches).not.toHaveBeenCalled()
+  })
+})
+
+// Fix 1: a socket that sends a malformed payload or omits the ack callback
+// must never crash the server process — Socket.IO's dispatch does not
+// try/catch listener bodies, so an unguarded throw (or a rejected promise
+// with no .catch, for async handlers) used to take down the whole relay
+// (every room, every connected player) via Node's default uncaughtException/
+// unhandledRejection behavior. These tests exercise the real registered
+// listener functions directly (grabbed off the live server-side Socket via
+// `.listeners(event)`), which is a plain synchronous call in THIS call stack
+// — so pre-fix, a throw is captured cleanly by `.not.toThrow()` as a normal
+// failing assertion, not a process crash. The last test goes over the real
+// wire (the actual vulnerable path, via Socket.IO's own packet dispatch) to
+// confirm the server survives and stays responsive end-to-end.
+describe('Fix 1: malformed payloads and missing ack callbacks never crash the process', () => {
+  it('registers its own process-level uncaughtException/unhandledRejection last-resort nets at startup', () => {
+    // Strictly greater than the pre-import baseline (not just `> 0`) so this
+    // actually verifies server/index.ts registered its own listener, rather
+    // than passing on the strength of Vitest's own unrelated safety net.
+    expect(process.listenerCount('uncaughtException')).toBeGreaterThan(uncaughtExceptionListenersBeforeImport)
+    expect(process.listenerCount('unhandledRejection')).toBeGreaterThan(unhandledRejectionListenersBeforeImport)
+  })
+
+  it('CREATE_ROOM handler does not throw when invoked with no ack callback', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+    const serverSocket = io.sockets.sockets.get(client.id as string)
+    expect(serverSocket).toBeDefined()
+    const handler = serverSocket!.listeners(EVENTS.CREATE_ROOM)[0] as (...args: any[]) => void
+    expect(typeof handler).toBe('function')
+    expect(() => handler(3, undefined)).not.toThrow()
+  })
+
+  it('JOIN_ROOM handler does not throw with a missing/malformed code and no ack callback', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+    const serverSocket = io.sockets.sockets.get(client.id as string)!
+    const handler = serverSocket.listeners(EVENTS.JOIN_ROOM)[0] as (...args: any[]) => void
+    expect(() => handler(undefined, undefined)).not.toThrow()
+    expect(() => handler(42, undefined)).not.toThrow()
+  })
+
+  it('REJOIN handler does not throw with a malformed payload and no ack callback', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+    const serverSocket = io.sockets.sockets.get(client.id as string)!
+    const handler = serverSocket.listeners(EVENTS.REJOIN)[0] as (...args: any[]) => void
+    expect(() => handler(undefined, undefined)).not.toThrow()
+    expect(() => handler({}, undefined)).not.toThrow()
+  })
+
+  it('ACTION handler does not throw and ignores a malformed payload without corrupting room state', async () => {
+    const client = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => client.on('connect', () => resolve()))
+    const code = await new Promise<string>((resolve) => client.emit(EVENTS.CREATE_ROOM, 3, resolve))
+    const serverSocket = io.sockets.sockets.get(client.id as string)!
+    const handler = serverSocket.listeners(EVENTS.ACTION)[0] as (...args: any[]) => void
+
+    expect(() => handler(undefined)).not.toThrow()
+    expect(() => handler({})).not.toThrow()
+
+    const room = rm.rooms.get(code)!
+    expect(room.state).toBeNull() // malformed ACTION payloads must be ignored, not applied
+  })
+
+  it('a CREATE_ROOM emitted over the real wire with no ack callback does not crash the server (subsequent requests still succeed)', async () => {
+    const badClient = connectClient({ token: 'good-token' })
+    await new Promise<void>((resolve) => badClient.on('connect', () => resolve()))
+    // No callback arg at all — the old handler called cb(code) unconditionally.
+    badClient.emit(EVENTS.CREATE_ROOM, 3)
+    // Give the server a moment to process the packet (and, pre-fix, to crash).
+    await new Promise((r) => setTimeout(r, 100))
+
+    const goodClient = connectClient({ token: 'good-token' })
+    const code = await new Promise<string>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('server appears dead after malformed CREATE_ROOM')), 2000)
+      goodClient.on('connect', () => {
+        goodClient.emit(EVENTS.CREATE_ROOM, 3, (c: string) => { clearTimeout(t); resolve(c) })
+      })
+    })
+    expect(code).toMatch(/^[A-Z0-9]{6}$/)
   })
 })
