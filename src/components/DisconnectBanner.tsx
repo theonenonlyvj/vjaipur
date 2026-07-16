@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useGameStore } from '../store/gameStore'
 
-const FORFEIT_SECONDS = 60
+const FORFEIT_SECONDS = 180
 
 export function DisconnectBanner() {
   const onlineStatus = useGameStore(s => s.onlineStatus)

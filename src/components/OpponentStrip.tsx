@@ -21,7 +21,7 @@ export function OpponentStrip({ player, playerIndex, isActive, name }: Props) {
     }}>
       <span style={{ fontWeight: 700, color: '#888' }}>{name || `P${playerIndex + 1}`}</span>
       <span style={{ color: '#f0e8d8' }}>Cards: {player.hand.length}</span>
-      <span style={{ color: '#d0a860' }}>Camels: ?</span>
+      <span style={{ color: '#d0a860' }}>Camels: {player.herd}</span>
       <span style={{ color: '#888' }}>Tokens: {tokenCount}</span>
       {isActive && (
         <span style={{ marginLeft: 'auto', color: '#f0c030', fontSize: 12, fontWeight: 700 }}>
