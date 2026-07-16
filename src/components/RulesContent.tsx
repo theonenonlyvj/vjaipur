@@ -53,7 +53,7 @@ export function ScoringTab() {
         The player with the most camels at round end earns 5 bonus rupees.
       </Section>
       <Section title="Seals of Excellence">
-        The player with more total rupees wins a Seal. In best-of-3, first to 2 seals wins the match. Ties are broken by: most bonus tokens, then most goods tokens.
+        Win a round to earn a Seal of Excellence. The match is best-of-N based on the Match Length you choose (1, 3, or 5 games)—first to a majority of seals wins. Ties are broken by most bonus tokens, then most goods tokens.
       </Section>
     </>
   )

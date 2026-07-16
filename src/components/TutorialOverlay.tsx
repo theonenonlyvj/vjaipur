@@ -82,7 +82,7 @@ const STEPS: Step[] = [
   },
   {
     title: 'Seals of Excellence',
-    body: 'The player with more rupees wins a Seal. In best-of-3, first to 2 seals wins. Ties are broken by most bonus tokens, then most goods tokens.',
+    body: 'Win a round to earn a Seal of Excellence. The match is best-of-N based on the Match Length you choose (1, 3, or 5 games)—first to a majority of seals wins. Ties are broken by most bonus tokens, then most goods tokens.',
     trigger: 'button',
     chapter: 2,
   },
