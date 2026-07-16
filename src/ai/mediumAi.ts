@@ -2,7 +2,9 @@ import type { GameState, Action, Good } from '../engine'
 import { getLegalActions, applyAction } from '../engine'
 
 function topValue(state: GameState, good: Good): number {
-  return state.tokens[good][0] ?? 0
+  // Guard against a non-Good key (e.g. a camel that leaked into a goods-indexing
+  // path) instead of indexing blindly — state.tokens has no 'camel' entry.
+  return state.tokens[good]?.[0] ?? 0
 }
 
 const PRECIOUS_GOODS: ReadonlySet<Good> = new Set(['diamond', 'gold', 'silver'])
@@ -62,7 +64,12 @@ export function getAllProfitableExchanges(state: GameState): Action[] {
 
   if (mktGoods.length < 2) return []
 
-  const handGoods = player.hand.map((c, i) => ({ type: c.type as Good, i }))
+  // Hand should never contain camels (they live in `herd`), but guard the same
+  // way mktGoods is guarded above — defense-in-depth against a contaminated hand
+  // (e.g. from a determinized/fairified search state) reaching goods-indexing below.
+  const handGoods = player.hand
+    .map((c, i) => ({ type: c.type as Good, i }))
+    .filter(x => (x.type as string) !== 'camel')
   const result: Action[] = []
   const seen = new Set<string>()
 
@@ -115,7 +122,12 @@ export function getProfitableExchanges(state: GameState): Action[] {
 
   if (mktGoods.length < 2) return []
 
-  const handGoods = player.hand.map((c, i) => ({ good: c.type as Good, i }))
+  // Hand should never contain camels (they live in `herd`), but guard the same
+  // way mktGoods is guarded above — defense-in-depth against a contaminated hand
+  // (e.g. from a determinized/fairified search state) reaching goods-indexing below.
+  const handGoods = player.hand
+    .map((c, i) => ({ good: c.type as Good, i }))
+    .filter(x => (x.good as string) !== 'camel')
   const result: Action[] = []
 
   for (let a = 0; a < mktGoods.length; a++) {
