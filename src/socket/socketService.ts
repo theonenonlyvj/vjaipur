@@ -49,6 +49,19 @@ export class SocketService {
     this.socket.on('connect', () => {
       this.onConnect?.()
     })
+    // The client's OWN connection dropping — must be surfaced or the app is
+    // left believing it's still 'playing' while the server runs a forfeit
+    // timer against it. socket.io-client auto-retries per the
+    // reconnectionAttempts option above; a subsequent 'connect' (handled
+    // above) signals recovery.
+    this.socket.on('disconnect', (reason: string) => {
+      this.onSelfDisconnected?.(reason)
+    })
+    // Reconnection-exhaustion is a Manager-level event (`socket.io`), not a
+    // Socket-level one — it never fires on `this.socket` itself.
+    this.socket.io.on('reconnect_failed', () => {
+      this.onReconnectFailed?.()
+    })
   }
 
   disconnect(): void {
@@ -165,6 +178,8 @@ export class SocketService {
   onForfeit: (() => void) | null = null
   onConnect: (() => void) | null = null
   onOpponentName: ((data: OpponentNamePayload) => void) | null = null
+  onSelfDisconnected: ((reason?: string) => void) | null = null
+  onReconnectFailed: (() => void) | null = null
 }
 
 export const socketService = new SocketService()
