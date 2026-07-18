@@ -781,6 +781,12 @@ export class GameDO extends DurableObject<Env> {
     const now = Date.now()
     {
       const sql = this.ctx.storage.sql as unknown as SqlLike
+      // Both players are demonstrably HERE at kickoff (one just created, one
+      // just joined) — stamp both present so neither sees a spurious "opponent
+      // away" banner in the sub-second window before the client's first
+      // heartbeat lands. (Presence otherwise rides the 20s heartbeat loop.)
+      this.repo.setPresence(0, now)
+      this.repo.setPresence(1, now)
       this.ensureHeal(sql, now)
       await rearmAlarm(this.ctx, sql)
     }

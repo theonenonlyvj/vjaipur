@@ -36,54 +36,53 @@ describe('net/session', () => {
     expect(session.load()).toBeNull()
   })
 
-  it('startHeartbeat calls heartbeat(gameId) every 20s', () => {
+  it('startHeartbeat fires immediately, then every 20s', () => {
     vi.useFakeTimers()
     session.startHeartbeat('ABC123')
 
-    expect(heartbeat).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(20_000)
+    // Fires ONE beat immediately so presence is established at kickoff/resume.
     expect(heartbeat).toHaveBeenCalledTimes(1)
     expect(heartbeat).toHaveBeenCalledWith('ABC123')
     vi.advanceTimersByTime(20_000)
     expect(heartbeat).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(20_000)
+    expect(heartbeat).toHaveBeenCalledTimes(3)
   })
 
   it('starting a new heartbeat loop replaces (does not stack) a prior one', () => {
     vi.useFakeTimers()
-    session.startHeartbeat('FIRST')
-    vi.advanceTimersByTime(20_000)
-    expect(heartbeat).toHaveBeenCalledTimes(1)
-
-    session.startHeartbeat('SECOND')
-    vi.advanceTimersByTime(20_000)
-    // Only ONE more call (from SECOND) — not two (FIRST's old interval must
-    // have been cleared, not left running alongside SECOND's).
+    session.startHeartbeat('FIRST') // immediate beat #1
+    vi.advanceTimersByTime(20_000) // interval beat #2
     expect(heartbeat).toHaveBeenCalledTimes(2)
+
+    session.startHeartbeat('SECOND') // immediate beat #3
+    vi.advanceTimersByTime(20_000) // ONE interval beat from SECOND (#4); FIRST's cleared
+    expect(heartbeat).toHaveBeenCalledTimes(4)
     expect(heartbeat).toHaveBeenLastCalledWith('SECOND')
   })
 
-  it('stopHeartbeat halts the loop', () => {
+  it('stopHeartbeat halts the loop (after the one immediate beat)', () => {
     vi.useFakeTimers()
-    session.startHeartbeat('ABC123')
+    session.startHeartbeat('ABC123') // immediate beat #1
     session.stopHeartbeat()
     vi.advanceTimersByTime(60_000)
-    expect(heartbeat).not.toHaveBeenCalled()
+    expect(heartbeat).toHaveBeenCalledTimes(1) // no interval beats after stop
   })
 
-  it('clear() also stops the heartbeat loop', () => {
+  it('clear() also stops the heartbeat loop (after the one immediate beat)', () => {
     vi.useFakeTimers()
-    session.startHeartbeat('ABC123')
+    session.startHeartbeat('ABC123') // immediate beat #1
     session.clear()
     vi.advanceTimersByTime(60_000)
-    expect(heartbeat).not.toHaveBeenCalled()
+    expect(heartbeat).toHaveBeenCalledTimes(1)
   })
 
-  it('a failed heartbeat tick does not crash the loop — the next tick still fires', () => {
+  it('a failed heartbeat tick does not crash the loop — later ticks still fire', () => {
     vi.useFakeTimers()
-    heartbeat.mockRejectedValueOnce(new TypeError('network down'))
-    session.startHeartbeat('ABC123')
-    vi.advanceTimersByTime(20_000)
-    vi.advanceTimersByTime(20_000)
-    expect(heartbeat).toHaveBeenCalledTimes(2)
+    heartbeat.mockRejectedValueOnce(new TypeError('network down')) // the immediate beat rejects
+    session.startHeartbeat('ABC123') // immediate beat #1 (rejected)
+    vi.advanceTimersByTime(20_000) // #2
+    vi.advanceTimersByTime(20_000) // #3
+    expect(heartbeat).toHaveBeenCalledTimes(3)
   })
 })
