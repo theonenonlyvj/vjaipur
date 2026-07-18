@@ -1,4 +1,4 @@
-import { env, SELF } from 'cloudflare:test'
+import { createExecutionContext, createScheduledController, env, runInDurableObject, SELF, waitOnExecutionContext } from 'cloudflare:test'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   authenticateToken,
@@ -7,6 +7,10 @@ import {
   __introspectCacheForTest,
 } from '../src/do/authctx'
 import { corsHeaders, handlePreflight } from '../src/do/cors'
+import worker, { mintUnusedCode } from '../src/index'
+import type { Env } from '../src/game-do'
+import { WAITING_ABANDON_MS } from '../src/do/constants'
+import { GameRepository, type SqlLike } from '../src/do/storage'
 import { applyD1Schema } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
@@ -139,6 +143,75 @@ describe('POST /games + GET /resolve + /games/:id/* forwarding', () => {
   })
 })
 
+// =============================================================================
+// mintUnusedCode (FIX 4 — room-code collision check)
+//
+// The room code doubles as the DO routing key (stubFor's docstring), so a
+// birthday collision would silently reuse another game's DO. These tests
+// force a deterministic first-attempt collision (rather than hoping for one
+// at 1-in-32^6 random odds) via the injectable code generator.
+// =============================================================================
+
+describe('mintUnusedCode (FIX 4)', () => {
+  async function seedGamesRow(code: string): Promise<void> {
+    await DB()
+      .prepare(`INSERT INTO games (game_uuid, code, status, match_length, created_at) VALUES (?, ?, 'waiting', 3, ?)`)
+      .bind(crypto.randomUUID(), code, Date.now())
+      .run()
+  }
+
+  it('retries past a colliding code and returns a fresh one (no DO reuse)', async () => {
+    const collidingCode = `CX${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    await seedGamesRow(collidingCode)
+
+    const freshCode = `FR${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    let calls = 0
+    const genCode = () => {
+      calls++
+      return calls === 1 ? collidingCode : freshCode
+    }
+
+    const result = await mintUnusedCode(env as unknown as Env, genCode)
+    expect(calls).toBe(2) // 1st attempt collided, 2nd succeeded
+    expect(result).toBe(freshCode)
+  })
+
+  it('a fresh (non-colliding) code is returned on the FIRST attempt (no wasted retries)', async () => {
+    const freshCode = `FR${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    let calls = 0
+    const genCode = () => {
+      calls++
+      return freshCode
+    }
+    const result = await mintUnusedCode(env as unknown as Env, genCode)
+    expect(calls).toBe(1)
+    expect(result).toBe(freshCode)
+  })
+
+  it('gives up (returns null) after MAX_CODE_ATTEMPTS if every generated code collides', async () => {
+    const alwaysCollides = `AC${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    await seedGamesRow(alwaysCollides)
+
+    let calls = 0
+    const genCode = () => {
+      calls++
+      return alwaysCollides
+    }
+    const result = await mintUnusedCode(env as unknown as Env, genCode)
+    expect(result).toBeNull()
+    expect(calls).toBe(5) // MAX_CODE_ATTEMPTS, never an unbounded loop
+  })
+
+  it('end-to-end: POST /games still succeeds normally (the extra D1 read is transparent on the happy path)', async () => {
+    const alice = `test:${uniqueName('acct-mint-happy')}:Alice`
+    const res = await SELF.fetch(req('/games', { token: alice, body: { matchLength: 3 } }))
+    expect(res.status).toBe(201)
+    const body = await readJson(res)
+    expect(typeof body.code).toBe('string')
+    expect(body.gameId).toBe(body.code)
+  })
+})
+
 describe('GET /health', () => {
   it('returns {ok:true}', async () => {
     const res = await SELF.fetch(req('/health', { method: 'GET' }))
@@ -163,6 +236,78 @@ describe('WS upgrade passthrough', () => {
     )
     expect(res.status).toBe(101)
     expect(res.webSocket).toBeTruthy()
+  })
+
+  // ---------------------------------------------------------------------
+  // FIX 5 (minor): broadcast() must never leak activity metadata (nudge/
+  // ai_cover/started frames) to a socket that never completed the
+  // {type:'auth'} handshake — an unauthenticated party who merely guessed a
+  // room code could otherwise sniff live activity without proving seat
+  // ownership.
+  // ---------------------------------------------------------------------
+
+  /** In-order message reader for a client WebSocket (mirrors viota's
+   *  packages/worker/test/websocket.test.ts pattern). */
+  function reader(ws: WebSocket) {
+    const queue: string[] = []
+    const waiters: ((v: string) => void)[] = []
+    ws.addEventListener('message', (e) => {
+      const data = String((e as MessageEvent).data)
+      const w = waiters.shift()
+      if (w) w(data)
+      else queue.push(data)
+    })
+    return () =>
+      new Promise<any>((resolve) => {
+        const q = queue.shift()
+        if (q !== undefined) resolve(JSON.parse(q))
+        else waiters.push((v) => resolve(JSON.parse(v)))
+      })
+  }
+
+  async function openSocket(code: string): Promise<WebSocket> {
+    const res = await SELF.fetch(
+      new Request(`https://worker/games/${code}/socket`, { headers: { Upgrade: 'websocket', Connection: 'Upgrade' } }),
+    )
+    expect(res.status).toBe(101)
+    const ws = res.webSocket!
+    ws.accept()
+    return ws
+  }
+
+  it('an unauthenticated socket never receives a broadcast nudge; an authed one does (FIX 5)', async () => {
+    const alice = `test:${uniqueName('acct-bcast-alice')}:Alice`
+    const created = await readJson(await SELF.fetch(req('/games', { token: alice, body: { matchLength: 3 } })))
+
+    const authed = await openSocket(created.code)
+    const authedNext = reader(authed)
+    authed.send(JSON.stringify({ type: 'auth', token: alice }))
+    const authOk = await authedNext()
+    expect(authOk.type).toBe('auth_ok')
+
+    const unauthed = await openSocket(created.code)
+    let unauthedReceived = false
+    unauthed.addEventListener('message', () => {
+      unauthedReceived = true
+    })
+    // Deliberately send NO auth frame — this socket stays unauthenticated.
+
+    const authedMsg = authedNext()
+    const stub = env.GAME_DO.get(env.GAME_DO.idFromName(created.code))
+    const sentCount = await runInDurableObject(stub, (instance) => instance.broadcast({ type: 'nudge', moveIndex: 42 }))
+    expect(sentCount).toBe(1) // only the authed socket counted
+
+    const nudge = await authedMsg
+    expect(nudge).toEqual({ type: 'nudge', moveIndex: 42 })
+
+    // A real async round-trip (the authed message above) already gave the
+    // unauthed socket equal opportunity to receive something from the SAME
+    // broadcast call; a short extra wait is just defensive margin.
+    await new Promise((r) => setTimeout(r, 10))
+    expect(unauthedReceived).toBe(false)
+
+    authed.close(1000, 'done')
+    unauthed.close(1000, 'done')
   })
 })
 
@@ -328,5 +473,80 @@ describe('introspect cache (ADDENDUM P)', () => {
     const second = await authenticateToken('test:acct-seam:Seamy', testEnv, fn, 6_000_001)
     expect(second).toEqual({ accountId: 'acct-seam', displayName: 'Seamy' })
     expect(callCount()).toBe(0) // the test seam never calls fetch at all, cached or not
+  })
+})
+
+// =============================================================================
+// Waiting-room abandon sweep (FIX 7)
+//
+// WAITING_ABANDON_MS was defined in constants.ts but never wired to
+// anything: the cron only ever queried status='active', so an unclaimed
+// 'waiting' room stayed /resolve-able forever.
+// =============================================================================
+
+describe('waiting-room abandon sweep (FIX 7)', () => {
+  it('POST /tick (DO-side) on a still-open waiting room flips DO meta AND D1 games.status to abandoned', async () => {
+    const alice = `test:${uniqueName('acct-tick-waiting')}:Alice`
+    const created = await readJson(await SELF.fetch(req('/games', { token: alice, body: { matchLength: 3 } })))
+    const stub = env.GAME_DO.get(env.GAME_DO.idFromName(created.code))
+
+    const res = await stub.fetch(new Request('https://do/tick', { method: 'POST' }))
+    expect(res.status).toBe(200)
+
+    await runInDurableObject(stub, (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      expect(repo.getMeta()!.status).toBe('abandoned')
+    })
+
+    const row = await DB().prepare(`SELECT status FROM games WHERE code = ?`).bind(created.code).first<any>()
+    expect(row.status).toBe('abandoned')
+  })
+
+  it('the cron sweep picks up a STALE waiting room (past WAITING_ABANDON_MS) and marks it abandoned in D1', async () => {
+    const code = `ST${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    const staleTs = Date.now() - WAITING_ABANDON_MS - 60_000
+    await DB()
+      .prepare(`INSERT INTO games (game_uuid, code, status, match_length, created_at, last_activity_at) VALUES (?, ?, 'waiting', 3, ?, ?)`)
+      .bind(crypto.randomUUID(), code, staleTs, staleTs)
+      .run()
+
+    const ctx = createExecutionContext()
+    await worker.scheduled(createScheduledController(), env as unknown as Env, ctx)
+    await waitOnExecutionContext(ctx)
+
+    const row = await DB().prepare(`SELECT status FROM games WHERE code = ?`).bind(code).first<any>()
+    expect(row.status).toBe('abandoned')
+  })
+
+  it('a FRESH waiting room (not yet stale) is left untouched by the cron sweep', async () => {
+    const code = `FW${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    const freshTs = Date.now()
+    await DB()
+      .prepare(`INSERT INTO games (game_uuid, code, status, match_length, created_at, last_activity_at) VALUES (?, ?, 'waiting', 3, ?, ?)`)
+      .bind(crypto.randomUUID(), code, freshTs, freshTs)
+      .run()
+
+    const ctx = createExecutionContext()
+    await worker.scheduled(createScheduledController(), env as unknown as Env, ctx)
+    await waitOnExecutionContext(ctx)
+
+    const row = await DB().prepare(`SELECT status FROM games WHERE code = ?`).bind(code).first<any>()
+    expect(row.status).toBe('waiting') // untouched — not yet stale
+  })
+
+  it('an ACTIVE game is never mistakenly swept by the waiting-room branch', async () => {
+    const code = `AV${crypto.randomUUID().slice(0, 4)}`.toUpperCase()
+    const staleTs = Date.now() - WAITING_ABANDON_MS - 60_000
+    await DB()
+      .prepare(`INSERT INTO games (game_uuid, code, status, match_length, created_at, last_activity_at) VALUES (?, ?, 'active', 3, ?, ?)`)
+      .bind(crypto.randomUUID(), code, staleTs, staleTs)
+      .run()
+
+    const ctx = createExecutionContext()
+    await worker.scheduled(createScheduledController(), env as unknown as Env, ctx)
+    await waitOnExecutionContext(ctx)
+
+    const row = await DB().prepare(`SELECT status FROM games WHERE code = ?`).bind(code).first<any>()
+    expect(row.status).toBe('active') // the waiting-only UPDATE predicate spared it
   })
 })

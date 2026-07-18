@@ -247,6 +247,77 @@ describe('archiveTick', () => {
     expect(matches.length).toBe(2)
   })
 
+  it('FIX 1 (blocker): running archiveTick TWICE for a completed match (as every post-match-over heartbeat/leave/cron-tick does) writes exactly ONE matches row per human seat, not two', async () => {
+    const stub = stubFor('archive-tick-dedup-rerun')
+    const code = `RR${crypto.randomUUID().slice(0, 4)}`
+    const t0 = Date.now()
+    let gameUuid = ''
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      repo.putMeta(baseMeta({ code, status: 'active' }))
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-rr-a' }))
+      repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-rr-b', display_name: 'B' }))
+      gameUuid = repo.getMeta()!.game_uuid
+      await archiveGameCreate(DB(), repo, t0, code)
+
+      repo.insertMove(roundEndMoveRow(1, 1, [30, 20], t0))
+      repo.putMeta({ ...repo.getMeta()!, status: 'completed', phase: 'match_over', winner_seat: 0, seals0: 2, seals1: 1, move_index: 1 })
+
+      // Two INDEPENDENT archiveTick invocations at very different wall-clock
+      // times (e.g. the direct handleMove call, then a much-later heal-tick
+      // or cron poke re-running the terminal backstop).
+      await archiveTick(DB(), repo, t0 + 2_000)
+      await archiveTick(DB(), repo, t0 + 3_600_000) // an hour later
+    })
+
+    const matches = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(matches.length).toBe(2) // one per human seat, NOT four
+
+    // The belt-and-suspenders `ended_at` guard also means the games row's
+    // finalize UPDATE only ever actually landed once.
+    const gameRow = await DB().prepare(`SELECT ended_at FROM games WHERE game_uuid = ?`).bind(gameUuid).first<any>()
+    expect(Number(gameRow.ended_at)).toBe(t0 + 2_000)
+  })
+
+  it('FIX 1 (blocker, resign case): running archiveTick TWICE after a resign writes exactly ONE matches row per human seat', async () => {
+    const stub = stubFor('archive-tick-dedup-rerun-resign')
+    const code = `RS${crypto.randomUUID().slice(0, 4)}`
+    const t0 = Date.now()
+    let gameUuid = ''
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      repo.putMeta(baseMeta({ code, status: 'active' }))
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-rs-a' }))
+      repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-rs-b', display_name: 'B' }))
+      gameUuid = repo.getMeta()!.game_uuid
+      await archiveGameCreate(DB(), repo, t0, code)
+
+      repo.insertMove({
+        move_index: 1,
+        round: 1,
+        turn_number: 1,
+        seat_index: 1,
+        type: 'resign',
+        payload: JSON.stringify({ type: 'resign', seat: 1 }),
+        by_ai: false,
+        ai_difficulty: null,
+        controlling_account_id: 'acct-rs-b',
+        client_move_id: null,
+        reverted: false,
+        created_at: t0,
+      })
+      repo.putMeta({ ...repo.getMeta()!, status: 'resigned', phase: 'match_over', winner_seat: 0, move_index: 1 })
+
+      await archiveTick(DB(), repo, t0 + 2_000)
+      await archiveTick(DB(), repo, t0 + 3_600_000)
+    })
+
+    const matches = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(matches.length).toBe(2)
+  })
+
   it('NEVER throws: a broken D1 leaves the outbox unflushed for the next retry', async () => {
     const stub = stubFor('archive-tick-broken')
     const brokenDb = {
@@ -367,6 +438,88 @@ describe('archiveMatchEnd', () => {
 
     const rows = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
     expect(rows.length).toBe(2) // still exactly one row PER human seat, not four
+  })
+
+  // ---------------------------------------------------------------------
+  // FIX 1 (blocker): the bug this regression-tests is that archiveTick's
+  // terminal branch calls archiveMatchEnd on EVERY invocation while status
+  // stays terminal (every post-match-over heartbeat/leave/cron-tick), and
+  // the OLD code used a FRESH Date.now() as `now` on every call and wrote
+  // it straight into `matches.timestamp` — so the UNIQUE(account_id,
+  // timestamp, opponent_type) dedup index never actually caught a repeat
+  // (each call minted a distinct timestamp). The test above ("dedups on
+  // re-run") passed a SAME `now` on both calls, which would have deduped
+  // even under the old broken code — it does NOT exercise the real bug.
+  // These tests pass DIFFERENT `now` values, mirroring what actually
+  // happens in production across repeated invocations.
+  // ---------------------------------------------------------------------
+
+  it('FIX 1: archiveMatchEnd called twice with DIFFERENT `now` values still dedups to ONE row per human seat (natural completion)', async () => {
+    const stub = stubFor('archive-match-end-dedup-now-varies')
+    const code = `DV${crypto.randomUUID().slice(0, 4)}`
+    const t0 = Date.now()
+    let gameUuid = ''
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      repo.putMeta(baseMeta({ code, status: 'active' }))
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-dv-alice' }))
+      repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-dv-bob', display_name: 'Bob' }))
+      gameUuid = repo.getMeta()!.game_uuid
+      await archiveGameCreate(DB(), repo, t0, code)
+
+      // The round_end move that actually ended the match — its created_at
+      // is the IMMUTABLE timestamp FIX 1 must key the dedup on.
+      repo.insertMove(roundEndMoveRow(1, 1, [40, 10], t0))
+      repo.putMeta({ ...repo.getMeta()!, status: 'completed', phase: 'match_over', winner_seat: 0, seals0: 2, seals1: 0, move_index: 1 })
+
+      // Two calls with WILDLY different `now` — simulating archiveTick's
+      // terminal branch re-firing on a much-later heartbeat/cron poke.
+      await archiveMatchEnd(DB(), repo, t0 + 1_000)
+      await archiveMatchEnd(DB(), repo, t0 + 999_000_000)
+    })
+
+    const rows = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(rows.length).toBe(2) // one per human seat, NOT four
+  })
+
+  it('FIX 1: archiveMatchEnd called twice with DIFFERENT `now` values still dedups to ONE row per human seat (resign)', async () => {
+    const stub = stubFor('archive-match-end-dedup-now-varies-resign')
+    const code = `DR${crypto.randomUUID().slice(0, 4)}`
+    const t0 = Date.now()
+    let gameUuid = ''
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      repo.putMeta(baseMeta({ code, status: 'active' }))
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-dr-alice' }))
+      repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-dr-bob', display_name: 'Bob' }))
+      gameUuid = repo.getMeta()!.game_uuid
+      await archiveGameCreate(DB(), repo, t0, code)
+
+      // The server-minted `resign` move — game-do.ts's handleResign shape.
+      repo.insertMove({
+        move_index: 1,
+        round: 1,
+        turn_number: 1,
+        seat_index: 0,
+        type: 'resign',
+        payload: JSON.stringify({ type: 'resign', seat: 0 }),
+        by_ai: false,
+        ai_difficulty: null,
+        controlling_account_id: 'acct-dr-alice',
+        client_move_id: null,
+        reverted: false,
+        created_at: t0,
+      })
+      repo.putMeta({ ...repo.getMeta()!, status: 'resigned', phase: 'match_over', winner_seat: 1, move_index: 1 })
+
+      await archiveMatchEnd(DB(), repo, t0 + 500)
+      await archiveMatchEnd(DB(), repo, t0 + 500_000_000)
+    })
+
+    const rows = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(rows.length).toBe(2) // one per human seat, NOT four
   })
 
   it('marks ai_covered=1 for a seat with a non-reverted AI-played move, 0 for a seat with none', async () => {

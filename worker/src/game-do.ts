@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { scoreRound, setupRound } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
-import { archiveGameCreate, archiveMatchEnd, archiveSeats, archiveTick } from './do/archive'
+import { archiveGameCreate, archiveSeats, archiveTick } from './do/archive'
 import { authenticateToken, requireAuth } from './do/authctx'
 import { applyAndPersist, type ApplyParams } from './do/apply'
 import { createWaitingRoom, dealRound } from './do/init'
@@ -156,18 +156,35 @@ export class GameDO extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  /** Generic seat-agnostic fan-out to every attached socket (nudges, toasts). */
+  /**
+   * Generic seat-agnostic fan-out to every attached socket (nudges, toasts).
+   *
+   * FIX 5 (minor): only sends to sockets that completed the `{type:'auth'}`
+   * handshake (`deserializeAttachment().authed === true`). Previously this
+   * sent nudge/ai_cover/started frames to EVERY attached socket, including
+   * ones that never authenticated — an unauthenticated party who merely
+   * guessed/observed a room code could open a WS connection and sniff live
+   * activity metadata (move-index nudges, cover events) without ever proving
+   * seat ownership. No hand/card data ever rides these frames (see `nudge`'s
+   * docstring), but "there's activity right now" is itself metadata this
+   * game never intended to leak pre-auth. Returns the count of sockets the
+   * payload actually reached (not the total attached count).
+   */
   broadcast(payload: unknown): number {
     const data = JSON.stringify(payload)
     const sockets = this.ctx.getWebSockets()
+    let sent = 0
     for (const ws of sockets) {
+      const att = ws.deserializeAttachment() as { authed?: boolean } | null
+      if (!att?.authed) continue // never leak activity metadata pre-auth
       try {
         ws.send(data)
+        sent++
       } catch {
         // socket gone; presence rides heartbeats (Wave 3), not socket state
       }
     }
-    return sockets.length
+    return sent
   }
 
   /** "There's news at index N" — never any hand data. */
@@ -305,8 +322,19 @@ export class GameDO extends DurableObject<Env> {
    * the just-ended snapshot). Idempotent per round: the phase check re-runs
    * INSIDE the synchronous span, so a racing second caller/timer is a benign
    * no-op. Returns whether a deal actually happened.
+   *
+   * FIX 2: this is now the SINGLE source of the ADDENDUM M post-deal wheel
+   * (`ensureHeal` -> `driveIfAI` -> `armDisconnectCoverIfAbsent` ->
+   * `rearmAlarm`), run HERE right after a deal actually happens — not just by
+   * `handleNextRound`. Previously the alarm's `round_wait` case called this
+   * method and then did NOTHING else: if the freshly-dealt round opened on an
+   * already-AI-covered (absent-opponent) seat, the present player watched
+   * nothing happen until the next heal tick or heartbeat (up to `HEAL_MS`,
+   * ~60s) rather than seeing the AI move immediately. Folding the wheel in
+   * here means every caller (both `handleNextRound` and the alarm path) gets
+   * identical, immediate post-deal behavior for free.
    */
-  private advanceRoundInternal(now: number): boolean {
+  private async advanceRoundInternal(now: number): Promise<boolean> {
     const meta = this.repo.getMeta()
     if (!meta || meta.phase !== 'round_end') return false
     const snapshot = this.repo.getSnapshot()
@@ -326,6 +354,14 @@ export class GameDO extends DurableObject<Env> {
     if (dealt) {
       const freshMeta = this.repo.getMeta()!
       this.nudge(freshMeta.move_index)
+      // ADDENDUM M / FIX 2: the post-deal wheel, run unconditionally after
+      // every successful deal so an already-absent/AI opening seat is driven
+      // immediately rather than waiting for the next heal tick.
+      const sql = this.ctx.storage.sql as unknown as SqlLike
+      this.ensureHeal(sql, now)
+      driveIfAI(this.driveDeps(), this.repo, sql, now)
+      armDisconnectCoverIfAbsent(this.repo, sql, now)
+      await rearmAlarm(this.ctx, sql)
     }
     return dealt
   }
@@ -503,6 +539,17 @@ export class GameDO extends DurableObject<Env> {
    * and — since a cron tick is not latency-sensitive — AWAITS the archive
    * drain so any archive_outbox rows a prior D1 hiccup left behind are
    * retried synchronously.
+   *
+   * FIX 7 (minor): a still-`'waiting'` room (created, never joined) has no
+   * `healTick`/never-stall path of its own — nothing else ever visits it
+   * again once its DO goes idle. `index.ts`'s cron only invokes `/tick` on a
+   * `'waiting'` game once D1's `last_activity_at` is ALREADY stale past
+   * `WAITING_ABANDON_MS`, so this trusts that pre-filter rather than
+   * re-deriving staleness from a DO-local timestamp (`createWaitingRoom`
+   * never stamps one — a fresh, still-being-joined room simply never reaches
+   * this branch, since the cron never pokes it). Flipping to `'abandoned'`
+   * here also finalizes D1 via `runArchiveTick`'s terminal-status branch
+   * below (belt and suspenders with the cron's own direct D1 update).
    */
   private async handleTick(_request: Request): Promise<Response> {
     const sql = this.ctx.storage.sql as unknown as SqlLike
@@ -510,6 +557,7 @@ export class GameDO extends DurableObject<Env> {
     this.onWake(sql, now)
     const meta = this.repo.getMeta()
     if (meta && meta.status === 'active') this.healTick(sql, now)
+    if (meta && meta.status === 'waiting') this.repo.putMeta({ ...meta, status: 'abandoned' })
     await rearmAlarm(this.ctx, sql)
     await this.runArchiveTick(now) // drain unflushed outbox + finalize on end
     return json({ ok: true })
@@ -573,9 +621,12 @@ export class GameDO extends DurableObject<Env> {
           case 'round_wait':
             // ADDENDUM J: dispatch straight to the internal next-round
             // advance — never driveIfAI/autoCover — firing when EITHER
-            // seat's deadline expires.
+            // seat's deadline expires. FIX 2: advanceRoundInternal now runs
+            // its own post-deal wheel (incl. driveIfAI), so a present player
+            // is never stalled waiting for the next heal tick if the round
+            // opens on an AI-covered seat.
             clearTimer(sql, 'round_wait', t.seat)
-            this.advanceRoundInternal(now)
+            await this.advanceRoundInternal(now)
             break
         }
       }
@@ -807,12 +858,32 @@ export class GameDO extends DurableObject<Env> {
       // stuck waiting on an absent one to click Continue.
       armRoundWaitIfAbsent(this.repo, sql, now)
     }
+    if (freshMeta && freshMeta.phase === 'match_over') {
+      // A move naturally ended the match (a seat reached sealsNeeded). Same
+      // defect class as resign: purge EVERY outstanding wheel timer for both
+      // seats so a leftover grace/turn/round_wait can't fire autoCover / a
+      // forced round-advance / a spurious ai_cover broadcast on a finished
+      // game. runArchiveTick's terminal branch finalizes D1 + writes the
+      // (idempotent) matches rows, so no separate archiveMatchEnd call.
+      this.stopWheelTimers(sql)
+    }
     await rearmAlarm(this.ctx, sql)
     this.ctx.waitUntil(this.runArchiveTick(now))
-    if (freshMeta && freshMeta.phase === 'match_over') {
-      this.ctx.waitUntil(archiveMatchEnd(this.env.DB, this.repo, now))
-    }
     return json(result, 200)
+  }
+
+  /** Cancel every outstanding absence/AI timer for both seats plus the heal
+   *  self-tick — used whenever a match becomes terminal (resign or a natural
+   *  sealsNeeded win) so the timer wheel goes fully quiet instead of
+   *  zombie-ticking a finished game. Safe to call inside or outside a txn. */
+  private stopWheelTimers(sql: SqlLike): void {
+    for (const s of [0, 1] as const) {
+      clearTimer(sql, 'grace', s)
+      clearTimer(sql, 'turn', s)
+      clearTimer(sql, 'ai_step', s)
+      clearTimer(sql, 'round_wait', s)
+    }
+    clearTimer(sql, 'heal', GLOBAL_SEAT)
   }
 
   /**
@@ -888,43 +959,18 @@ export class GameDO extends DurableObject<Env> {
       })
     }
 
-    const snapshot = this.repo.getSnapshot()
-    if (!snapshot) return json({ error: 'no_snapshot' }, 404)
-    const result = scoreRound(snapshot)
-    const prevLoser: 0 | 1 | undefined =
-      result.sealAwardedTo === 0 ? 1 : result.sealAwardedTo === 1 ? 0 : undefined
-
-    const targetRound = meta.round + 1
-    let dealt = false
-    this.ctx.storage.transactionSync(() => {
-      const freshMeta = this.repo.getMeta()!
-      if (freshMeta.phase !== 'round_end') return // raced — someone else already dealt
-      dealRound(this.repo, targetRound, prevLoser)
-      dealt = true
-    })
-
-    if (dealt) {
-      const dealtMeta = this.repo.getMeta()!
-      this.nudge(dealtMeta.move_index)
-      // ADDENDUM M: /next-round runs the same post-deal wheel as /join:
-      // ensureHeal -> driveIfAI -> armDisconnectCoverIfAbsent -> rearmAlarm,
-      // so an already-absent opening seat is handled without waiting a heal
-      // tick. Rebuild the view AFTER the wheel in case driveIfAI advanced
-      // the state further.
-      const sql = this.ctx.storage.sql as unknown as SqlLike
-      const now = Date.now()
-      this.ensureHeal(sql, now)
-      driveIfAI(this.driveDeps(), this.repo, sql, now)
-      armDisconnectCoverIfAbsent(this.repo, sql, now)
-      await rearmAlarm(this.ctx, sql)
-      const finalMeta = this.repo.getMeta()!
-      const view = buildClientView(this.repo.getSnapshot()!, finalMeta, seat.seat_index, this.repo.getSeats())
-      return json({ view })
-    }
+    // FIX 2: delegate to advanceRoundInternal — the SINGLE source of the
+    // deal + ADDENDUM M post-deal wheel, shared with the alarm's
+    // `round_wait` auto-advance path, so both callers get identical,
+    // immediate post-deal behavior (an already-absent/AI opening seat is
+    // driven right away, not just here). Rebuild the view AFTER the call in
+    // case driveIfAI advanced the state further.
+    const now = Date.now()
+    const dealt = await this.advanceRoundInternal(now)
 
     const freshMeta = this.repo.getMeta()!
     const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats())
-    return json({ already: true, view })
+    return json(dealt ? { view } : { already: true, view })
   }
 
   /**
@@ -934,6 +980,21 @@ export class GameDO extends DurableObject<Env> {
    * — unlike round_start/round_end, a resignation IS a specific seat's
    * action). Idempotent (a second resign on an already-resigned game is a
    * benign no-op inside the same synchronous span).
+   *
+   * FIX 3: unlike every OTHER mutating handler (move/join/heartbeat/reclaim/
+   * leave), this used to commit `status:'resigned'`/`phase:'match_over'`
+   * WITHOUT clearing any outstanding grace/turn/ai_step/round_wait timers (on
+   * EITHER seat) or the heal self-tick, and without a `rearmAlarm` after —
+   * leaving a zombie timer that could fire `autoCover`/`driveIfAI`/a forced
+   * round-advance and broadcast on a match that has already ended. It also
+   * archived via a direct `archiveMatchEnd` call rather than the
+   * terminal-aware `runArchiveTick`, so D1's `games.status`/`ended_at` never
+   * got finalized on a resign (only the `matches` stats rows did). Both are
+   * fixed here: the timer sweep runs INSIDE the same synchronous span as the
+   * resign commit (so it only happens once, on the call that actually wins
+   * the race), and archiving now goes through `runArchiveTick` (whose
+   * terminal branch calls `archiveMatchEnd` internally — idempotent per
+   * FIX 1).
    */
   private async handleResign(request: Request): Promise<Response> {
     const auth = await requireAuth(request, this.env)
@@ -949,6 +1010,7 @@ export class GameDO extends DurableObject<Env> {
 
     const otherSeat: 0 | 1 = seat.seat_index === 0 ? 1 : 0
     const now = Date.now()
+    const sql = this.ctx.storage.sql as unknown as SqlLike
 
     this.ctx.storage.transactionSync(() => {
       const freshMeta = this.repo.getMeta()!
@@ -975,10 +1037,20 @@ export class GameDO extends DurableObject<Env> {
         winner_seat: otherSeat,
         move_index: moveIndex,
       })
+
+      // FIX 3: the match is over — purge the whole timer wheel for both seats
+      // + the heal self-tick so nothing zombie-ticks a dead match. Shared with
+      // handleMove's natural match-over path via stopWheelTimers.
+      this.stopWheelTimers(sql)
     })
 
     const freshMeta = this.repo.getMeta()!
-    this.ctx.waitUntil(archiveMatchEnd(this.env.DB, this.repo, now))
+    await rearmAlarm(this.ctx, sql)
+    // FIX 3: route through the terminal-aware runArchiveTick (its terminal
+    // branch calls archiveMatchEnd internally, idempotent per FIX 1) rather
+    // than a direct archiveMatchEnd call, so D1's games.status/ended_at is
+    // finalized too, not just the matches stats rows.
+    this.ctx.waitUntil(this.runArchiveTick(now))
     this.nudge(freshMeta.move_index)
 
     const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats())

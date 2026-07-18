@@ -239,16 +239,29 @@ export async function archiveTick(db: D1Database, repo: GameRepository, now: num
 
     const TERMINAL_STATUSES = new Set(['completed', 'stalemate', 'resigned', 'abandoned'])
     if (TERMINAL_STATUSES.has(meta.status)) {
-      await db
-        .prepare(
-          `UPDATE games
-             SET status = ?, seals0 = ?, seals1 = ?, winner_seat = ?,
-                 ended_at = COALESCE(ended_at, ?), last_activity_at = ?
-           WHERE game_uuid = ?`,
-        )
-        .bind(meta.status, meta.seals0, meta.seals1, meta.winner_seat, now, now, meta.game_uuid)
-        .run()
-      await archiveMatchEnd(db, repo, now)
+      // FIX 1 (belt and suspenders): archiveTick runs on EVERY post-match-over
+      // heartbeat/leave/cron-tick/re-run while status stays terminal — without
+      // this guard it would re-attempt the finalize+archiveMatchEnd work on
+      // every single one of those. `archiveMatchEnd` is now idempotent on its
+      // own (its dedup key no longer rides the volatile `now`), but skipping
+      // the whole block once `ended_at` is already set avoids the wasted D1
+      // round-trips AND double-belts the dedup guarantee.
+      const existing = await db
+        .prepare(`SELECT ended_at FROM games WHERE game_uuid = ?`)
+        .bind(meta.game_uuid)
+        .first<{ ended_at: number | null }>()
+      if (!existing || existing.ended_at == null) {
+        await db
+          .prepare(
+            `UPDATE games
+               SET status = ?, seals0 = ?, seals1 = ?, winner_seat = ?,
+                   ended_at = COALESCE(ended_at, ?), last_activity_at = ?
+             WHERE game_uuid = ?`,
+          )
+          .bind(meta.status, meta.seals0, meta.seals1, meta.winner_seat, now, now, meta.game_uuid)
+          .run()
+        await archiveMatchEnd(db, repo, now)
+      }
     }
   } catch {
     // D1 hiccup: leave whatever wasn't flushed for the cron/tick retry. Never
@@ -281,9 +294,12 @@ export async function archiveTick(db: D1Database, repo: GameRepository, now: num
  * for either seat.
  *
  * Dedup via the UNIQUE(account_id, timestamp, opponent_type) index —
- * `ON CONFLICT DO NOTHING` — so calling this twice for the same match-end
- * moment (the direct `game-do.ts` call AND `archiveTick`'s backstop call,
- * which both pass the SAME `now`) writes each seat's row at most once.
+ * `ON CONFLICT DO NOTHING` — so calling this any number of times for the
+ * same match-end moment (the direct `game-do.ts` call, `archiveTick`'s
+ * backstop call on every subsequent heartbeat/leave/cron-tick, a `/tick`
+ * retry, ...) writes each seat's row at most once. FIX 1: this holds
+ * regardless of what `now` each call happens to pass, because `timestamp` is
+ * derived from the IMMUTABLE terminal move's `created_at`, not from `now`.
  *
  * NEVER THROWS (see `archiveGameCreate`'s docstring for why every function
  * in this module is defensive): both direct call sites in `game-do.ts`
@@ -297,6 +313,22 @@ export async function archiveMatchEnd(db: D1Database, repo: GameRepository, now:
     const meta = repo.getMeta()
     if (!meta) return
     if (meta.winner_seat === null) return // no resolvable winner (e.g. abandoned) -> no stats row
+
+    // FIX 1 (blocker): the match-row identity must be STABLE across repeated
+    // invocations. `archiveTick`'s terminal-status branch calls this function
+    // on EVERY invocation while `meta.status` stays terminal — every
+    // post-match-over heartbeat/leave/cron-tick/re-run — and the caller here
+    // is ALSO reached directly via `ctx.waitUntil` from `handleMove`/
+    // `handleResign`. If `matches.timestamp` rode the passed-in `now` (a
+    // fresh `Date.now()` on every call), the UNIQUE(account_id, timestamp,
+    // opponent_type) dedup index would never actually catch a repeat — every
+    // re-run would mint a brand-new timestamp and a brand-new row, silently
+    // duplicating every leaderboard/history/rollup. Instead, derive the
+    // timestamp from the IMMUTABLE terminal move's `created_at` — the
+    // round_end move that set `match_over`, or the resign move — which is
+    // written exactly once and never changes on replay.
+    const terminalMove = repo.getMove(meta.move_index)
+    const matchTimestamp = terminalMove?.created_at ?? now
 
     const seats = repo.getSeats()
     const humanSeats = seats.filter((s): s is SeatRow & { owner_account_id: string } => s.owner_type === 'human' && !!s.owner_account_id)
@@ -336,8 +368,8 @@ export async function archiveMatchEnd(db: D1Database, repo: GameRepository, now:
             won ? 1 : 0,
             aiCoveredBySeat.has(seat.seat_index) ? 1 : 0,
             meta.game_uuid,
-            now,
-            now,
+            matchTimestamp, // FIX 1: stable dedup key, not the volatile `now`
+            now, // created_at: the row-insert wall clock is fine to vary
           ),
       )
 

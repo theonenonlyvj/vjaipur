@@ -1,5 +1,5 @@
 import { GameDO, type Env } from './game-do'
-import { ABANDON_MS } from './do/constants'
+import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
 import { getHistory, getLeaderboard, getRollup, reportMatch, type ReportMatchBody } from './do/stats'
@@ -104,6 +104,33 @@ async function tryResolveAccountId(request: Request, env: Env): Promise<string |
 
 // ---- route handlers ---------------------------------------------------------
 
+/** FIX 4: max collision-retry attempts before giving up (see
+ *  `mintUnusedCode`'s docstring). */
+const MAX_CODE_ATTEMPTS = 5
+
+/**
+ * FIX 4 (major): the room `code` doubles as the DO ROUTING KEY (see
+ * `stubFor`'s docstring) — `handleCreateGame` used to mint a fresh code and
+ * hand it straight to `stubFor(env, code)` with no check that the code was
+ * actually unused. A birthday collision (astronomically unlikely at 32^6, but
+ * never zero, and never silently ignored here) would silently reuse — and
+ * corrupt — another game's DO instead of failing loudly.
+ *
+ * Cheap fix that preserves `gameId === code`: before creating, check D1's
+ * `games.code` index (one indexed read); on a hit, mint a fresh code and
+ * retry, up to `MAX_CODE_ATTEMPTS`. Exported (and the code generator
+ * injectable) so router.test.ts can force a deterministic first-attempt
+ * collision rather than relying on a random one.
+ */
+export async function mintUnusedCode(env: Env, genCode: () => string = generateCode): Promise<string | null> {
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
+    const code = genCode()
+    const existing = await env.DB.prepare(`SELECT 1 FROM games WHERE code = ? LIMIT 1`).bind(code).first()
+    if (!existing) return code
+  }
+  return null
+}
+
 /**
  * `POST /games` {matchLength} — mint a room code, create the DO (routed by
  * that code — see `stubFor`), forward the create call (Authorization passed
@@ -119,7 +146,9 @@ async function handleCreateGame(request: Request, env: Env): Promise<Response> {
     return json({ error: 'bad_json' }, 400)
   }
 
-  const code = generateCode()
+  const code = await mintUnusedCode(env)
+  if (!code) return json({ error: 'code_exhausted' }, 503)
+
   const res = await stubFor(env, code).fetch(
     new Request('https://do/games', {
       method: 'POST',
@@ -292,14 +321,41 @@ export default {
    * is actively polling doesn't sit un-ticked indefinitely. Lightweight: one
    * indexed D1 query + a fire-and-forget poke per stale game. `code` is the
    * routing key (see `stubFor`'s docstring), not `game_uuid`.
+   *
+   * FIX 7 (minor): `WAITING_ABANDON_MS` was defined in constants.ts but never
+   * wired to anything — the query above only ever picks up `status='active'`
+   * games, so an unclaimed `'waiting'` room (created, never joined) stayed
+   * `/resolve`-able forever. A second query picks up rooms stuck `'waiting'`
+   * past `WAITING_ABANDON_MS` and pokes their DO too — `handleTick`'s own
+   * `meta.status === 'waiting'` branch flips it to `'abandoned'` in BOTH the
+   * DO's own meta and (via its `runArchiveTick` call) D1. Belt and
+   * suspenders: this also flips D1's `games.status` directly here, so
+   * `/resolve` stops returning the room even if the DO poke itself no-ops
+   * (e.g. an evicted/broken DO, or a D1 hiccup mid-`archiveTick`).
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const now = Date.now()
-    const { results } = await env.DB.prepare(`SELECT code FROM games WHERE status = 'active' AND last_activity_at < ?`)
+    const { results: activeStale } = await env.DB.prepare(
+      `SELECT code FROM games WHERE status = 'active' AND last_activity_at < ?`,
+    )
       .bind(now - ABANDON_MS)
       .all<{ code: string }>()
-    for (const { code } of results) {
+    for (const { code } of activeStale) {
       ctx.waitUntil(stubFor(env, code).fetch('https://do/tick', { method: 'POST' }))
+    }
+
+    const { results: waitingStale } = await env.DB.prepare(
+      `SELECT code FROM games WHERE status = 'waiting' AND last_activity_at < ?`,
+    )
+      .bind(now - WAITING_ABANDON_MS)
+      .all<{ code: string }>()
+    for (const { code } of waitingStale) {
+      ctx.waitUntil(stubFor(env, code).fetch('https://do/tick', { method: 'POST' }))
+      ctx.waitUntil(
+        env.DB.prepare(`UPDATE games SET status = 'abandoned', ended_at = COALESCE(ended_at, ?) WHERE code = ? AND status = 'waiting'`)
+          .bind(now, code)
+          .run(),
+      )
     }
   },
 } satisfies ExportedHandler<Env>
