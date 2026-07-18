@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { setupRound } from '../../src/engine'
+import { scoreRound, setupRound } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
 import {
   GameRepository,
@@ -322,6 +322,94 @@ describe('driveIfAI keeps a fully-covered game progressing (both seats AI, never
   })
 })
 
+describe('AI-covered move payloads are the TRANSLATED PUBLIC shape (FIX 6 regression coverage)', () => {
+  /** The known toPublicPayload (do/publicPayload.ts) field sets per action
+   *  type — asserts the persisted payload actually matches ONE of these
+   *  shapes, not merely "doesn't have the raw keys". */
+  function assertTranslatedShape(type: string, payload: Record<string, unknown>) {
+    expect(payload).not.toHaveProperty('marketIndices')
+    expect(payload).not.toHaveProperty('handIndices')
+    switch (type) {
+      case 'TAKE_SINGLE':
+        expect(payload).toHaveProperty('takenCard')
+        break
+      case 'TAKE_CAMELS':
+        expect(payload).toHaveProperty('count')
+        break
+      case 'TAKE_EXCHANGE':
+        expect(payload).toHaveProperty('takenCards')
+        expect(payload).toHaveProperty('givenGoods')
+        expect(payload).toHaveProperty('camelsGiven')
+        break
+      case 'SELL':
+        expect(payload).toHaveProperty('good')
+        expect(payload).toHaveProperty('cards')
+        break
+      default:
+        throw new Error(`unexpected move type in shape assertion: ${type}`)
+    }
+  }
+
+  it('a driveIfAI-committed move never persists raw marketIndices/handIndices (repo.getMove level)', async () => {
+    await runInDurableObject(stubFor('ai-move-payload-shape'), (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const { repo } = seedLiveGame(sql, { now: NOW, aiSeats: [0], presentSeats: [1] })
+      driveIfAI({ ctx: state, nudge: () => {} }, repo, sql, NOW)
+
+      const rows = repo.getMovesSince(0)
+      expect(rows.length).toBeGreaterThan(0)
+      const moveRow = rows[0]!
+      expect(moveRow.by_ai).toBe(true)
+
+      const payload = JSON.parse(moveRow.payload)
+      assertTranslatedShape(moveRow.type, payload)
+
+      // Also confirm via repo.getMove() specifically (the fix's other
+      // suggested read path), not just getMovesSince.
+      const same = repo.getMove(moveRow.move_index)!
+      expect(JSON.parse(same.payload)).toEqual(payload)
+    })
+  })
+
+  it('a CPU-kill floor move (applyFloor via a RETRY alarm) also persists the translated public shape', async () => {
+    const stub = stubFor('floor-move-payload-shape')
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      seedLiveGame(sql, { now: Date.now(), phase: 'playing', currentSeat: 0, aiSeats: [0], presentSeats: [1] })
+    })
+    await runInDurableObject(stub, (instance) => instance.alarm({ isRetry: true, retryCount: 1 }))
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const repo = new GameRepository(sql)
+      const rows = repo.getMovesSince(0)
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.ai_difficulty).toBe('floor')
+      const payload = JSON.parse(rows[0]!.payload)
+      assertTranslatedShape(rows[0]!.type, payload)
+    })
+  })
+
+  it('the same AI move is served via GET /sync with the identical translated shape (no raw indices leak through the API)', async () => {
+    const stub = stubFor('ai-move-sync-shape')
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const { repo } = seedLiveGame(sql, { now: Date.now(), aiSeats: [0], presentSeats: [1] })
+      driveIfAI({ ctx: state, nudge: () => {} }, repo, sql, Date.now())
+    })
+
+    const res = await stub.fetch(req('/sync?since=0', { method: 'GET', token: 'test:acct-1:P1' }))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { moves: any[] }
+    const aiMove = body.moves.find((m: any) => m.type !== 'round_start')
+    expect(aiMove).toBeTruthy()
+
+    const raw = JSON.stringify(aiMove)
+    expect(raw).not.toContain('marketIndices')
+    expect(raw).not.toContain('handIndices')
+    assertTranslatedShape(aiMove.type, aiMove.payload)
+  })
+})
+
 describe('cover via the alarm (end-to-end wiring through game-do.ts)', () => {
   it('an absent ON-TURN human is AI-covered once its turn timer fires', async () => {
     const stub = stubFor('alarm-cover-absent')
@@ -431,6 +519,63 @@ describe('round_wait auto-advance (ADDENDUM J)', () => {
       expect(hasTimer(sql, 'round_wait', 1)).toBe(false)
       const repo = new GameRepository(sql)
       expect(repo.getMeta()!.phase).toBe('round_end') // untouched, no forced advance
+    })
+  })
+})
+
+describe('round_wait auto-advance re-drives the AI immediately (FIX 2)', () => {
+  it('when the auto-advanced round opens on an AI-covered seat, the AI moves in the SAME alarm fire — no further heartbeat needed', async () => {
+    const stub = stubFor('round-wait-redrives-ai')
+    const seed = 1
+
+    // Work out (deterministically, from the same seed/logic advanceRoundInternal
+    // uses) which seat opens round 2, BEFORE seeding, so we can mark THAT
+    // exact seat AI-covered + absent and the other present. This mirrors
+    // do/apply.ts's ADDENDUM C/F prevLoser derivation and setupRound's
+    // `activePlayer: prevLoser ?? 0`.
+    const dealt = setupRound([0, 0], undefined, mulberry32(seed))
+    const result = scoreRound(dealt)
+    const openerSeat: 0 | 1 = result.sealAwardedTo === 0 ? 1 : result.sealAwardedTo === 1 ? 0 : 0
+    const presentSeat: 0 | 1 = openerSeat === 0 ? 1 : 0
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const now = Date.now()
+      seedLiveGame(sql, {
+        now,
+        phase: 'round_end',
+        round: 1,
+        seed,
+        aiSeats: [openerSeat],
+        presentSeats: [presentSeat],
+      })
+      // Arm in the FUTURE (mirrors the other alarm tests) so the platform
+      // doesn't auto-fire it before the explicit runDurableObjectAlarm below.
+      setTimer(sql, 'round_wait', openerSeat, now + 60_000)
+      await rearmAlarm(state, sql)
+    })
+
+    expect(await runDurableObjectAlarm(stub)).toBe(true)
+
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const repo = new GameRepository(sql)
+      const meta = repo.getMeta()!
+      expect(meta.phase).toBe('playing') // auto-advanced to round 2
+      expect(meta.round).toBe(2)
+
+      // Before FIX 2, nothing further would happen here until the next heal
+      // tick/heartbeat: the present player would just watch the AI-covered
+      // opening seat sit idle. FIX 2 folds the post-deal wheel (incl.
+      // driveIfAI) into advanceRoundInternal itself, so a real AI move for
+      // the AI-covered OPENING seat already landed in round 2 within this
+      // SAME alarm invocation — Jaipur has no "extra turn" mechanic, so that
+      // single AI move immediately hands the turn back to the present seat.
+      const round2Moves = repo.getMovesSince(0).filter((r) => r.round === 2 && r.type !== 'round_start')
+      expect(round2Moves.length).toBeGreaterThan(0)
+      expect(round2Moves[0]!.by_ai).toBe(true)
+      expect(round2Moves[0]!.seat_index).toBe(openerSeat) // the AI-covered opening seat actually moved
+      expect(meta.current_seat).toBe(presentSeat) // turn already passed back to the human
     })
   })
 })

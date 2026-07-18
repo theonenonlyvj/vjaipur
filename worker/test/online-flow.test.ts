@@ -1,8 +1,11 @@
 import { env, runInDurableObject } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { applyAction, setupRound, type Action, type Good } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
 import { GameRepository, type SqlLike } from '../src/do/storage'
+import { GLOBAL_SEAT } from '../src/do/constants'
+import { hasTimer, setTimer } from '../src/do/timers'
+import { applyD1Schema } from './helpers'
 
 /**
  * Full 2-HUMAN authoritative flow, driven entirely through `GameDO.fetch`
@@ -10,6 +13,12 @@ import { GameRepository, type SqlLike } from '../src/do/storage'
  * logic (the repo is only used as a GROUND-TRUTH oracle for the redaction
  * and determinism assertions, via `runInDurableObject`).
  */
+
+const DB = () => (env as unknown as { DB: D1Database }).DB
+
+beforeAll(async () => {
+  await applyD1Schema(DB())
+})
 
 let counter = 0
 function stubFor(name: string) {
@@ -266,6 +275,113 @@ describe('resign', () => {
     await stub.fetch(req('/resign', { token: tokens[0], body: {} }))
     const second = await stub.fetch(req('/resign', { token: tokens[1], body: {} }))
     expect(second.status).toBe(409)
+  })
+
+  it('FIX 3: resign clears EVERY outstanding timer for BOTH seats (+ heal), a subsequent alarm fire does NOT autoCover/append any move, and archiving (via runArchiveTick) writes exactly ONE matches row per human seat even after repeated /tick calls (ties into FIX 1)', async () => {
+    const { stub, tokens } = await createAndJoin('resign-timers-archive', 3)
+
+    // Arm a scattering of timers on BOTH seats (not just the resigning one)
+    // before resigning, to prove resign sweeps ALL of them — a leftover
+    // timer would otherwise fire autoCover/a forced round-advance/broadcast
+    // on a match that has already ended.
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const now = Date.now()
+      setTimer(sql, 'turn', 0, now + 60_000)
+      setTimer(sql, 'grace', 1, now + 60_000)
+      setTimer(sql, 'ai_step', 1, now)
+      setTimer(sql, 'round_wait', 0, now + 30_000)
+      setTimer(sql, 'heal', GLOBAL_SEAT, now + 60_000)
+    })
+
+    const res = await stub.fetch(req('/resign', { token: tokens[0], body: {} }))
+    expect(res.status).toBe(200)
+
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      for (const seat of [0, 1] as const) {
+        expect(hasTimer(sql, 'turn', seat)).toBe(false)
+        expect(hasTimer(sql, 'grace', seat)).toBe(false)
+        expect(hasTimer(sql, 'ai_step', seat)).toBe(false)
+        expect(hasTimer(sql, 'round_wait', seat)).toBe(false)
+      }
+      expect(hasTimer(sql, 'heal', GLOBAL_SEAT)).toBe(false)
+    })
+
+    // A subsequent forced alarm fire must find nothing due and change
+    // NOTHING — no zombie autoCover, no new move, on a finished match.
+    const movesBefore = await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      return new GameRepository(sql).getMovesSince(0).length
+    })
+    await stub.fetch(new Request('https://do/tick', { method: 'POST' })) // no-op wheel poke; also drains the archive
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const repo = new GameRepository(sql)
+      expect(repo.getMovesSince(0).length).toBe(movesBefore)
+      expect(repo.getSeats().every((s) => !s.controlled_by_ai)).toBe(true) // no zombie autoCover
+    })
+
+    // FIX 3 + FIX 1: resign now routes through runArchiveTick (not a direct
+    // archiveMatchEnd call), so D1 gets finalized; a SECOND /tick must not
+    // duplicate the matches rows (FIX 1's idempotent timestamp derivation).
+    const gameUuid = await runInDurableObject(stub, (_instance, state) =>
+      new GameRepository(state.storage.sql as unknown as SqlLike).getMeta()!.game_uuid,
+    )
+    await stub.fetch(new Request('https://do/tick', { method: 'POST' })) // re-run
+
+    const gameRow = await DB().prepare(`SELECT status, ended_at FROM games WHERE game_uuid = ?`).bind(gameUuid).first<any>()
+    expect(gameRow.status).toBe('resigned') // D1 games row finalized too, not just matches
+    expect(gameRow.ended_at).toBeTruthy()
+
+    const rows = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(rows.length).toBe(2) // one per human seat, NOT four
+  })
+
+  it('a NATURAL match-over (a move reaching sealsNeeded, not resign) ALSO sweeps every wheel timer, so a subsequent alarm makes no zombie autoCover/move — same defect class as FIX 3', async () => {
+    const { stub, tokens } = await createAndJoin('natural-timers', 1) // sealsNeeded=1: one decisive round ends the match
+
+    let endView: any
+    for (let attempt = 0; attempt < 6; attempt++) {
+      // Arm a scattering of timers right before each round's final move, so
+      // when the decisive round-ending move flips phase to 'match_over' there
+      // ARE outstanding timers to sweep.
+      await runInDurableObject(stub, (_instance, state) => {
+        const sql = state.storage.sql as unknown as SqlLike
+        const now = Date.now()
+        setTimer(sql, 'turn', 0, now + 60_000)
+        setTimer(sql, 'grace', 1, now + 60_000)
+        setTimer(sql, 'round_wait', 0, now + 30_000)
+        setTimer(sql, 'heal', GLOBAL_SEAT, now + 60_000)
+      })
+      endView = await playRoundToEnd(stub, tokens)
+      if (endView.phase === 'match_over') break
+      await stub.fetch(req('/next-round', { token: tokens[0], body: {} }))
+    }
+    expect(endView.phase).toBe('match_over') // the match ended via natural play, not resign
+
+    // Every wheel timer for BOTH seats (+ heal) must be gone.
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      for (const seat of [0, 1] as const) {
+        expect(hasTimer(sql, 'turn', seat)).toBe(false)
+        expect(hasTimer(sql, 'grace', seat)).toBe(false)
+        expect(hasTimer(sql, 'ai_step', seat)).toBe(false)
+        expect(hasTimer(sql, 'round_wait', seat)).toBe(false)
+      }
+      expect(hasTimer(sql, 'heal', GLOBAL_SEAT)).toBe(false)
+    })
+
+    // A forced alarm on the finished match changes nothing (no zombie cover).
+    const movesBefore = await runInDurableObject(stub, (_instance, state) =>
+      new GameRepository(state.storage.sql as unknown as SqlLike).getMovesSince(0).length,
+    )
+    await stub.fetch(new Request('https://do/tick', { method: 'POST' }))
+    await runInDurableObject(stub, (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      expect(repo.getMovesSince(0).length).toBe(movesBefore)
+      expect(repo.getSeats().every((s) => !s.controlled_by_ai)).toBe(true)
+    })
   })
 })
 
