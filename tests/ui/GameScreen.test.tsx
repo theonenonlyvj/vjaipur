@@ -47,25 +47,42 @@ describe('AI thinking indicator', () => {
   })
 })
 
-describe('Forfeit outcome (online)', () => {
-  it('does not show a Back to Menu control when onlineStatus is not forfeited', () => {
+// FORFEIT is gone online (an absent seat is AI-covered, never forfeited —
+// worker/src/do/presence.ts). Match end (however it happens, incl. a
+// resign) now routes through the normal phase -> '/game-over' navigation
+// guard above, so there's no special in-GameScreen overlay to test anymore;
+// what replaces it is the Resign affordance below and the cover/away
+// banner (see tests/ui/DisconnectBanner.test.tsx).
+describe('Resign (online)', () => {
+  it('does not show a resign control outside online mode', () => {
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: /back to menu/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /resign match/i })).not.toBeInTheDocument()
   })
 
-  it('shows a Back to Menu control and calls leaveOnline when onlineStatus is forfeited', () => {
-    const leaveOnlineMock = vi.fn()
-    const original = (useGameStore.getState() as any).leaveOnline
-    useGameStore.setState({ mode: 'online', onlineStatus: 'forfeited', leaveOnline: leaveOnlineMock } as any)
+  it('shows a resign control in online mode, behind a confirm', () => {
+    useGameStore.setState({ mode: 'online' })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.getByText(/opponent left.*you win/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /resign match/i }))
 
-    fireEvent.click(screen.getByRole('button', { name: /back to menu/i }))
-    expect(leaveOnlineMock).toHaveBeenCalledTimes(1)
+    expect(confirmSpy).toHaveBeenCalled()
+    confirmSpy.mockRestore()
+    useGameStore.setState({ mode: 'local' })
+  })
 
-    // Restore so this mock doesn't leak into other tests in this file
-    useGameStore.setState({ mode: 'local', onlineStatus: 'idle', leaveOnline: original } as any)
+  it('calls resignMatch only when the confirm is accepted', () => {
+    const resignMatchMock = vi.fn()
+    const original = useGameStore.getState().resignMatch
+    useGameStore.setState({ mode: 'online', resignMatch: resignMatchMock } as any)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: /resign match/i }))
+
+    expect(resignMatchMock).toHaveBeenCalledTimes(1)
+    confirmSpy.mockRestore()
+    useGameStore.setState({ mode: 'local', resignMatch: original } as any)
   })
 })
 

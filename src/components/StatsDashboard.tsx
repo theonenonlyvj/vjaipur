@@ -1,8 +1,7 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
-import { socketService } from '../socket/socketService'
-import { rankBySkill } from './leaderboardRank'
-import type { LeaderboardRow } from '../shared/protocol'
+import { leaderboard as fetchLeaderboard } from '../net/online'
+import type { LeaderboardResponse } from '../net/online'
 import { TIERS } from '../ai/tiers'
 
 interface StatsDashboardProps {
@@ -16,11 +15,7 @@ interface StatsDashboardProps {
 // src/ai/tiers.ts, the single source of truth for tier display metadata.
 const AI_TIERS = TIERS.map((t) => ({ id: t.id, label: t.label }))
 
-const OPPONENT_TABS = [
-  { id: 'overall', label: 'Overall' },
-  ...AI_TIERS,
-  { id: 'online', label: 'Online' },
-]
+const EMPTY_LEADERBOARD: LeaderboardResponse = { overall: [], verified: [] }
 
 function winPct(wins: number, games: number) {
   return games > 0 ? ((wins / games) * 100).toFixed(0) + '%' : '—'
@@ -35,34 +30,31 @@ function fmtDelta(d: number) {
   return d > 0 ? `+${s}` : s
 }
 
+function fmtWinRate(rate: number) {
+  return `${Math.round(rate * 100)}%`
+}
+
 export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const matches = useStatsStore((state) => state.matches)
   const [view, setView] = useState<'mine' | 'global'>('mine')
-  const [opponentTab, setOpponentTab] = useState('overall')
-  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([])
+  // 'verified' = online_authoritative only (server-enforced, but NOT proof of
+  // two distinct humans — worker/src/do/stats.ts's ADDENDUM T comment).
+  const [lbTab, setLbTab] = useState<'overall' | 'verified'>('overall')
+  const [leaderboardData, setLeaderboardData] = useState<LeaderboardResponse>(EMPTY_LEADERBOARD)
   const [lbLoading, setLbLoading] = useState(false)
   const [lbError, setLbError] = useState('')
 
-  // Fetch leaderboard when switching to global view
+  // Fetch the (already server-ranked — worker/src/do/stats.ts#getLeaderboard
+  // reuses the exact same rankBySkill comparator) leaderboard when switching
+  // to global view.
   useEffect(() => {
     if (view !== 'global') return
-    const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
     setLbLoading(true)
     setLbError('')
-    // Give socket a moment to connect before emitting
-    const timer = setTimeout(async () => {
-      try {
-        const ack = await socketService.getLeaderboard()
-        if (ack.ok) setLeaderboard(ack.rows)
-        else setLbError('Could not load leaderboard.')
-      } catch {
-        setLbError('Connection error.')
-      } finally {
-        setLbLoading(false)
-      }
-    }, 300)
-    return () => clearTimeout(timer)
+    fetchLeaderboard()
+      .then((data) => setLeaderboardData(data))
+      .catch(() => setLbError('Could not load leaderboard.'))
+      .finally(() => setLbLoading(false))
   }, [view])
 
   // ── MY RECORDS ─────────────────────────────────────────────────────────
@@ -87,29 +79,11 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
     .sort((a, b) => b.games - a.games)
 
   // ── GLOBAL LEADERBOARD ─────────────────────────────────────────────────
-  // Aggregate rows for "Overall" — sum across all opponent types per player
-  const overallMap = new Map<string, { games: number; wins: number; totalDelta: number }>()
-  leaderboard.forEach((r) => {
-    const s = overallMap.get(r.display_name) ?? { games: 0, wins: 0, totalDelta: 0 }
-    s.games += r.games
-    s.wins += r.wins
-    s.totalDelta += r.avg_delta * r.games
-    overallMap.set(r.display_name, s)
-  })
-  const overallRows = Array.from(overallMap.entries())
-    .map(([name, s]) => ({ display_name: name, games: s.games, wins: s.wins, avg_delta: s.games > 0 ? s.totalDelta / s.games : 0 }))
-    .sort(rankBySkill)
-
-  // Rows for a specific opponent_type tab
-  const filteredRows = leaderboard
-    .filter((r) => r.opponent_type === opponentTab)
-    .sort(rankBySkill)
-
-  const activeRows = opponentTab === 'overall' ? overallRows : filteredRows
-
-  // Only show tabs that have data
-  const tabsWithData = new Set(['overall', ...leaderboard.map(r => r.opponent_type)])
-  const visibleTabs = OPPONENT_TABS.filter(t => tabsWithData.has(t.id))
+  // The worker aggregates by account_id (never display_name) and ranks with
+  // the SAME rankBySkill comparator this app used to apply client-side
+  // (worker/src/do/stats.ts#getLeaderboard reuses src/components/
+  // leaderboardRank.ts directly) — these rows arrive already ranked.
+  const activeRows = leaderboardData[lbTab]
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -170,7 +144,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                   <table style={tableStyle}>
                     <thead>
                       <tr style={tableHeaderRowStyle}>
-                        <th style={thStyle}>Rival Code</th>
+                        <th style={thStyle}>Rival</th>
                         <th style={thStyle}>W</th>
                         <th style={thStyle}>L</th>
                         <th style={thStyle}>Win %</th>
@@ -210,17 +184,21 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
             )}
             {!lbLoading && !lbError && (
               <>
-                {/* Opponent sub-tabs */}
+                {/* Overall (every recorded source) vs Verified (server-authoritative
+                    online matches only — see LeaderboardResponse.verified) */}
                 <div style={subTabRowStyle}>
-                  {visibleTabs.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setOpponentTab(t.id)}
-                      style={opponentTab === t.id ? activeSubTabStyle : subTabStyle}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
+                  <button
+                    onClick={() => setLbTab('overall')}
+                    style={lbTab === 'overall' ? activeSubTabStyle : subTabStyle}
+                  >
+                    Overall
+                  </button>
+                  <button
+                    onClick={() => setLbTab('verified')}
+                    style={lbTab === 'verified' ? activeSubTabStyle : subTabStyle}
+                  >
+                    Verified Online
+                  </button>
                 </div>
 
                 {activeRows.length === 0 ? (
@@ -237,20 +215,16 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                           <th style={thStyle}>Games</th>
                           <th style={thStyle}>Wins</th>
                           <th style={thStyle}>Win %</th>
-                          <th style={thStyle}>Avg Δ</th>
                         </tr>
                       </thead>
                       <tbody>
                         {activeRows.map((r, i) => (
-                          <tr key={r.display_name} style={trStyle}>
+                          <tr key={r.accountId} style={trStyle}>
                             <td style={{ ...tdStyle, color: '#666', fontSize: 11 }}>{i + 1}</td>
-                            <td style={{ ...tdStyle, fontWeight: 700, color: '#f0c030' }}>{r.display_name}</td>
+                            <td style={{ ...tdStyle, fontWeight: 700, color: '#f0c030' }}>{r.displayName}</td>
                             <td style={tdStyle}>{r.games}</td>
                             <td style={tdStyle}>{r.wins}</td>
-                            <td style={tdStyle}>{winPct(r.wins, r.games)}</td>
-                            <td style={{ ...tdStyle, fontWeight: 700, color: deltaColor(r.avg_delta) }}>
-                              {fmtDelta(r.avg_delta)}
-                            </td>
+                            <td style={tdStyle}>{fmtWinRate(r.winRate)}</td>
                           </tr>
                         ))}
                       </tbody>

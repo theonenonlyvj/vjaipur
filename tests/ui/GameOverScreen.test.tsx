@@ -45,3 +45,32 @@ describe('GameOverScreen', () => {
     useGameStore.setState({ leaveOnline: original } as any)
   })
 })
+
+// ADDENDUM C: winnerSeat is ALWAYS seals[seat] >= sealsNeeded ? seat : other —
+// a resign sets winnerSeat WITHOUT touching seals at all, so a seals-only
+// formula gets a resign wrong. Online mode must trust the server's own
+// onlineView.winnerSeat instead of re-deriving from state.seals.
+describe('online winner uses onlineView.winnerSeat (handles resign correctly)', () => {
+  it('a resign at seals [0,0] still shows the correct winner from winnerSeat', () => {
+    useGameStore.setState({
+      state: { ...makeGameOverState(), seals: [0, 0] },
+      mode: 'online', onlinePlayerIndex: 0, matchLength: 3, matchScores: [10, 5],
+      onlineView: {
+        mySeat: 0, phase: 'match_over', round: 2, seals: [0, 0], matchLength: 3, winnerSeat: 1,
+        lastRoundResult: null,
+        players: [
+          { seat: 0, displayName: 'You', ownerType: 'human', controlledByAi: false },
+          { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
+        ],
+        game: {} as any,
+      } as any,
+      error: null,
+    })
+
+    render(<MemoryRouter><GameOverScreen /></MemoryRouter>)
+
+    // Seat 1 (the opponent, from my seat-0 perspective) won via resign —
+    // I lost, even though seals are tied at [0,0].
+    expect(screen.getByText(/defeat/i)).toBeInTheDocument()
+  })
+})

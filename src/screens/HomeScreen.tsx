@@ -1,8 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
-import { useStatsStore } from '../store/statsStore'
-import { socketService } from '../socket/socketService'
 import { ProfileIcon } from '../components/ProfileIcon'
 import { ProfileOverlay } from '../components/ProfileOverlay'
 import { StatsDashboard } from '../components/StatsDashboard'
@@ -12,10 +10,18 @@ import { ACTIVE_TIERS } from '../ai/tiers'
 
 export function HomeScreen() {
   const navigate = useNavigate()
-  const { startGame, setDifficulty, matchLength, setMatchLength } = useGameStore()
+  const { startGame, setDifficulty, matchLength, setMatchLength, mode, state } = useGameStore()
   const [showDifficulty, setShowDifficulty] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+
+  // main.tsx's boot-time resumeSession() silently restores a persisted
+  // online session (src/net/session.ts) into the store when the game is
+  // still active/round_end — this is the "least invasive" resume affordance
+  // the build brief calls for: a banner here rather than an automatic
+  // navigate (which could yank the user into a game they didn't ask to see
+  // yet, e.g. right after a fresh page load).
+  const canResumeOnline = mode === 'online' && state !== null
 
   function handleDifficulty(d: Difficulty) {
     setDifficulty(d)
@@ -33,7 +39,16 @@ export function HomeScreen() {
       <ProfileIcon onClick={() => setShowProfile(true)} />
 
       <h1 style={{ fontSize: 40, fontWeight: 900, letterSpacing: 2, color: '#f0c030', marginTop: 20 }}>VJAIPUR</h1>
-      
+
+      {canResumeOnline && (
+        <button
+          onClick={() => navigate('/game')}
+          style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040', minWidth: 260 }}
+        >
+          Resume online match
+        </button>
+      )}
+
       {/* Match Length Selector */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: 11, color: '#888', fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>Match Length</div>

@@ -7,7 +7,7 @@ import { GameScreen } from './GameScreen'
 
 export function RoundEndScreen() {
   const navigate = useNavigate()
-  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName, matchLength, onlineStatus } = useGameStore()
+  const { state, mode, nextRound, lastMoveDescription, opponentName, playerName, matchLength, onlineView } = useGameStore()
   const [showBoard, setShowBoard] = useState(false)
 
   useEffect(() => {
@@ -18,8 +18,22 @@ export function RoundEndScreen() {
 
   if (!state || state.phase !== 'round-end') return <Navigate to="/" replace />
 
-  const result = scoreRound(state)
+  // Online: the server is the sole scoring authority — viewToRenderState's
+  // GameState has placeholder (zero-value) opponent tokens, so a LOCAL
+  // scoreRound() here would silently credit the opponent 0 points. Use the
+  // worker's own RoundResult (view.lastRoundResult) instead; it's populated
+  // whenever phase is round_end/match_over (do/view.ts#buildClientView).
+  const result = mode === 'online' && onlineView?.lastRoundResult ? onlineView.lastRoundResult : scoreRound(state)
   const { scores, camelWinner, sealAwardedTo } = result
+
+  // Online's MatchState.seals is ALREADY post-award by the time phase is
+  // round_end (worker/src/do/apply.ts applies the seal in the same
+  // transaction that ends the round) — unlike local mode's engine
+  // `state.seals`, which stays frozen at this round's OPENING tally until
+  // the next setupRound. Adding sealAwardedTo's +1 again online would
+  // double-count the star.
+  const currentSealsFor = (p: 0 | 1) =>
+    mode === 'online' ? state.seals[p] : state.seals[p] + (sealAwardedTo === p ? 1 : 0)
 
   function handleContinue() {
     nextRound()
@@ -31,13 +45,9 @@ export function RoundEndScreen() {
         navigate('/game', { replace: true })
       }
     }
-    // In online mode, navigation is triggered by the useEffect above
-    // when startNextRound updates state.phase to 'playing' or 'game-over'
-  }
-
-  function handleBackToMenu() {
-    useGameStore.getState().leaveOnline()
-    navigate('/')
+    // In online mode, navigation is triggered by the useEffect above once
+    // nextRound()'s applyServerView() lands the fresh view and state.phase
+    // becomes 'playing' (next round dealt) or 'game-over' (match_over).
   }
 
   const myIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
@@ -115,7 +125,7 @@ export function RoundEndScreen() {
               roundTotal={scores[p]}
               name={p === 0 ? p0Name : p1Name}
               totalSeals={totalSeals}
-              currentSeals={state.seals[p] + (sealAwardedTo === p ? 1 : 0)}
+              currentSeals={currentSealsFor(p)}
             />
           ))}
         </div>
@@ -132,34 +142,6 @@ export function RoundEndScreen() {
       }}>
         Continue
       </button>
-
-      {onlineStatus === 'forfeited' && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1500,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 24, padding: 24,
-          background: 'rgba(5, 5, 5, 0.94)',
-        }}>
-          <div style={{
-            fontSize: 26, fontWeight: 900, color: '#60c040', textAlign: 'center',
-            textTransform: 'uppercase', letterSpacing: 1, maxWidth: 400,
-          }}>
-            Opponent left — you win the match
-          </div>
-          <button
-            onClick={handleBackToMenu}
-            style={{
-              padding: '16px 48px', fontSize: 18, fontWeight: 900,
-              background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
-              color: '#f0e8d8',
-              border: '2px solid #f0c030', borderRadius: 12, cursor: 'pointer',
-              textTransform: 'uppercase', letterSpacing: 1,
-            }}
-          >
-            Back to Menu
-          </button>
-        </div>
-      )}
 
       <style>{`
         @keyframes fadeIn {

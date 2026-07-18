@@ -12,27 +12,56 @@ vi.mock('../../src/App', () => ({
   default: () => null,
 }))
 
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connect: vi.fn(),
-  },
+const pullVGamesHistory = vi.fn().mockResolvedValue(undefined)
+const retryPendingReports = vi.fn().mockResolvedValue(undefined)
+const statsGetState = vi.fn(() => ({ vgamesToken: null as string | null, pullVGamesHistory, retryPendingReports }))
+vi.mock('../../src/store/statsStore', () => ({
+  useStatsStore: { getState: () => statsGetState() },
+}))
+
+const resumeSession = vi.fn().mockResolvedValue(undefined)
+vi.mock('../../src/store/gameStore', () => ({
+  useGameStore: { getState: () => ({ resumeSession }) },
 }))
 
 describe('main.tsx boot path', () => {
   beforeEach(() => {
     vi.resetModules()
+    vi.clearAllMocks()
+    pullVGamesHistory.mockResolvedValue(undefined)
+    retryPendingReports.mockResolvedValue(undefined)
+    resumeSession.mockResolvedValue(undefined)
+    statsGetState.mockReturnValue({ vgamesToken: null, pullVGamesHistory, retryPendingReports })
     document.body.innerHTML = '<div id="root"></div>'
   })
 
-  it('connects the socket on boot to wake the server / carry any persisted token', async () => {
-    const { socketService } = await import('../../src/socket/socketService')
+  // Phase 2C cut the eager socketService.connect() boot call entirely — the
+  // new online path never touches the old Socket.IO server at all (it keeps
+  // running only for stale tabs still on the old client — see
+  // docs/superpowers/specs/2026-07-18-vjaipur-worker-online-design.md §7).
+  // Boot's network side effects are now: retry any queued vs-AI stat
+  // reports, pull cross-device history if already signed in, and try to
+  // resume a persisted online session.
+  it('retries pending match reports on boot', async () => {
+    await import('../../src/main')
+    expect(retryPendingReports).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes a persisted online session on boot', async () => {
+    await import('../../src/main')
+    expect(resumeSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('pulls cross-device history when a VGames token is already persisted', async () => {
+    statsGetState.mockReturnValue({ vgamesToken: 'tok-1', pullVGamesHistory, retryPendingReports })
 
     await import('../../src/main')
 
-    // The legacy cross-device restore path that emitted RESTORE_ACCOUNT with
-    // the local secret_key (to a server that now just returns {error:'gone'})
-    // has been deleted outright, so there is no longer any dead flow for boot
-    // to reach — boot's only network side effect is this connect.
-    expect(socketService.connect).toHaveBeenCalled()
+    expect(pullVGamesHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT pull history when signed out (no persisted token)', async () => {
+    await import('../../src/main')
+    expect(pullVGamesHistory).not.toHaveBeenCalled()
   })
 })

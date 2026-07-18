@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
-import type { SyncMatchPayload } from '../shared/protocol'
+import { history as fetchHistory, reportMatch as reportMatchToWorker } from '../net/online'
 
 export interface MatchRecord {
   opponent_type: string
@@ -18,6 +18,12 @@ interface StatsState {
   secretKey: string | null
   displayName: string | null
   matches: MatchRecord[]
+  /** Local vs-AI matches whose POST /stats/report failed (offline / worker
+   *  unreachable / not-yet-authenticated) — retried on next app boot (see
+   *  retryPendingReports, called from main.tsx). The local `matches` entry
+   *  is NOT removed while pending; this is purely a "still owes the server a
+   *  write" queue. */
+  pendingReports: MatchRecord[]
   // VGames Identity (see src/auth/vgamesClient.ts). `secretKey` above doubles as
   // the device credential passed to /auth/quick — the legacy-guest bridge, so
   // existing local installs resolve to their VGames account automatically.
@@ -37,6 +43,13 @@ interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
   ensureVGamesAccount: () => Promise<{ token: string; accountId: string } | null>
   addMatch: (match: Omit<MatchRecord, 'timestamp'>) => Promise<void>
+  /** POST /stats/report for one match now (minting/reusing a VGames token
+   *  first). Returns whether it actually landed — never throws. Split out of
+   *  addMatch so retryPendingReports can reuse the exact same path. */
+  reportMatchNow: (match: MatchRecord) => Promise<boolean>
+  /** Retry every match that failed to report earlier (see pendingReports) —
+   *  called once at app boot (main.tsx). */
+  retryPendingReports: () => Promise<void>
   restoreAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   secureAccount: (username: string, password: string) => Promise<{ ok: boolean, error?: string }>
   setDisplayName: (name: string) => void
@@ -87,6 +100,7 @@ export const useStatsStore = create<StatsStore>()(
       secretKey: null,
       displayName: null,
       matches: [],
+      pendingReports: [],
       vgamesToken: null,
       vgamesAccountId: null,
 
@@ -142,8 +156,12 @@ export const useStatsStore = create<StatsStore>()(
         }
       },
 
+      // Local vs-AI match (online matches are archived server-side and never
+      // call addMatch — see gameStore's applyServerView). Records locally
+      // for instant UI, then reports to the worker (source='client_reported'
+      // — worker/src/do/stats.ts#reportMatch); a failed report is queued in
+      // pendingReports for a retry on next boot rather than silently lost.
       addMatch: async (matchData) => {
-        const { displayName } = get().ensureAccount()
         const newMatch: MatchRecord = {
           ...matchData,
           timestamp: Date.now(),
@@ -153,22 +171,39 @@ export const useStatsStore = create<StatsStore>()(
           matches: [newMatch, ...state.matches],
         }))
 
-        const account = await get().ensureVGamesAccount()
-        if (!account) return // fail-closed: no verified identity, don't sync
-
-        const payload: SyncMatchPayload = {
-          vgamesToken: account.token,
-          displayName: displayName || undefined,
-          match: {
-            opponent_type: newMatch.opponent_type,
-            opponent_id: newMatch.opponent_id,
-            player_score: newMatch.player_score,
-            opponent_score: newMatch.opponent_score,
-            won: newMatch.won,
-            timestamp: newMatch.timestamp,
-          },
+        const ok = await get().reportMatchNow(newMatch)
+        if (!ok) {
+          set((state) => ({ pendingReports: [...state.pendingReports, newMatch] }))
         }
-        socketService.syncMatch(payload)
+      },
+
+      reportMatchNow: async (match) => {
+        const account = await get().ensureVGamesAccount()
+        if (!account) return false // fail-closed: no verified identity, don't sync
+        try {
+          const result = await reportMatchToWorker({
+            opponent_type: match.opponent_type,
+            player_score: match.player_score,
+            opponent_score: match.opponent_score,
+            won: match.won,
+            timestamp: match.timestamp,
+          })
+          return !!result.ok
+        } catch (e) {
+          console.warn('reportMatchNow failed (offline or worker unreachable):', e)
+          return false
+        }
+      },
+
+      retryPendingReports: async () => {
+        const { pendingReports } = get()
+        if (pendingReports.length === 0) return
+        const stillPending: MatchRecord[] = []
+        for (const match of pendingReports) {
+          const ok = await get().reportMatchNow(match)
+          if (!ok) stillPending.push(match)
+        }
+        set({ pendingReports: stillPending })
       },
 
       // Binds this device to an existing username+password VGames account
@@ -232,35 +267,31 @@ export const useStatsStore = create<StatsStore>()(
         }
       },
 
-      // Cross-device history restore over the VGames-authenticated socket
-      // (superseded the removed legacy RESTORE_ACCOUNT path). Fetches THIS
-      // account's own matches from the server (Supabase, dual-run) and merges
-      // them into the local career-stats panel. No-op without a VGames token.
+      // Cross-device history restore over the worker's GET /stats/history
+      // (superseded the removed legacy Socket.IO PULL_HISTORY path — see
+      // worker/src/do/stats.ts#getHistory). Fetches THIS account's own
+      // matches (both online_authoritative and client_reported rows) and
+      // merges them into the local career-stats panel. No-op without a
+      // VGames token. Also called by gameStore on every online match_over so
+      // the server-authoritative row shows up without a local addMatch()
+      // double-write (see applyServerView).
       pullVGamesHistory: async () => {
         const { vgamesToken } = get()
         if (!vgamesToken) return
-        // Render free-tier servers cold-start (~50s), which can exceed
-        // waitForConnection's 10s window on a fresh boot. Retry the connect
-        // wait (bounded) so the pull still lands once the socket comes up.
-        let connected = false
-        for (let attempt = 0; attempt < 6; attempt++) {
-          try { await waitForConnection(); connected = true; break }
-          catch { await new Promise((r) => setTimeout(r, 8000)) }
-        }
-        if (!connected) { console.warn('pullVGamesHistory: server unreachable after retries'); return }
         try {
-          const ack = await socketService.pullHistory({ vgamesToken })
-          if (!ack || !ack.ok || !ack.matches) return
-          const cloud: MatchRecord[] = ack.matches.map((m) => ({
-            opponent_type: m.opponent_type,
-            opponent_id: m.opponent_id ?? null,
-            player_score: m.player_score,
-            opponent_score: m.opponent_score,
+          const { matches: rows } = await fetchHistory()
+          const cloud: MatchRecord[] = rows.map((m) => ({
+            opponent_type: m.opponentType,
+            opponent_id: m.opponentAccountId ?? null,
+            player_score: m.playerScore,
+            opponent_score: m.opponentScore,
             won: m.won,
-            timestamp: typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp,
+            timestamp: m.timestamp, // already epoch-ms (ADDENDUM V — D1's INTEGER column)
           }))
           // Merge server history with any local matches not yet synced up,
-          // de-duped by timestamp, newest first.
+          // de-duped by timestamp (string-vs-number normalized defensively —
+          // a pre-migration localStorage row could still carry an ISO
+          // string), newest first.
           const cloudTs = new Set(cloud.map((m) => m.timestamp))
           const localUnsynced = get().matches.filter((m) => {
             const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : m.timestamp
@@ -271,16 +302,16 @@ export const useStatsStore = create<StatsStore>()(
             const tb = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp
             return tb - ta
           })
-          // Only restore MATCHES here. displayName is already authoritative
-          // locally (login sets it to the username; boot restores it from
-          // persistence), and the server's Supabase display_name can lag a
-          // fresh "Create Account" (still the old guest name) — adopting it
-          // would flip a secured account back to "guest". friendCode likewise
-          // stays local: the server row holds only the synthetic cosmetic
-          // VG-#### code, never the user's real VJ-####.
+          // Only restore MATCHES here — never displayName/friendCode/claimed
+          // (ADDENDUM V: "a history pull must NEVER clobber local identity
+          // fields"). displayName is already authoritative locally (login
+          // sets it to the username; boot restores it from persistence), and
+          // the server's cached display_name can lag a fresh "Create
+          // Account" (still the old guest name) — adopting it would flip a
+          // secured account back to "guest".
           set({ matches: merged })
         } catch (e) {
-          console.warn('pullVGamesHistory failed (offline or server waking up)')
+          console.warn('pullVGamesHistory failed (offline or worker unreachable):', e)
         }
       },
 
@@ -294,6 +325,7 @@ export const useStatsStore = create<StatsStore>()(
           secretKey: null,
           displayName: null,
           matches: [],
+          pendingReports: [],
           vgamesToken: null,
           vgamesAccountId: null,
           claimed: false, // reset to a fresh, unclaimed guest
