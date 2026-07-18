@@ -1,0 +1,54 @@
+name = "vjaipur-worker"
+main = "src/index.ts"
+compatibility_date = "2025-04-17"
+
+# One Durable Object per game. MUST be new_sqlite_classes (the SQLite-backed
+# class is the one available on the Workers Free plan; new_classes requests the
+# paid KV-backed class).
+[[durable_objects.bindings]]
+name = "GAME_DO"
+class_name = "GameDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameDO"]
+
+# D1 analytics archive (registry + move-log archive + stats). The DO SQLite
+# copy is the authoritative live truth; D1 is the durable, queryable,
+# rebuildable archive written through via ctx.waitUntil. Local dev + Miniflare
+# need only this binding (a local SQLite is provisioned automatically).
+#
+# PRODUCTION (see design spec §9): run `wrangler d1 create vjaipur` ONCE and
+# REPLACE the database_id placeholder below with the real id it prints, then
+# apply the schema via `wrangler d1 migrations apply vjaipur --remote`
+# (migrations/0001_init.sql).
+[[d1_databases]]
+binding = "DB"
+database_name = "vjaipur"
+database_id = "PLACEHOLDER_REPLACE_AT_DEPLOY" # `wrangler d1 create vjaipur` prints the real id
+
+# Cron sweep (1-min is the Cloudflare floor): pokes stale active games so their
+# DO alarm/heal path re-drives/abandons them and drains any unflushed archive.
+[triggers]
+crons = ["* * * * *"]
+
+# VGAMES_URL is the canonical shared identity service (ADDENDUM O) — a PUBLIC
+# URL, not a secret, so it lives in [vars] (unlike viota, which co-hosts
+# identity and verifies JWTs locally, vjaipur-worker has NO local identity and
+# INTROSPECTS every token against this URL instead: POST {VGAMES_URL}/auth/introspect).
+[vars]
+VGAMES_URL = "https://vgames-identity.theonenonlyvj.workers.dev"
+
+# JWT_SECRET is DELIBERATELY NOT set here, and unlike viota's worker, it is
+# NEVER needed at all: vjaipur-worker does not co-host identity and never
+# verifies a JWT signature locally. Every Bearer token is verified by calling
+# out to VGAMES_URL's /auth/introspect (see design spec §2) and the result is
+# cached (SHA-256(token) -> {accountId, displayName}, 5-minute TTL, positive
+# results only). There is no local secret to leak or rotate for this worker.
+#
+# CLIENT_ORIGIN is DELIBERATELY UNSET here: unset => CORS falls back to a
+# permissive `*`, which is what you want for local `wrangler dev` (any
+# localhost origin). In PRODUCTION set it to the EXACT Render static-site
+# origin (e.g. https://vjaipur-game.onrender.com) via
+# `wrangler secret put CLIENT_ORIGIN` so CORS is pinned to that one origin.
+# See src/cors.ts (Wave 4).

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  // Covers this package's own sources/tests PLUS the certified engine it
+  // imports via relative path (worker/src/game-do.ts -> ../../src/engine) so
+  // `tsc --noEmit` here actually type-checks the exact files that get bundled.
+  // The engine and src/shared are NOT copied/duplicated — this is the same
+  // src/engine on disk that the root app's tsconfig.json also includes.
+  "include": ["src/**/*", "test/**/*", "../src/engine/**/*", "../src/shared/**/*"]
+}
