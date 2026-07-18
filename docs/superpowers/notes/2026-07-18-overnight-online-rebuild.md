@@ -115,3 +115,25 @@ Decisions (Vijay, 2026-07-18):
     (keep gameId===code).
   - MINOR: gate WS broadcasts to authed sockets; AI-cover payload regression
     test; sweep abandoned waiting rooms.
+- 10:00 — Worker review fixes committed `7190d2e` (+ I fixed the same-class
+  natural-match-over timer sweep myself; 140 worker tests). Client 2C committed
+  `d9d23d7` (446 client tests, view-driven, no-forfeit UX, worker-backed stats).
+- 10:27 — **Fuzz battery ALL PASS** (committed `fccbbee`, worker now 202 tests):
+  oracle 45 matches/6830 moves vs independent scorer = 0 divergences; races 9/9
+  no bugs; redaction 32 games/6315 steps = 0 leaks.
+- 10:30–10:38 — **DEPLOYED + LIVE-VERIFIED ON CLOUDFLARE:**
+  - D1 `vjaipur` created (`f363488e-1672-4104-851c-ccba73573820`), schema applied.
+  - `CLIENT_ORIGIN` secret = https://vjaipur-game.onrender.com; `wrangler deploy`
+    → **https://vjaipur-worker.theonenonlyvj.workers.dev** (version 94385877),
+    cron active, GAME_DO + DB + VGAMES_URL bound.
+  - **Live e2e ALL PASS** (2 real ghost tokens, full match to match_over):
+    create/join/redaction/foreign-seat-403/idempotency/winnerSeat + 2 D1 matches
+    rows (one per seat, opponent_type='online', source='online_authoritative').
+    Wiped the e2e rows after.
+  - **Stats migration DONE:** 77 Supabase matches (0 skipped) + 3 player names
+    → D1. Live `/stats/leaderboard` shows `theonenonlyvj` (37g, 10.8% — the
+    Omniscient Bot has been wrecking him) + `reks` (2-0); ranking floor works.
+- 10:39 — **CUTOVER PUSHED** (`85b5b66`, 8 commits f8a5ebf→85b5b66 to origin/main).
+  Client default worker URL baked (`src/net/http.ts`, prod builds only), so no
+  Render env var needed. Render auto-deploying the static client. Polling for the
+  new bundle. **ROLLBACK: `git push origin checkpoint-2026-07-18-pre-online-worker^{}:main --force-with-lease`** (client returns to the Socket.IO relay, still running).
