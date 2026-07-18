@@ -8,10 +8,15 @@ import { socketService } from '../socket/socketService'
 import { mulberry32 } from '../shared/rng'
 import { soundService } from '../audio/soundService'
 import { useStatsStore } from './statsStore'
+import { type TierId, DEFAULT_TIER_ID } from '../ai/tiers'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited' | 'reconnecting' | 'connection-lost'
-export type Difficulty = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3' | 'fair'
+// The set of engine ids an AI opponent can be — kept as the single source of
+// truth in src/ai/tiers.ts (TierId) since those ids are also what gets
+// stored as opponent_type in match history. This alias just preserves the
+// `Difficulty` name that the rest of the app (HomeScreen, etc.) imports.
+export type Difficulty = TierId
 export type MatchLength = 1 | 3 | 5
 
 export interface GameStore {
@@ -176,7 +181,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   onlinePlayerIndex: null,
   roomCode: null,
   onlineStatus: 'idle',
-  difficulty: 'easy',
+  difficulty: DEFAULT_TIER_ID,
   matchLength: 1,
   aiThinking: false,
   muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',

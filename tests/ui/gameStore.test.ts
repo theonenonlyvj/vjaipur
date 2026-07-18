@@ -1,8 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useGameStore } from '../../src/store/gameStore'
 import { getLegalActions } from '../../src/engine'
 import type { Action } from '../../src/engine'
-import { setWorkerBridge, WorkerBridge } from '../../src/ai/workerBridge'
+import {
+  setWorkerBridge,
+  setWorkerBridge2,
+  setWorkerBridge3,
+  setFairBotWorkerBridge,
+  WorkerBridge,
+} from '../../src/ai/workerBridge'
 
 // Fix 3 needs to force the medium-AI fallback (used inside runAi's worker
 // .catch()) to throw on demand, while leaving it real for every other test.
@@ -174,5 +180,92 @@ describe('aiThinking', () => {
 
     expect(useGameStore.getState().aiThinking).toBe(false)
     setWorkerBridge(null)
+  })
+})
+
+// Tier-lineup rework (2026-07-18): 'Hard' in the picker is now the fairBot
+// engine and 'Omniscient Bot' is hardAi3 — both ids ('fair' and 'hard3')
+// already existed as engine ids and were routed in runAi; these tests pin
+// down that each difficulty id talks to its OWN worker bridge and no other,
+// so a mislabeled routing change can't silently swap engines.
+describe('AI tier routing: engine id -> worker bridge', () => {
+  afterEach(() => {
+    setWorkerBridge(null)
+    setWorkerBridge2(null)
+    setWorkerBridge3(null)
+    setFairBotWorkerBridge(null)
+  })
+
+  function trackingBridge(name: string, calls: string[]): WorkerBridge {
+    const bridge = new WorkerBridge(() => { throw new Error('not used') })
+    bridge.getAction = () => {
+      calls.push(name)
+      return Promise.resolve({ type: 'TAKE_CAMELS' } as Action)
+    }
+    return bridge
+  }
+
+  it("difficulty 'fair' (picker label \"Hard\") routes to the fairBot worker bridge only", async () => {
+    const calls: string[] = []
+    setWorkerBridge(trackingBridge('hard', calls))
+    setWorkerBridge2(trackingBridge('hard2', calls))
+    setWorkerBridge3(trackingBridge('hard3', calls))
+    setFairBotWorkerBridge(trackingBridge('fair', calls))
+
+    useGameStore.setState({ difficulty: 'fair', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toEqual(['fair'])
+  })
+
+  it("difficulty 'hard3' (picker label \"Omniscient Bot\") routes to worker bridge 3 only", async () => {
+    const calls: string[] = []
+    setWorkerBridge(trackingBridge('hard', calls))
+    setWorkerBridge2(trackingBridge('hard2', calls))
+    setWorkerBridge3(trackingBridge('hard3', calls))
+    setFairBotWorkerBridge(trackingBridge('fair', calls))
+
+    useGameStore.setState({ difficulty: 'hard3', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toEqual(['hard3'])
+  })
+
+  it("retired difficulty 'hard' still routes to worker bridge 1 (engine untouched, just off the picker)", async () => {
+    const calls: string[] = []
+    setWorkerBridge(trackingBridge('hard', calls))
+    setWorkerBridge2(trackingBridge('hard2', calls))
+    setWorkerBridge3(trackingBridge('hard3', calls))
+    setFairBotWorkerBridge(trackingBridge('fair', calls))
+
+    useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toEqual(['hard'])
+  })
+
+  it("new vs-ai matches store the STABLE engine id, not a display label", () => {
+    useGameStore.setState({ difficulty: 'fair' })
+    expect(useGameStore.getState().difficulty).toBe('fair')
+    expect(useGameStore.getState().difficulty).not.toBe('Hard')
+
+    useGameStore.setState({ difficulty: 'hard3' })
+    expect(useGameStore.getState().difficulty).toBe('hard3')
+    expect(useGameStore.getState().difficulty).not.toBe('Omniscient Bot')
   })
 })

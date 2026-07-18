@@ -8,6 +8,7 @@ import { ProfileOverlay } from '../components/ProfileOverlay'
 import { StatsDashboard } from '../components/StatsDashboard'
 import { StatsStrip } from '../components/StatsStrip'
 import type { Difficulty } from '../store/gameStore'
+import { ACTIVE_TIERS } from '../ai/tiers'
 
 export function HomeScreen() {
   const navigate = useNavigate()
@@ -61,12 +62,16 @@ export function HomeScreen() {
       
       {showDifficulty ? (
         <>
-          <button onClick={() => handleDifficulty('easy')} style={btnStyle}>Easy</button>
-          <button onClick={() => handleDifficulty('medium')} style={btnStyle}>Medium</button>
-          <button onClick={() => handleDifficulty('hard')} style={btnStyle}>Hard</button>
-          <button onClick={() => handleDifficulty('fair')} style={{ ...btnStyle, borderColor: '#40a0ff', background: '#001a3a', color: '#80c0ff' }}>Fair Bot 🧠</button>
-          <button onClick={() => handleDifficulty('hard2')} style={{ ...btnStyle, borderColor: '#e06060', background: '#3a0000' }}>Hard II</button>
-          <button onClick={() => handleDifficulty('hard3')} style={{ ...btnStyle, borderColor: '#ff3030', background: '#1a0000', color: '#ff9090' }}>Hard III 💀</button>
+          {ACTIVE_TIERS.map((tier) => (
+            <button
+              key={tier.id}
+              onClick={() => handleDifficulty(tier.id)}
+              style={{ ...btnStyle, ...(tierAccentStyle[tier.id] ?? {}) }}
+            >
+              <span style={{ display: 'block' }}>{tier.label}</span>
+              <span style={taglineStyle}>{tier.tagline}</span>
+            </button>
+          ))}
           <button
             onClick={() => setShowDifficulty(false)}
             style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14 }}
@@ -98,7 +103,7 @@ export function HomeScreen() {
 }
 
 const btnStyle: CSSProperties = {
-  padding: '14px 40px',
+  padding: '12px 40px',
   fontSize: 18,
   fontWeight: 700,
   background: '#5a3a00',
@@ -108,6 +113,25 @@ const btnStyle: CSSProperties = {
   cursor: 'pointer',
   letterSpacing: 1,
   minWidth: 220,
+  textAlign: 'center',
+}
+
+const taglineStyle: CSSProperties = {
+  display: 'block',
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: 0.3,
+  opacity: 0.75,
+  marginTop: 2,
+  textTransform: 'none',
+}
+
+// Presentational accents for the two "lean into it" tiers — purely cosmetic,
+// keyed off the stable engine id. Labels/taglines themselves come from
+// src/ai/tiers.ts; this just picks a color.
+const tierAccentStyle: Partial<Record<string, CSSProperties>> = {
+  fair: { borderColor: '#40a0ff', background: '#001a3a', color: '#80c0ff' },
+  hard3: { borderColor: '#ff3030', background: '#1a0000', color: '#ff9090' },
 }
 
 const secondaryBtnStyle: CSSProperties = {
