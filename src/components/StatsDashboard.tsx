@@ -3,19 +3,18 @@ import { useStatsStore } from '../store/statsStore'
 import { socketService } from '../socket/socketService'
 import { rankBySkill } from './leaderboardRank'
 import type { LeaderboardRow } from '../shared/protocol'
+import { TIERS } from '../ai/tiers'
 
 interface StatsDashboardProps {
   onClose: () => void
 }
 
-const AI_TIERS = [
-  { id: 'easy',   label: 'Easy' },
-  { id: 'medium', label: 'Medium' },
-  { id: 'hard',   label: 'Hard' },
-  { id: 'hard2',  label: 'Hard II' },
-  { id: 'hard3',  label: 'Hard III 💀' },
-  { id: 'fair',   label: 'Fair Bot' },
-]
+// Every AI tier that has ever recorded a match — active AND retired — so
+// historical rows (e.g. the old MCTS "Hard"/"Hard II") keep displaying under
+// their own label instead of disappearing from Hall of Records. Order:
+// active tiers in picker order, then retired tiers. Sourced from
+// src/ai/tiers.ts, the single source of truth for tier display metadata.
+const AI_TIERS = TIERS.map((t) => ({ id: t.id, label: t.label }))
 
 const OPPONENT_TABS = [
   { id: 'overall', label: 'Overall' },
