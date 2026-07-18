@@ -6,6 +6,7 @@ import type { Action } from '../engine'
 import { useStatsStore } from '../store/statsStore'
 import { workerFetch } from './http'
 import type {
+  ClaimWinResponse,
   CreateGameResponse,
   HeartbeatResponse,
   HistoryResponse,
@@ -77,6 +78,19 @@ export async function nextRound(gameId: string): Promise<NextRoundResult> {
 
 export async function resign(gameId: string): Promise<ResignResponse> {
   return workerFetch<ResignResponse>(`/games/${encodeURIComponent(gameId)}/resign`, {
+    method: 'POST',
+    body: {},
+    token: authToken(),
+  })
+}
+
+/** POST /games/:id/claim-win — the present player's manual resolution once
+ *  the opponent has genuinely, continuously gone dark (no more AI takeover —
+ *  see worker/src/game-do.ts#handleClaimWin). 409 `opponent_present` when
+ *  the worker's own grace check hasn't cleared yet; surfaced as a
+ *  WorkerError for the caller to branch on, same pattern as move()'s 4xx. */
+export async function claimWin(gameId: string): Promise<ClaimWinResponse> {
+  return workerFetch<ClaimWinResponse>(`/games/${encodeURIComponent(gameId)}/claim-win`, {
     method: 'POST',
     body: {},
     token: authToken(),

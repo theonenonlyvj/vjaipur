@@ -158,7 +158,12 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
   }
 
   function handleResign() {
-    if (window.confirm('Resign this match? Your opponent will be declared the winner.')) {
+    // Resign is the deliberate "give up" affordance — distinct from the
+    // DisconnectBanner's "Leave & resume later" (which only appears once the
+    // OPPONENT has gone away: steps away, nothing lost, game stays saved) and
+    // "Claim win" (only offered to the OTHER player once I've genuinely gone
+    // dark). Resigning here ends the match immediately, on purpose, right now.
+    if (window.confirm("Resign this match? Your opponent wins immediately and the match ends — this can't be undone.")) {
       void useGameStore.getState().resignMatch()
     }
   }

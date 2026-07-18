@@ -73,6 +73,12 @@ describe('net/online typed calls', () => {
     expect(workerFetch).toHaveBeenCalledWith('/games/ABC123/resign', { method: 'POST', body: {}, token: 'tok-abc' })
   })
 
+  it('claimWin POSTs /games/:id/claim-win', async () => {
+    workerFetch.mockResolvedValueOnce({ view: {} })
+    await onlineApi.claimWin('ABC123')
+    expect(workerFetch).toHaveBeenCalledWith('/games/ABC123/claim-win', { method: 'POST', body: {}, token: 'tok-abc' })
+  })
+
   it('heartbeat POSTs /games/:id/heartbeat and opts into 5xx retry', async () => {
     workerFetch.mockResolvedValueOnce({ ok: true, seat: 0 })
     await onlineApi.heartbeat('ABC123')

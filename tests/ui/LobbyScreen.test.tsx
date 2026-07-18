@@ -17,7 +17,11 @@ import { useStatsStore } from '../../src/store/statsStore'
 import * as onlineApi from '../../src/net/online'
 
 beforeEach(() => {
-  useGameStore.setState({ onlineStatus: 'idle', roomCode: null, error: null, mode: null })
+  useGameStore.setState({ onlineStatus: 'idle', roomCode: null, error: null, mode: null, myGamesList: [] })
+  // Stubbed by default so mounting the (idle-state) Lobby's "Your games"
+  // fetch never hits the real network in tests that don't care about it —
+  // individual tests override with mockResolvedValueOnce/mockResolvedValue.
+  vi.spyOn(onlineApi, 'myGames').mockResolvedValue({ games: [] })
 })
 
 describe('LobbyScreen', () => {
@@ -98,5 +102,80 @@ describe('LobbyScreen -> gameStore -> net wiring', () => {
     await waitFor(() => expect(screen.getByText('CAML99')).toBeInTheDocument())
     expect(createGame).toHaveBeenCalled()
     createGame.mockRestore()
+  })
+})
+
+describe('LobbyScreen -> "Your games" resume list', () => {
+  it('fetches myGames on mount (idle state) and lists each active/waiting game', async () => {
+    vi.mocked(onlineApi.myGames).mockResolvedValue({
+      games: [
+        { gameId: 'ABC123', code: 'ABC123', status: 'active', matchLength: 3, lastActivityAt: Date.now(), seatIndex: 0 },
+        { gameId: 'ZZZ999', code: 'ZZZ999', status: 'waiting', matchLength: 1, lastActivityAt: null, seatIndex: 1 },
+      ],
+    })
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText(/your games/i)).toBeInTheDocument())
+    expect(screen.getByText(/ABC123/)).toBeInTheDocument()
+    expect(screen.getByText(/ZZZ999/)).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^resume$/i })).toHaveLength(2)
+  })
+
+  it('shows no "Your games" section when the list is empty', async () => {
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    await waitFor(() => expect(onlineApi.myGames).toHaveBeenCalled())
+    expect(screen.queryByText(/your games/i)).not.toBeInTheDocument()
+  })
+
+  it('clicking Resume wires gameId/mySeat through resumeGame and (once active) redirects to /game via onlineStatus', async () => {
+    vi.mocked(onlineApi.myGames).mockResolvedValue({
+      games: [{ gameId: 'ABC123', code: 'ABC123', status: 'active', matchLength: 3, lastActivityAt: Date.now(), seatIndex: 1 }],
+    })
+    const sync = vi.spyOn(onlineApi, 'sync').mockResolvedValueOnce({
+      moveIndex: 2,
+      view: {
+        mySeat: 1, phase: 'playing', round: 1, seals: [0, 0], matchLength: 3, winnerSeat: null,
+        lastRoundResult: null, opponentPresent: true, claimWinAvailable: false,
+        players: [
+          { seat: 0, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
+          { seat: 1, displayName: 'Me', ownerType: 'human', controlledByAi: false },
+        ],
+        game: {
+          market: [], myHand: [], oppHandCount: 0, herds: [0, 0],
+          tokens: { diamond: [], gold: [], silver: [], cloth: [], spice: [], leather: [] },
+          bonusTokenCounts: { three: 0, four: 0, five: 0 },
+          myGoodsTokens: [], oppGoodsTokenCount: 0, myBonusTokens: [], oppBonusTokens: [],
+          deckCount: 0, myScore: 0, activePlayer: 0,
+        },
+      },
+      moves: [],
+    })
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: /^resume$/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^resume$/i }))
+
+    await waitFor(() => expect(sync).toHaveBeenCalledWith('ABC123', 0))
+    expect(useGameStore.getState().roomCode).toBe('ABC123')
+    expect(useGameStore.getState().onlinePlayerIndex).toBe(1)
+    // onlineStatus flips to 'playing', which the screen's own effect turns
+    // into a redirect to /game — same reactive path joinOnline already uses.
+    await waitFor(() => expect(useGameStore.getState().onlineStatus).toBe('playing'))
+    sync.mockRestore()
+  })
+
+  it('a failed resume surfaces an inline error instead of throwing', async () => {
+    vi.mocked(onlineApi.myGames).mockResolvedValue({
+      games: [{ gameId: 'DEAD01', code: 'DEAD01', status: 'active', matchLength: 3, lastActivityAt: null, seatIndex: 0 }],
+    })
+    const sync = vi.spyOn(onlineApi, 'sync').mockRejectedValueOnce(new TypeError('offline'))
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: /^resume$/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^resume$/i }))
+
+    await waitFor(() => expect(screen.getByText(/could not resume/i)).toBeInTheDocument())
+    sync.mockRestore()
   })
 })

@@ -12,15 +12,16 @@ import * as outbox from '../net/outbox'
 import * as session from '../net/session'
 import { openNudgeSocket, type NudgeSocket } from '../net/nudge'
 import { WorkerError } from '../net/http'
-import type { ClientView, ClientMove, MoveType, WaitingRoomView } from '../net/types'
+import type { ClientView, ClientMove, MoveType, MyGamesRow, WaitingRoomView } from '../net/types'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 // Trimmed to what the view-driven online architecture actually produces —
 // the old socket-relay statuses ('opponent-disconnected', 'forfeited',
-// 'reconnecting', 'connection-lost') no longer exist: there is no forfeit
-// anymore (an absent seat is AI-covered, never forfeited — see
-// coveredSeat/opponentCovered below), and presence is heartbeat/view-driven,
-// not socket-connection-driven.
+// 'reconnecting', 'connection-lost') no longer exist. Owner's 2026-07-18
+// no-AI-takeover ruling removed AI cover too: there is no forfeit AND no
+// takeover anymore — an absent seat's turn simply PAUSES the game (see
+// opponentPresent/claimWinAvailable below), and presence is
+// heartbeat/view-driven, not socket-connection-driven.
 export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing'
 // The set of engine ids an AI opponent can be — kept as the single source of
 // truth in src/ai/tiers.ts (TierId) since those ids are also what gets
@@ -52,16 +53,24 @@ export interface GameStore {
   /** True while a move POST is in flight — gates further dispatches until
    *  the server acks (no optimistic mutation online). */
   pendingMove: boolean
-  /** My own seat is currently AI-covered (I was away). */
-  coveredSeat: boolean
-  /** The opponent's seat is currently AI-covered (they're away). */
-  opponentCovered: boolean
+  /** Is the opponent's seat currently present (heartbeated recently)?
+   *  Mirrors `onlineView.opponentPresent`, defaulted true so no banner shows
+   *  outside an active online match. */
+  opponentPresent: boolean
+  /** May I call claimWin() right now? Mirrors `onlineView.claimWinAvailable`
+   *  — only true once the opponent has been genuinely, continuously absent
+   *  past the worker's grace window. */
+  claimWinAvailable: boolean
   /** Highest move_index this client has applied — the `since` cursor for
    *  the next incremental /sync. */
   lastMoveIndex: number
   /** The match `round` matchScores was last accumulated for (dedup guard —
    *  see applyServerView). */
   lastScoredRound: number | null
+  /** The caller's other active/waiting games (worker's GET /my-games) — the
+   *  "Your games" resume list. Populated by fetchMyGames(). */
+  myGamesList: MyGamesRow[]
+  myGamesLoading: boolean
 
   setPlayerName: (name: string) => void
   toggleMute: () => void
@@ -75,8 +84,18 @@ export interface GameStore {
   applyServerView: (view: ClientView) => void
   onNudge: (moveIndex?: number) => Promise<void>
   resumeSession: () => Promise<void>
-  reclaimSeat: () => Promise<void>
+  /** Resume a game from the "Your games" list — NOT the same-device
+   *  persisted session (resumeSession) — this can reopen ANY of the
+   *  caller's active/waiting games. Re-syncs the full log, re-persists the
+   *  session pointer to THIS game, and (re)starts the heartbeat/nudge
+   *  socket, mirroring resumeSession's own wiring. */
+  resumeGame: (gameId: string, mySeat: 0 | 1) => Promise<void>
+  fetchMyGames: () => Promise<void>
   resignMatch: () => Promise<void>
+  /** POST /claim-win — end the match in my favor once the opponent has
+   *  genuinely gone dark (onlineView.claimWinAvailable gates when this is
+   *  legal; the worker re-validates independently). */
+  claimWin: () => Promise<void>
   disconnectOnline: () => void
   leaveOnline: () => void
   setDifficulty: (d: Difficulty) => void
@@ -404,16 +423,18 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     onlineView: null,
     pendingMove: false,
-    coveredSeat: false,
-    opponentCovered: false,
+    opponentPresent: true,
+    claimWinAvailable: false,
     lastMoveIndex: 0,
     lastScoredRound: null,
+    myGamesList: [],
+    myGamesLoading: false,
 
     startGame: (mode) => {
       const newState = setupRound([0, 0])
       set({
         state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0],
-        onlineView: null, pendingMove: false, coveredSeat: false, opponentCovered: false,
+        onlineView: null, pendingMove: false, opponentPresent: true, claimWinAvailable: false,
       })
       if (mode === 'vs-ai' && get().difficulty === 'fair') {
         set({ fairBotTracker: { knownInHand: [], unknownInHand: newState.players[0].hand.length } })
@@ -644,7 +665,6 @@ export const useGameStore = create<GameStore>((set, get) => {
     applyServerView: (view) => {
       const state = viewToRenderState(view)
       const oppRoster = view.players.find((p) => p.seat !== view.mySeat)
-      const mySeatRoster = view.players.find((p) => p.seat === view.mySeat)
 
       const patch: Partial<GameStore> = {
         onlineView: view,
@@ -652,8 +672,8 @@ export const useGameStore = create<GameStore>((set, get) => {
         matchLength: view.matchLength as MatchLength,
         onlinePlayerIndex: (view.mySeat === 1 ? 1 : 0) as 0 | 1,
         opponentName: oppRoster?.displayName ?? null,
-        coveredSeat: mySeatRoster?.controlledByAi ?? false,
-        opponentCovered: oppRoster?.controlledByAi ?? false,
+        opponentPresent: view.opponentPresent,
+        claimWinAvailable: view.claimWinAvailable,
       }
 
       if ((view.phase === 'round_end' || view.phase === 'match_over') && view.lastRoundResult) {
@@ -743,14 +763,50 @@ export const useGameStore = create<GameStore>((set, get) => {
       }
     },
 
-    reclaimSeat: async () => {
-      const { mode, roomCode } = get()
-      if (mode !== 'online' || !roomCode) return
+    /** Resume any game from the "Your games" list (GET /my-games) — unlike
+     *  resumeSession (which only knows about THIS device's last persisted
+     *  session), this can reopen any active/waiting game the account owns,
+     *  e.g. one left mid-game via leaveOnline() and picked back up later or
+     *  from another device. Re-persists the session pointer to `gameId` so a
+     *  reload after resuming still lands back here. */
+    resumeGame: async (gameId, mySeat) => {
+      set({ error: null, onlineStatus: 'connecting' })
       try {
-        const result = await onlineApi.reclaim(roomCode)
+        const result = await onlineApi.sync(gameId, 0)
+        session.save({ gameId, code: gameId, mySeat })
+        if (!('moves' in result)) {
+          set({
+            mode: 'online', roomCode: gameId, onlinePlayerIndex: mySeat,
+            onlineStatus: 'waiting', lastScoredRound: null, matchScores: [0, 0],
+          })
+          session.startHeartbeat(gameId)
+          attachNudge(gameId)
+          startWaitingPoll(gameId)
+          return
+        }
+        const rebuiltScores = computeMatchScoresFromMoves(result.moves)
+        set({
+          mode: 'online', roomCode: gameId, onlinePlayerIndex: mySeat,
+          onlineStatus: 'playing', matchScores: rebuiltScores,
+          lastScoredRound: result.view.phase !== 'playing' ? result.view.round : null,
+        })
         get().applyServerView(result.view)
+        set({ lastMoveIndex: result.moveIndex })
+        session.startHeartbeat(gameId)
+        attachNudge(gameId)
       } catch {
-        set({ error: { code: 'NETWORK', message: 'Could not reclaim your seat — try again.' } })
+        set({ onlineStatus: 'idle', error: { code: 'NETWORK', message: 'Could not resume that game — try again.' } })
+      }
+    },
+
+    fetchMyGames: async () => {
+      set({ myGamesLoading: true })
+      try {
+        const { games } = await onlineApi.myGames()
+        set({ myGamesList: games, myGamesLoading: false })
+      } catch {
+        // Transient — leave whatever list we already had, just stop loading.
+        set({ myGamesLoading: false })
       }
     },
 
@@ -762,6 +818,29 @@ export const useGameStore = create<GameStore>((set, get) => {
         get().applyServerView(result.view)
       } catch {
         set({ error: { code: 'NETWORK', message: 'Could not resign — check your connection and try again.' } })
+      }
+    },
+
+    // The opponent-ghosted resolution: POST /claim-win ends the match in my
+    // favor. applyServerView's match_over branch handles the
+    // session/nudge/history-refresh teardown the same way it does for any
+    // other match_over view (resign, natural end) — no special-casing
+    // needed here beyond applying the returned view. The worker
+    // re-validates opponent absence independently and 409s
+    // ('opponent_present') if it raced a reconnect — surfaced as a gentle,
+    // retryable error rather than a hard failure.
+    claimWin: async () => {
+      const { mode, roomCode } = get()
+      if (mode !== 'online' || !roomCode) return
+      try {
+        const result = await onlineApi.claimWin(roomCode)
+        get().applyServerView(result.view)
+      } catch (err) {
+        if (err instanceof WorkerError && err.code === 'opponent_present') {
+          set({ error: { code: 'opponent_present', message: "They're still connected — give it a moment." } })
+          return
+        }
+        set({ error: { code: 'NETWORK', message: 'Could not claim the win — try again.' } })
       }
     },
 
@@ -790,6 +869,13 @@ export const useGameStore = create<GameStore>((set, get) => {
       // POST /leave ONLY when this is an intentional mid-game (or
       // still-waiting-for-a-friend) exit — a match that has already ended
       // needs no server call (design brief: "match_over → no server call").
+      // Since the owner's 2026-07-18 no-AI-takeover ruling, /leave is
+      // GRACEFUL server-side (worker/src/game-do.ts#handleLeave): it marks
+      // this seat away and KEEPS the game active/owned — no forfeit, no AI
+      // cover, nothing lost. The game persists in the Durable Object and
+      // reopens later via "Your games" (fetchMyGames/resumeGame) on this or
+      // any other device. Clearing the LOCAL session below only makes THIS
+      // device forget the pointer — it never ends the match server-side.
       const shouldNotifyServer = mode === 'online' && !!roomCode && onlineView?.phase !== 'match_over'
       if (shouldNotifyServer && roomCode) {
         void onlineApi.leave(roomCode).catch(() => {})
@@ -804,7 +890,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       set({
         state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null,
         opponentName: null, lastMoveDescription: null, error: null,
-        onlineView: null, pendingMove: false, coveredSeat: false, opponentCovered: false,
+        onlineView: null, pendingMove: false, opponentPresent: true, claimWinAvailable: false,
         lastMoveIndex: 0, lastScoredRound: null, matchScores: [0, 0],
       })
     },
