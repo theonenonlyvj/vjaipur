@@ -41,6 +41,16 @@ export interface ClientView {
   matchLength: number
   winnerSeat: 0 | 1 | null
   lastRoundResult: RoundResult | null
+  /** NEW (no-AI-takeover rework, 2026-07-18): is the OPPONENT currently
+   *  present (heartbeated within the worker's presence window)? Drives the
+   *  "waiting for them" banner instead of a silent freeze. See
+   *  worker/src/do/view.ts's ClientView docstring. */
+  opponentPresent: boolean
+  /** NEW: may THIS seat call POST /claim-win right now? True only once the
+   *  opponent has been genuinely, continuously absent past the worker's
+   *  claim grace window — never merely `!opponentPresent`. Purely a client
+   *  affordance; the worker re-validates independently at claim time. */
+  claimWinAvailable: boolean
   players: ClientPlayer[]
   game: ClientViewGame
 }
@@ -91,6 +101,14 @@ export type MoveResult = { ok: true; moveIndex: number; view: ClientView } | { d
 export type NextRoundResult = { view: ClientView } | { already: true; view: ClientView }
 
 export interface ResignResponse {
+  view: ClientView
+}
+
+/** POST /claim-win success shape. On failure the worker returns 409
+ *  `{error:'opponent_present'}` (opponent isn't genuinely absent yet) or 409
+ *  `{error:'match_over'}` (raced/already ended) — surfaced as a WorkerError,
+ *  not part of this success type. */
+export interface ClaimWinResponse {
   view: ClientView
 }
 

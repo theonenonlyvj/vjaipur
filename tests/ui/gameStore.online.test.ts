@@ -8,6 +8,7 @@ vi.mock('../../src/net/online', () => ({
   move: vi.fn(),
   nextRound: vi.fn(),
   resign: vi.fn(),
+  claimWin: vi.fn(),
   heartbeat: vi.fn(),
   reclaim: vi.fn(),
   leave: vi.fn(),
@@ -63,6 +64,8 @@ function makeView(overrides: Partial<ClientView> = {}): ClientView {
     matchLength: 3,
     winnerSeat: null,
     lastRoundResult: null,
+    opponentPresent: true,
+    claimWinAvailable: false,
     players: [
       { seat: 0, displayName: 'Me', ownerType: 'human', controlledByAi: false },
       { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
@@ -98,8 +101,9 @@ function resetStore() {
   useGameStore.setState({
     state: null, mode: null, error: null, onlinePlayerIndex: null, roomCode: null,
     onlineStatus: 'idle', lastMoveDescription: null, opponentName: null,
-    matchScores: [0, 0], onlineView: null, pendingMove: false, coveredSeat: false,
-    opponentCovered: false, lastMoveIndex: 0, lastScoredRound: null,
+    matchScores: [0, 0], onlineView: null, pendingMove: false, opponentPresent: true,
+    claimWinAvailable: false, lastMoveIndex: 0, lastScoredRound: null,
+    myGamesList: [], myGamesLoading: false,
   })
 }
 
@@ -319,19 +323,30 @@ describe('dispatchOnline', () => {
 // ---- applyServerView ----------------------------------------------------------
 
 describe('applyServerView', () => {
-  it('derives opponentName, coveredSeat and opponentCovered from the roster', () => {
+  it('derives opponentName from the roster', () => {
     const view = makeView({
       mySeat: 0,
       players: [
-        { seat: 0, displayName: 'Me', ownerType: 'human', controlledByAi: true },
-        { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: true },
+        { seat: 0, displayName: 'Me', ownerType: 'human', controlledByAi: false },
+        { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
       ],
     })
     useGameStore.getState().applyServerView(view)
-    const s = useGameStore.getState()
-    expect(s.opponentName).toBe('Rival')
-    expect(s.coveredSeat).toBe(true)
-    expect(s.opponentCovered).toBe(true)
+    expect(useGameStore.getState().opponentName).toBe('Rival')
+  })
+
+  it('mirrors opponentPresent and claimWinAvailable straight off the view (no-AI-takeover model)', () => {
+    useGameStore.getState().applyServerView(makeView({ opponentPresent: true, claimWinAvailable: false }))
+    expect(useGameStore.getState().opponentPresent).toBe(true)
+    expect(useGameStore.getState().claimWinAvailable).toBe(false)
+
+    useGameStore.getState().applyServerView(makeView({ opponentPresent: false, claimWinAvailable: false }))
+    expect(useGameStore.getState().opponentPresent).toBe(false)
+    expect(useGameStore.getState().claimWinAvailable).toBe(false)
+
+    useGameStore.getState().applyServerView(makeView({ opponentPresent: false, claimWinAvailable: true }))
+    expect(useGameStore.getState().opponentPresent).toBe(false)
+    expect(useGameStore.getState().claimWinAvailable).toBe(true)
   })
 
   it('accumulates matchScores from lastRoundResult exactly ONCE per round', () => {
@@ -492,7 +507,7 @@ describe('nextRound (online)', () => {
   })
 })
 
-// ---- resign / reclaim -----------------------------------------------------------
+// ---- resign / claim-win -----------------------------------------------------------
 
 describe('resignMatch', () => {
   it('POSTs /resign and applies the resulting match_over view', async () => {
@@ -515,27 +530,109 @@ describe('resignMatch', () => {
   })
 })
 
-describe('reclaimSeat', () => {
-  it('POSTs /reclaim and the resulting view clears coveredSeat', async () => {
-    const coveredView = makeView({
-      players: [
-        { seat: 0, displayName: 'Me', ownerType: 'human', controlledByAi: true },
-        { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
-      ],
-    })
-    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: coveredView, coveredSeat: true })
+describe('claimWin', () => {
+  it('available: POSTs /claim-win, applies the resulting match_over view, and refreshes history', async () => {
+    const view = makeView({ opponentPresent: false, claimWinAvailable: true })
+    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: view })
 
-    const reclaimedView = makeView({
-      players: [
-        { seat: 0, displayName: 'Me', ownerType: 'human', controlledByAi: false },
-        { seat: 1, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
-      ],
-    })
-    vi.mocked(onlineApi.reclaim).mockResolvedValueOnce({ moveIndex: 8, view: reclaimedView })
+    const overView = makeView({ phase: 'match_over', winnerSeat: 0, opponentPresent: false, claimWinAvailable: false })
+    vi.mocked(onlineApi.claimWin).mockResolvedValueOnce({ view: overView })
 
-    await useGameStore.getState().reclaimSeat()
+    await useGameStore.getState().claimWin()
 
-    expect(useGameStore.getState().coveredSeat).toBe(false)
+    expect(onlineApi.claimWin).toHaveBeenCalledWith('ABC123')
+    expect(useGameStore.getState().onlineView?.phase).toBe('match_over')
+    expect(useGameStore.getState().onlineView?.winnerSeat).toBe(0)
+    expect(useStatsStore.getState().pullVGamesHistory).toHaveBeenCalled()
+  })
+
+  it('opponent_present 409: surfaces a gentle error, no match_over applied', async () => {
+    const view = makeView({ opponentPresent: false, claimWinAvailable: false })
+    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: view, error: null })
+
+    vi.mocked(onlineApi.claimWin).mockRejectedValueOnce(new WorkerError(409, 'opponent_present', {}))
+
+    await useGameStore.getState().claimWin()
+
+    expect(useGameStore.getState().onlineView?.phase).not.toBe('match_over')
+    expect(useGameStore.getState().error?.code).toBe('opponent_present')
+    expect(useGameStore.getState().error?.message).toMatch(/still connected/i)
+  })
+
+  it('a network failure surfaces a retry-worthy NETWORK error', async () => {
+    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: makeView(), error: null })
+    vi.mocked(onlineApi.claimWin).mockRejectedValueOnce(new TypeError('offline'))
+
+    await useGameStore.getState().claimWin()
+
+    expect(useGameStore.getState().error?.code).toBe('NETWORK')
+  })
+
+  it('is a no-op outside online mode', async () => {
+    resetStore()
+    await useGameStore.getState().claimWin()
+    expect(onlineApi.claimWin).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchMyGames', () => {
+  it('populates myGamesList from GET /my-games', async () => {
+    const rows = [
+      { gameId: 'ABC123', code: 'ABC123', status: 'active', matchLength: 3, lastActivityAt: 100, seatIndex: 0 },
+      { gameId: 'ZZZ999', code: 'ZZZ999', status: 'waiting', matchLength: 1, lastActivityAt: null, seatIndex: 0 },
+    ]
+    vi.mocked(onlineApi.myGames).mockResolvedValueOnce({ games: rows })
+
+    await useGameStore.getState().fetchMyGames()
+
+    expect(useGameStore.getState().myGamesList).toEqual(rows)
+    expect(useGameStore.getState().myGamesLoading).toBe(false)
+  })
+
+  it('a transient failure leaves myGamesLoading false without throwing', async () => {
+    vi.mocked(onlineApi.myGames).mockRejectedValueOnce(new TypeError('offline'))
+    await expect(useGameStore.getState().fetchMyGames()).resolves.toBeUndefined()
+    expect(useGameStore.getState().myGamesLoading).toBe(false)
+  })
+})
+
+describe('resumeGame', () => {
+  it('an active game: syncs the full log, wires gameId/mySeat, persists the session, and enters play', async () => {
+    resetStore()
+    const view = makeView({ mySeat: 1, phase: 'playing' })
+    vi.mocked(onlineApi.sync).mockResolvedValueOnce({ moveIndex: 4, view, moves: [] })
+
+    await useGameStore.getState().resumeGame('ABC123', 1)
+
+    expect(onlineApi.sync).toHaveBeenCalledWith('ABC123', 0)
+    expect(session.save).toHaveBeenCalledWith({ gameId: 'ABC123', code: 'ABC123', mySeat: 1 })
+    expect(useGameStore.getState().mode).toBe('online')
+    expect(useGameStore.getState().roomCode).toBe('ABC123')
+    expect(useGameStore.getState().onlinePlayerIndex).toBe(1)
+    expect(useGameStore.getState().onlineStatus).toBe('playing')
+    expect(session.startHeartbeat).toHaveBeenCalledWith('ABC123')
+    expect(openNudgeSocket).toHaveBeenCalled()
+  })
+
+  it('a still-waiting game resumes into the waiting room', async () => {
+    resetStore()
+    const waitingView: WaitingRoomView = { status: 'waiting', code: 'ABC123', matchLength: 3, seats: [] }
+    vi.mocked(onlineApi.sync).mockResolvedValueOnce(waitingView)
+
+    await useGameStore.getState().resumeGame('ABC123', 0)
+
+    expect(useGameStore.getState().mode).toBe('online')
+    expect(useGameStore.getState().onlineStatus).toBe('waiting')
+  })
+
+  it('a network failure surfaces a retry-worthy error and falls back to idle', async () => {
+    resetStore()
+    vi.mocked(onlineApi.sync).mockRejectedValueOnce(new TypeError('offline'))
+
+    await useGameStore.getState().resumeGame('ABC123', 0)
+
+    expect(useGameStore.getState().onlineStatus).toBe('idle')
+    expect(useGameStore.getState().error?.code).toBe('NETWORK')
   })
 })
 
@@ -700,7 +797,7 @@ describe('resumeSession', () => {
 // ---- leave / disconnect ----------------------------------------------------------
 
 describe('disconnectOnline / leaveOnline', () => {
-  it('mid-game: notifies the server (AI covers the seat) before resetting local state', () => {
+  it('mid-game: notifies the server (graceful /leave — the game stays saved, nothing forfeits) before resetting local state', () => {
     useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: makeView({ phase: 'playing' }) })
     useGameStore.getState().leaveOnline()
     expect(onlineApi.leave).toHaveBeenCalledWith('ABC123')
@@ -731,7 +828,7 @@ describe('disconnectOnline / leaveOnline', () => {
     useGameStore.setState({
       state: viewToRenderState(makeView()), mode: 'online', onlinePlayerIndex: 0, roomCode: 'ABC123',
       onlineStatus: 'playing', opponentName: 'Rival', onlineView: makeView(), pendingMove: true,
-      coveredSeat: true, opponentCovered: true, lastMoveIndex: 5, lastScoredRound: 1, matchScores: [10, 5],
+      opponentPresent: false, claimWinAvailable: true, lastMoveIndex: 5, lastScoredRound: 1, matchScores: [10, 5],
     })
     useGameStore.getState().leaveOnline()
     const s = useGameStore.getState()
@@ -743,10 +840,17 @@ describe('disconnectOnline / leaveOnline', () => {
     expect(s.opponentName).toBeNull()
     expect(s.onlineView).toBeNull()
     expect(s.pendingMove).toBe(false)
-    expect(s.coveredSeat).toBe(false)
-    expect(s.opponentCovered).toBe(false)
+    expect(s.opponentPresent).toBe(true)
+    expect(s.claimWinAvailable).toBe(false)
     expect(s.lastMoveIndex).toBe(0)
     expect(s.lastScoredRound).toBeNull()
     expect(s.matchScores).toEqual([0, 0])
+  })
+
+  it('a mid-game leave does NOT resign — the match stays owned/active server-side, only the local view resets', () => {
+    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: makeView({ phase: 'playing' }) })
+    useGameStore.getState().leaveOnline()
+    expect(onlineApi.resign).not.toHaveBeenCalled()
+    expect(onlineApi.claimWin).not.toHaveBeenCalled()
   })
 })

@@ -4,9 +4,25 @@ import { useGameStore } from '../store/gameStore'
 import { ProfileIcon } from '../components/ProfileIcon'
 import { ProfileOverlay } from '../components/ProfileOverlay'
 
+/** Coarse "Xm/Xh/Xd ago" for the "Your games" resume list. Deliberately
+ *  coarse (no seconds) — this is a lobby list, not a live countdown. */
+function formatLastActivity(ts: number): string {
+  const deltaMs = Date.now() - ts
+  const minutes = Math.floor(deltaMs / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export function LobbyScreen() {
   const navigate = useNavigate()
-  const { onlineStatus, roomCode, joinOnline, disconnectOnline, playerName, setPlayerName } = useGameStore()
+  const {
+    onlineStatus, roomCode, joinOnline, disconnectOnline, playerName, setPlayerName,
+    myGamesList, fetchMyGames, resumeGame,
+  } = useGameStore()
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
@@ -16,6 +32,26 @@ export function LobbyScreen() {
       navigate('/game', { replace: true })
     }
   }, [onlineStatus, navigate])
+
+  // "Your games" — the other active/waiting games this account owns (worker's
+  // GET /my-games), fetched once on entering the lobby's idle (pre-create/
+  // join) state. Resuming one routes through resumeGame, which drives
+  // onlineStatus itself — the effect above (and the render guard below) then
+  // navigate/redirect exactly like joinOnline already does, so no separate
+  // navigation call is needed here.
+  useEffect(() => {
+    if (onlineStatus === 'idle') void fetchMyGames()
+  }, [onlineStatus, fetchMyGames])
+
+  async function handleResume(gameId: string, seatIndex: number) {
+    setError(null)
+    await resumeGame(gameId, seatIndex === 1 ? 1 : 0)
+    // resumeGame surfaces failures via the store's general `error` field
+    // (there's no board mounted yet to show the usual Toast) — mirror it
+    // into this screen's local error line instead.
+    const storeError = useGameStore.getState().error
+    if (storeError) setError(storeError.message)
+  }
 
   if (onlineStatus === 'playing') return <Navigate to="/game" replace />
 
@@ -104,6 +140,41 @@ export function LobbyScreen() {
         />
         <button onClick={handleJoin} style={{ ...btnStyle, minWidth: 80, padding: '14px 20px' }}>Join</button>
       </div>
+
+      {myGamesList.length > 0 && (
+        <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, color: '#888', fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>
+            Your games
+          </div>
+          {myGamesList.map(g => (
+            <div
+              key={g.gameId}
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                padding: '10px 12px', background: 'rgba(255,255,255,0.05)',
+                border: '1px solid #444', borderRadius: 6,
+              }}
+            >
+              <span style={{ color: '#f0e8d8', fontSize: 13 }}>
+                {g.code} · {g.matchLength === 1 ? '1 game' : `${g.matchLength} games`}
+                {' · '}
+                {g.status === 'waiting' ? 'waiting for opponent' : 'in progress'}
+                {g.lastActivityAt != null && ` · ${formatLastActivity(g.lastActivityAt)}`}
+              </span>
+              <button
+                onClick={() => { void handleResume(g.gameId, g.seatIndex) }}
+                style={{
+                  padding: '6px 14px', fontSize: 13, fontWeight: 700,
+                  background: '#5a3a00', color: '#f0e8d8',
+                  border: '2px solid #f0c030', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                Resume
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', color: '#888', fontSize: 14, cursor: 'pointer', marginTop: 8 }}>
         ← Back

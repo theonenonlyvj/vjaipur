@@ -1,52 +1,91 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { DisconnectBanner } from '../../src/components/DisconnectBanner'
 import { useGameStore } from '../../src/store/gameStore'
 
-// DisconnectBanner is now the cover/reclaim banner (there is no more online
-// forfeit — an absent seat is AI-covered, never forfeited; see
-// worker/src/do/presence.ts). It reads coveredSeat/opponentCovered directly,
-// no countdown timer.
+// DisconnectBanner is now the "opponent away" banner (there is no more
+// AI-cover/reclaim — owner's 2026-07-18 no-AI-takeover ruling replaced it
+// with a pause + present-player-resolves model). It reads
+// opponentPresent/claimWinAvailable directly off the store, no countdown
+// timer, and its "Leave & resume later" button navigates home — it needs a
+// Router.
+function renderBanner() {
+  return render(<MemoryRouter><DisconnectBanner /></MemoryRouter>)
+}
+
 beforeEach(() => {
-  useGameStore.setState({ coveredSeat: false, opponentCovered: false })
+  useGameStore.setState({
+    onlineView: null, opponentName: null, opponentPresent: true, claimWinAvailable: false,
+  })
 })
 
 describe('DisconnectBanner', () => {
-  it('renders nothing when nobody is covered', () => {
-    const { container } = render(<DisconnectBanner />)
+  it('renders nothing when the opponent is present', () => {
+    const { container } = renderBanner()
     expect(container.textContent).toBe('')
   })
 
-  it('shows an away/AI-covering message when the OPPONENT is covered', () => {
-    useGameStore.setState({ opponentCovered: true })
-    render(<DisconnectBanner />)
-    expect(screen.getByText(/opponent away/i)).toBeInTheDocument()
-    expect(screen.getByText(/ai is playing for them/i)).toBeInTheDocument()
+  it('renders nothing once the match is over, even if opponentPresent is stale-false', () => {
+    useGameStore.setState({ opponentPresent: false, onlineView: { phase: 'match_over' } as never })
+    const { container } = renderBanner()
+    expect(container.textContent).toBe('')
   })
 
-  it('shows a reclaim affordance when MY OWN seat is covered', () => {
-    useGameStore.setState({ coveredSeat: true })
-    render(<DisconnectBanner />)
-    expect(screen.getByText(/ai covered your seat/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /take back my seat/i })).toBeInTheDocument()
+  it('shows a waiting message (named) when the opponent is away but not yet claimable', () => {
+    useGameStore.setState({ opponentPresent: false, opponentName: 'Rival', claimWinAvailable: false })
+    renderBanner()
+    expect(screen.getByText(/waiting for rival to return/i)).toBeInTheDocument()
   })
 
-  it('the reclaim button calls reclaimSeat', () => {
-    const reclaimSeatMock = vi.fn()
-    const original = useGameStore.getState().reclaimSeat
-    useGameStore.setState({ coveredSeat: true, reclaimSeat: reclaimSeatMock } as never)
-
-    render(<DisconnectBanner />)
-    fireEvent.click(screen.getByRole('button', { name: /take back my seat/i }))
-    expect(reclaimSeatMock).toHaveBeenCalledTimes(1)
-
-    useGameStore.setState({ reclaimSeat: original } as never)
+  it('falls back to a generic label when opponentName is unset', () => {
+    useGameStore.setState({ opponentPresent: false, opponentName: null })
+    renderBanner()
+    expect(screen.getByText(/waiting for your opponent to return/i)).toBeInTheDocument()
   })
 
-  it('my own coveredSeat takes priority over opponentCovered if somehow both are true', () => {
-    useGameStore.setState({ coveredSeat: true, opponentCovered: true })
-    render(<DisconnectBanner />)
-    expect(screen.getByRole('button', { name: /take back my seat/i })).toBeInTheDocument()
-    expect(screen.queryByText(/opponent away/i)).not.toBeInTheDocument()
+  it('always offers "Leave & resume later" once the opponent is away, even before claimWinAvailable', () => {
+    useGameStore.setState({ opponentPresent: false, claimWinAvailable: false })
+    renderBanner()
+    expect(screen.getByRole('button', { name: /leave.*resume later/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /claim win/i })).not.toBeInTheDocument()
+  })
+
+  it('adds a "Claim win" button once claimWinAvailable is true', () => {
+    useGameStore.setState({ opponentPresent: false, claimWinAvailable: true })
+    renderBanner()
+    expect(screen.getByRole('button', { name: /claim win/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /leave.*resume later/i })).toBeInTheDocument()
+  })
+
+  it('never renders a forfeit countdown — no numeric/seconds copy anywhere', () => {
+    useGameStore.setState({ opponentPresent: false, claimWinAvailable: true })
+    renderBanner()
+    expect(screen.queryByText(/forfeit/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/seconds?/i)).not.toBeInTheDocument()
+  })
+
+  it('the Claim win button calls claimWin', () => {
+    const claimWinMock = vi.fn()
+    const original = useGameStore.getState().claimWin
+    useGameStore.setState({ opponentPresent: false, claimWinAvailable: true, claimWin: claimWinMock } as never)
+
+    renderBanner()
+    fireEvent.click(screen.getByRole('button', { name: /claim win/i }))
+    expect(claimWinMock).toHaveBeenCalledTimes(1)
+
+    useGameStore.setState({ claimWin: original } as never)
+  })
+
+  it('the Leave & resume later button calls leaveOnline and navigates home (the game stays saved)', () => {
+    const leaveOnlineMock = vi.fn()
+    const original = useGameStore.getState().leaveOnline
+    useGameStore.setState({ opponentPresent: false, claimWinAvailable: true, leaveOnline: leaveOnlineMock } as never)
+
+    renderBanner()
+    fireEvent.click(screen.getByRole('button', { name: /leave.*resume later/i }))
+    expect(leaveOnlineMock).toHaveBeenCalledTimes(1)
+
+    useGameStore.setState({ leaveOnline: original } as never)
   })
 })
