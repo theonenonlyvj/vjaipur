@@ -5,8 +5,16 @@
 // client never verifies anything locally, it just carries the token.
 import { useStatsStore } from '../store/statsStore'
 
+// The live worker (deployed 2026-07-18). An explicit VITE_VJAIPUR_WORKER_URL
+// always wins; otherwise production builds bake the prod worker and local dev
+// falls back to localhost. This makes the Render client cutover self-contained
+// (no dashboard env var required) while keeping `npm run dev` pointed locally.
+const PROD_WORKER_URL = 'https://vjaipur-worker.theonenonlyvj.workers.dev'
+
 export function workerBaseUrl(): string {
-  return (import.meta.env.VITE_VJAIPUR_WORKER_URL as string | undefined) ?? 'http://localhost:8787'
+  const explicit = import.meta.env.VITE_VJAIPUR_WORKER_URL as string | undefined
+  if (explicit) return explicit
+  return import.meta.env.PROD ? PROD_WORKER_URL : 'http://localhost:8787'
 }
 
 /** A non-2xx JSON response from the worker. `code` is the worker's `error`

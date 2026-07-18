@@ -160,14 +160,42 @@ export function renderReport(report) {
   return lines.join('\n')
 }
 
+/** Emit INSERTs to seed the D1 `players` display-name cache the leaderboard
+ *  joins on, so migrated accounts show their real names on day one instead of
+ *  "Player N" (which otherwise only self-heals once each user next logs in and
+ *  requireAuth upserts them). One row per Supabase player that has a canonical
+ *  vgames_account_id AND a real (non-Guest_) display name. Idempotent via
+ *  ON CONFLICT: refresh the name but never regress last_seen_at. */
+export function emitPlayersSql(supabasePlayers, now = 0) {
+  const seen = new Set()
+  const lines = []
+  for (const p of supabasePlayers) {
+    const accountId = p.vgames_account_id
+    const name = p.display_name
+    if (!accountId || seen.has(accountId)) continue
+    if (!name || String(name).startsWith('Guest_')) continue // skip anonymous ghosts
+    seen.add(accountId)
+    lines.push(
+      `INSERT INTO players (account_id, display_name, last_seen_at) VALUES (${sqlEscape(accountId)}, ${sqlEscape(name)}, ${sqlEscape(now)}) ` +
+        `ON CONFLICT(account_id) DO UPDATE SET display_name=excluded.display_name;`,
+    )
+  }
+  return lines.length ? lines.join('\n') + '\n' : ''
+}
+
 /** Writes the SQL + markdown report artifacts to outDir (default worker/scripts/out/). */
-export function writeArtifacts(inserts, report, outDir = OUT_DIR) {
+export function writeArtifacts(inserts, report, outDir = OUT_DIR, supabasePlayers = null, now = 0) {
   mkdirSync(outDir, { recursive: true })
   const sqlPath = path.join(outDir, 'd1-matches.sql')
   const reportPath = path.join(outDir, 'classification-report.md')
   writeFileSync(sqlPath, emitSql(inserts))
   writeFileSync(reportPath, renderReport(report))
-  return { sqlPath, reportPath }
+  let playersPath = null
+  if (supabasePlayers) {
+    playersPath = path.join(outDir, 'd1-players.sql')
+    writeFileSync(playersPath, emitPlayersSql(supabasePlayers, now))
+  }
+  return { sqlPath, reportPath, playersPath }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -211,13 +239,15 @@ async function runLive() {
   console.log(`migrate-stats --live: pulled ${players.length} players, ${matches.length} matches.`)
 
   const { inserts, report } = transformMatches(players, matches)
-  const { sqlPath, reportPath } = writeArtifacts(inserts, report)
+  const { sqlPath, reportPath, playersPath } = writeArtifacts(inserts, report, OUT_DIR, players)
 
   console.log(renderReport(report))
   console.log(`migrate-stats --live: wrote ${inserts.length} INSERT statements to ${sqlPath}`)
   console.log(`migrate-stats --live: wrote report to ${reportPath}`)
+  console.log(`migrate-stats --live: wrote players seed to ${playersPath}`)
   console.log('migrate-stats --live: Supabase itself was left untouched (read-only pull).')
   console.log('Next: wrangler d1 execute vjaipur --remote --file=' + sqlPath)
+  console.log('Then: wrangler d1 execute vjaipur --remote --file=' + playersPath)
 }
 
 async function main() {
