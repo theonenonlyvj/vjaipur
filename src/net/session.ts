@@ -51,6 +51,11 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null
  *  successful one resets it. */
 export function startHeartbeat(gameId: string): void {
   stopHeartbeat()
+  // Fire ONE beat immediately (don't wait a full interval) so presence is
+  // established the instant we enter/resume a game — otherwise the opponent
+  // could see a spurious "away" for up to HEARTBEAT_INTERVAL_MS at kickoff or
+  // on resume/reconnect.
+  onlineApi.heartbeat(gameId).catch(() => {})
   heartbeatTimer = setInterval(() => {
     onlineApi.heartbeat(gameId).catch(() => {})
   }, HEARTBEAT_INTERVAL_MS)
