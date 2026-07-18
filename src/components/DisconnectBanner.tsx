@@ -1,46 +1,54 @@
-import { useEffect, useState } from 'react'
 import { useGameStore } from '../store/gameStore'
 
-const FORFEIT_SECONDS = 180
-
+/**
+ * The cover/reclaim banner — REPLACES the old forfeit-countdown banner.
+ * There is no more forfeit online: an absent seat is AI-covered (never
+ * forfeited — see worker/src/do/presence.ts's "NO auto-forfeit anywhere").
+ * Kept the component name (still mounted from GameScreen) since its role —
+ * "tell the player something's off with presence" — is the same, just the
+ * mechanism underneath changed.
+ */
 export function DisconnectBanner() {
-  const onlineStatus = useGameStore(s => s.onlineStatus)
-  const [seconds, setSeconds] = useState(FORFEIT_SECONDS)
+  const coveredSeat = useGameStore(s => s.coveredSeat)
+  const opponentCovered = useGameStore(s => s.opponentCovered)
+  const reclaimSeat = useGameStore(s => s.reclaimSeat)
 
-  useEffect(() => {
-    if (onlineStatus !== 'opponent-disconnected') {
-      setSeconds(FORFEIT_SECONDS)
-      return
-    }
-    const interval = setInterval(() => {
-      setSeconds(s => Math.max(0, s - 1))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [onlineStatus])
-
-  if (onlineStatus === 'forfeited') {
+  if (coveredSeat) {
     return (
       <div style={{
-        padding: '12px 20px', background: '#2a3020',
-        border: '2px solid #60c040', borderRadius: 8,
-        textAlign: 'center', color: '#60c040', fontWeight: 700,
+        padding: '12px 20px', background: '#3a1a00',
+        border: '2px solid #f0c030', borderRadius: 8,
+        textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        Opponent forfeit — you win!
+        <div style={{ color: '#f0c030', fontWeight: 700 }}>
+          You were away — AI covered your seat
+        </div>
+        <button
+          onClick={() => { void reclaimSeat() }}
+          style={{
+            alignSelf: 'center', padding: '8px 20px', fontSize: 13, fontWeight: 700,
+            background: '#5a3a00', color: '#f0e8d8',
+            border: '2px solid #f0c030', borderRadius: 6, cursor: 'pointer',
+          }}
+        >
+          Take back my seat
+        </button>
       </div>
     )
   }
 
-  if (onlineStatus !== 'opponent-disconnected') return null
-
-  return (
-    <div style={{
-      padding: '12px 20px', background: '#3a1a00',
-      border: '2px solid #f0c030', borderRadius: 8, textAlign: 'center',
-    }}>
-      <div style={{ color: '#f0c030', fontWeight: 700 }}>Opponent disconnected</div>
-      <div style={{ color: '#888', fontSize: 13, marginTop: 4 }}>
-        Waiting for reconnect... {seconds}s
+  if (opponentCovered) {
+    return (
+      <div style={{
+        padding: '12px 20px', background: '#1a1a1a',
+        border: '2px solid #666', borderRadius: 8, textAlign: 'center',
+      }}>
+        <div style={{ color: '#aaa', fontWeight: 700 }}>
+          Opponent away — AI is playing for them
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
+
+  return null
 }

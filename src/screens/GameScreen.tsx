@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { MarketRow } from '../components/MarketRow'
 import { HandRow } from '../components/HandRow'
@@ -21,8 +21,7 @@ export interface GameScreenProps {
 }
 
 export function GameScreen({ frozen = false }: GameScreenProps) {
-  const navigate = useNavigate()
-  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, onlineStatus, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
+  const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
 
   const [selMarket, setSelMarket] = useState<number[]>([])
   const [selHand, setSelHand] = useState<number[]>([])
@@ -158,9 +157,10 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
     dispatch({ type: 'SELL', good, quantity })
   }
 
-  function handleBackToMenu() {
-    useGameStore.getState().leaveOnline()
-    navigate('/')
+  function handleResign() {
+    if (window.confirm('Resign this match? Your opponent will be declared the winner.')) {
+      void useGameStore.getState().resignMatch()
+    }
   }
 
   return (
@@ -185,6 +185,16 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
         <span>Deck: {state.deck.length}</span>
         {!frozen && (
           <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {mode === 'online' && (
+              <button
+                onClick={handleResign}
+                aria-label="Resign match"
+                title="Resign match"
+                style={{ background: 'none', border: 'none', color: '#888', fontSize: 16, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}
+              >
+                🏳️
+              </button>
+            )}
             <button
               onClick={() => setShowRules(true)}
               aria-label="Rules"
@@ -270,34 +280,6 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
 
       {!frozen && tutorial && <TutorialOverlay onDone={endTutorial} />}
       {!frozen && showRules && <RulesModal onClose={() => setShowRules(false)} />}
-
-      {!frozen && onlineStatus === 'forfeited' && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1500,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 24, padding: 24,
-          background: 'rgba(5, 5, 5, 0.94)',
-        }}>
-          <div style={{
-            fontSize: 26, fontWeight: 900, color: '#60c040', textAlign: 'center',
-            textTransform: 'uppercase', letterSpacing: 1, maxWidth: 400,
-          }}>
-            Opponent left — you win the match
-          </div>
-          <button
-            onClick={handleBackToMenu}
-            style={{
-              padding: '16px 48px', fontSize: 18, fontWeight: 900,
-              background: 'linear-gradient(to bottom, #5a3a00, #3a2a00)',
-              color: '#f0e8d8',
-              border: '2px solid #f0c030', borderRadius: 12, cursor: 'pointer',
-              textTransform: 'uppercase', letterSpacing: 1,
-            }}
-          >
-            Back to Menu
-          </button>
-        </div>
-      )}
     </div>
   )
 }

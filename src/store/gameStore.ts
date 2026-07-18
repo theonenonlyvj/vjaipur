@@ -1,17 +1,27 @@
 import { create } from 'zustand'
-import type { GameState, Action, EngineError, Card } from '../engine'
-import { applyAction, setupRound, scoreRound } from '../engine'
+import type { GameState, Action, EngineError, Card, PlayerState, Phase } from '../engine'
+import { applyAction, setupRound, scoreRound, Errors } from '../engine'
 import { pickEasyAction } from '../ai/easyAi'
 import { pickMediumAction } from '../ai/mediumAi'
 import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3, getFairBotWorkerBridge } from '../ai/workerBridge'
-import { socketService } from '../socket/socketService'
-import { mulberry32 } from '../shared/rng'
 import { soundService } from '../audio/soundService'
 import { useStatsStore } from './statsStore'
 import { type TierId, DEFAULT_TIER_ID } from '../ai/tiers'
+import * as onlineApi from '../net/online'
+import * as outbox from '../net/outbox'
+import * as session from '../net/session'
+import { openNudgeSocket, type NudgeSocket } from '../net/nudge'
+import { WorkerError } from '../net/http'
+import type { ClientView, ClientMove, MoveType, WaitingRoomView } from '../net/types'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
-export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing' | 'opponent-disconnected' | 'forfeited' | 'reconnecting' | 'connection-lost'
+// Trimmed to what the view-driven online architecture actually produces —
+// the old socket-relay statuses ('opponent-disconnected', 'forfeited',
+// 'reconnecting', 'connection-lost') no longer exist: there is no forfeit
+// anymore (an absent seat is AI-covered, never forfeited — see
+// coveredSeat/opponentCovered below), and presence is heartbeat/view-driven,
+// not socket-connection-driven.
+export type OnlineStatus = 'idle' | 'connecting' | 'waiting' | 'playing'
 // The set of engine ids an AI opponent can be — kept as the single source of
 // truth in src/ai/tiers.ts (TierId) since those ids are also what gets
 // stored as opponent_type in match history. This alias just preserves the
@@ -34,29 +44,55 @@ export interface GameStore {
   tutorial: boolean
   playerName: string
   opponentName: string | null
-  opponentFriendCode: string | null
-  disconnectTimestamp: number | null
   matchScores: [number, number]
   fairBotTracker: { knownInHand: Card[]; unknownInHand: number } | null
+
+  // ---- online (view-driven — see src/net/) ---------------------------------
+  onlineView: ClientView | null
+  /** True while a move POST is in flight — gates further dispatches until
+   *  the server acks (no optimistic mutation online). */
+  pendingMove: boolean
+  /** My own seat is currently AI-covered (I was away). */
+  coveredSeat: boolean
+  /** The opponent's seat is currently AI-covered (they're away). */
+  opponentCovered: boolean
+  /** Highest move_index this client has applied — the `since` cursor for
+   *  the next incremental /sync. */
+  lastMoveIndex: number
+  /** The match `round` matchScores was last accumulated for (dedup guard —
+   *  see applyServerView). */
+  lastScoredRound: number | null
+
   setPlayerName: (name: string) => void
   toggleMute: () => void
 
   startGame: (mode: Mode) => void
   dispatch: (action: Action) => void
+  dispatchOnline: (action: Action) => Promise<void>
   nextRound: () => void
   clearError: () => void
-  joinOnline: (variant: 'create' | 'join' | 'quick', code?: string) => Promise<void>
-  receiveOpponentAction: (action: Action, syncedState?: GameState) => void
-  startNextRound: (seed: number) => void
-  setOnlineStatus: (status: OnlineStatus) => void
+  joinOnline: (variant: 'create' | 'join', code?: string) => Promise<void>
+  applyServerView: (view: ClientView) => void
+  onNudge: (moveIndex?: number) => Promise<void>
+  resumeSession: () => Promise<void>
+  reclaimSeat: () => Promise<void>
+  resignMatch: () => Promise<void>
   disconnectOnline: () => void
   leaveOnline: () => void
-  forceForfeit: () => void
   setDifficulty: (d: Difficulty) => void
   setMatchLength: (l: MatchLength) => void
   startTutorial: () => void
   endTutorial: () => void
   clearMatches: () => void
+}
+
+function countItems(items: string[]): string {
+  const counts = new Map<string, number>()
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1)
+  return Array.from(counts.entries()).map(([type, count]) => {
+    const label = count > 1 ? (type === 'spice' ? 'spice' : type + 's') : type
+    return `${count} ${label}`
+  }).join(' and ')
 }
 
 function describeAction(name: string, action: Action, state?: GameState): string {
@@ -73,15 +109,6 @@ function describeAction(name: string, action: Action, state?: GameState): string
     case 'TAKE_EXCHANGE': {
       if (!state) return `${prefix}made an exchange`
       const player = state.players[state.activePlayer]
-      
-      const countItems = (items: string[]) => {
-        const counts = new Map<string, number>()
-        for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1)
-        return Array.from(counts.entries()).map(([type, count]) => {
-          const label = count > 1 ? (type === 'spice' ? 'spice' : type + 's') : type
-          return `${count} ${label}`
-        }).join(' and ')
-      }
 
       const takenTypes = action.marketIndices.map(i => state.market[i]?.type ?? '?')
       const taken = countItems(takenTypes)
@@ -90,7 +117,7 @@ function describeAction(name: string, action: Action, state?: GameState): string
         .filter(i => i !== -1)
         .map(i => player.hand[i]?.type ?? '?')
       const camelsGiven = action.handIndices.filter(i => i === -1).length
-      
+
       const givenParts = []
       if (givenGoods.length > 0) givenParts.push(countItems(givenGoods))
       if (camelsGiven > 0) givenParts.push(`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`)
@@ -100,6 +127,139 @@ function describeAction(name: string, action: Action, state?: GameState): string
     case 'SELL':
       return `${prefix}sold ${action.quantity} ${action.good}`
   }
+}
+
+/** Same human-readable style as describeAction, but sourced from the
+ *  TRANSLATED PUBLIC move payload (worker/src/do/publicPayload.ts's shapes)
+ *  instead of a raw action + private state — this is what a synced
+ *  ClientMove (mine or the opponent's) carries, since the opponent's hand is
+ *  never visible to us. */
+function describePublicMove(name: string, type: MoveType, payload: unknown): string {
+  const prefix = `${name.toUpperCase()}: `
+  const p = (payload ?? {}) as Record<string, unknown>
+  switch (type) {
+    case 'TAKE_SINGLE': {
+      const card = p.takenCard as Card | undefined
+      return `${prefix}took a ${card?.type ?? 'card'}`
+    }
+    case 'TAKE_CAMELS': {
+      const count = typeof p.count === 'number' ? p.count : 1
+      return `${prefix}took ${count} camel${count === 1 ? '' : 's'}`
+    }
+    case 'TAKE_EXCHANGE': {
+      const takenCards = (p.takenCards as Card[] | undefined) ?? []
+      const givenGoods = (p.givenGoods as Card[] | undefined) ?? []
+      const camelsGiven = typeof p.camelsGiven === 'number' ? p.camelsGiven : 0
+      const taken = countItems(takenCards.map(c => c.type))
+      const givenParts: string[] = []
+      if (givenGoods.length > 0) givenParts.push(countItems(givenGoods.map(c => c.type)))
+      if (camelsGiven > 0) givenParts.push(`${camelsGiven} camel${camelsGiven > 1 ? 's' : ''}`)
+      return `${prefix}traded ${givenParts.join(' and ')} for ${taken}`
+    }
+    case 'SELL': {
+      const count = typeof p.count === 'number' ? p.count : 0
+      const good = typeof p.good === 'string' ? p.good : 'goods'
+      return `${prefix}sold ${count} ${good}`
+    }
+    case 'resign':
+      return `${prefix}resigned`
+    default:
+      return `${prefix}made a move`
+  }
+}
+
+const ENGINE_ERROR_MESSAGES: Record<string, string> = Object.fromEntries(
+  Object.values(Errors).map((e) => [e.code, e.message]),
+)
+
+const WORKER_ERROR_MESSAGES: Record<string, string> = {
+  not_your_turn: "It's not your turn.",
+  not_your_seat: "That's not your seat.",
+  game_over: 'This match has already ended.',
+  conflict: 'Something went out of sync — refreshing.',
+  reclaimed: 'Your seat changed hands — refreshing.',
+  invalid_seat: 'Invalid move — refreshing.',
+  invalid_client_move_id: 'Invalid move — please try again.',
+  game_not_found: 'This game could not be found.',
+  no_snapshot: 'This game could not be found.',
+}
+
+function onlineErrorMessage(code: string): string {
+  return ENGINE_ERROR_MESSAGES[code] ?? WORKER_ERROR_MESSAGES[code] ?? "That move wasn't accepted — try again."
+}
+
+/** A never-face-rendered filler card — used ONLY for the opponent's hand/deck
+ *  placeholder arrays in viewToRenderState, whose real contents are never
+ *  sent to the client (redaction). Negative ids keep them visibly distinct
+ *  from real card ids (which are always >= 0) in case anything ever logs one. */
+function placeholderCard(id: number): Card {
+  return { id, type: 'leather' }
+}
+
+/**
+ * Adapts a redacted ClientView into the same GameState shape every existing
+ * render component (MarketRow, HandRow, OpponentStrip, StatusBar, TokenRail,
+ * ActionBar, ScoreCard...) already knows how to draw — so none of them need
+ * to change for online play. `players` is indexed by SEAT (players[0] =
+ * seat 0's state), matching how the screens already pick "me" vs "opponent"
+ * via `onlinePlayerIndex` in online mode. Placeholder cards/tokens carry only
+ * a count's worth of filler entries — every component that touches the
+ * opponent's hand/tokens must render counts only (OpponentStrip) or nothing
+ * at all (MarketRow only renders the market, which is real/public).
+ */
+export function viewToRenderState(view: ClientView): GameState {
+  const g = view.game
+  const mySeat: 0 | 1 = view.mySeat === 1 ? 1 : 0
+  const oppSeat: 0 | 1 = mySeat === 0 ? 1 : 0
+
+  const me: PlayerState = {
+    hand: g.myHand,
+    herd: g.herds[mySeat],
+    tokens: g.myGoodsTokens,
+    bonusTokens: g.myBonusTokens,
+  }
+  const opponent: PlayerState = {
+    hand: Array.from({ length: g.oppHandCount }, (_, i) => placeholderCard(-(i + 1))),
+    herd: g.herds[oppSeat],
+    tokens: Array.from({ length: g.oppGoodsTokenCount }, () => ({ good: 'leather' as const, value: 0 })),
+    bonusTokens: g.oppBonusTokens.map((t) => ({ tier: t.tier, value: 0 })),
+  }
+
+  const players: [PlayerState, PlayerState] = mySeat === 0 ? [me, opponent] : [opponent, me]
+
+  const phase: Phase = view.phase === 'playing' ? 'playing' : view.phase === 'round_end' ? 'round-end' : 'game-over'
+
+  return {
+    phase,
+    round: view.round,
+    activePlayer: g.activePlayer,
+    market: g.market,
+    // Deck contents/order are never sent (redaction) — only the count. A
+    // deck-length placeholder is enough for every component that touches
+    // `deck` (they all just read `.length`).
+    deck: Array.from({ length: g.deckCount }, (_, i) => placeholderCard(-(1000 + i))),
+    discard: [],
+    revealedHands: [[], []],
+    players,
+    tokens: g.tokens,
+    bonusTokens: {
+      three: Array.from({ length: g.bonusTokenCounts.three }, () => ({ tier: 3 as const, value: 0 })),
+      four: Array.from({ length: g.bonusTokenCounts.four }, () => ({ tier: 4 as const, value: 0 })),
+      five: Array.from({ length: g.bonusTokenCounts.five }, () => ({ tier: 5 as const, value: 0 })),
+    },
+    seals: view.seals,
+  }
+}
+
+function computeMatchScoresFromMoves(moves: ClientMove[]): [number, number] {
+  let totals: [number, number] = [0, 0]
+  for (const m of moves) {
+    if (m.type !== 'round_end') continue
+    const payload = m.payload as { result?: { scores?: [number, number] } } | null
+    const scores = payload?.result?.scores
+    if (scores) totals = [totals[0] + scores[0], totals[1] + scores[1]]
+  }
+  return totals
 }
 
 // Trigger the AI to move given a state where activePlayer === 1 in vs-ai mode.
@@ -174,373 +334,515 @@ function runAi(
   set({ state: next, error: null })
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
-  state: null,
-  mode: null,
-  error: null,
-  onlinePlayerIndex: null,
-  roomCode: null,
-  onlineStatus: 'idle',
-  difficulty: DEFAULT_TIER_ID,
-  matchLength: 1,
-  aiThinking: false,
-  muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
-  lastMoveDescription: null,
-  tutorial: false,
-  playerName: useStatsStore.getState().ensureAccount().displayName || '',
-  opponentName: null,
-  opponentFriendCode: null,
-  disconnectTimestamp: null,
-  matchScores: [0, 0],
-  fairBotTracker: null,
+export const useGameStore = create<GameStore>((set, get) => {
+  // ---- online singletons (live for the app's lifetime, mirroring the old
+  // module-level `socketService` singleton this replaces) ------------------
+  let nudgeSocket: NudgeSocket | null = null
+  let waitingPollTimer: ReturnType<typeof setInterval> | null = null
 
-  startGame: (mode) => {
-    const newState = setupRound([0, 0])
-    set({ state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0] })
-    if (mode === 'vs-ai' && get().difficulty === 'fair') {
-      set({ fairBotTracker: { knownInHand: [], unknownInHand: newState.players[0].hand.length } })
-    } else {
-      set({ fairBotTracker: null })
+  function stopWaitingPoll(): void {
+    if (waitingPollTimer != null) {
+      clearInterval(waitingPollTimer)
+      waitingPollTimer = null
     }
-  },
+  }
 
-  dispatch: (action) => {
-    const { state, mode, onlinePlayerIndex, difficulty } = get()
-    if (!state) return
-    // If our own socket is down, don't silently apply the move locally as
-    // if it were authoritative — the server never sees it, and the player
-    // would keep "playing" into the void while a forfeit timer runs against
-    // them. Surface it instead of dropping it with no feedback.
-    if (mode === 'online' && !socketService.connected) {
-      set({ error: { code: 'NOT_CONNECTED', message: "You're disconnected — your move wasn't sent." } })
-      return
-    }
-    if (mode === 'online' && state.activePlayer !== onlinePlayerIndex) return
+  function attachNudge(gameId: string): void {
+    nudgeSocket?.close()
+    nudgeSocket = openNudgeSocket(gameId, () => useStatsStore.getState().vgamesToken, {
+      onNudge: (moveIndex) => { void get().onNudge(moveIndex) },
+      onStarted: () => { void get().onNudge() },
+      onAiCover: () => { void get().onNudge() },
+      // Reconcile triggers (design brief §7): nudge/started/ai_cover above
+      // cover "there's news"; auth_ok is what fires on EVERY successful (re)
+      // connect — including the visibilitychange/pageshow/online-forced
+      // reconnects nudge.ts's NudgeSocket does on its own — so wiring it to
+      // onNudge() too is what actually closes the "WS open" and "tab back in
+      // foreground" reconcile cases, not just a fresh nudge frame.
+      onAuthOk: () => { void get().onNudge() },
+    })
+  }
 
-    const playerDesc = describeAction('YOU', action, state)
-
-    const result = applyAction(state, action)
-    if (!result.ok) { set({ error: result.error }); return }
-
-    const next = result.value
-    if (mode === 'online') socketService.sendAction(action, next)
-
-    // Update fair bot tracker with player's action
-    const { fairBotTracker } = get()
-    if (mode === 'vs-ai' && difficulty === 'fair' && fairBotTracker && state) {
-      const updatedTracker = { ...fairBotTracker, knownInHand: [...fairBotTracker.knownInHand] }
-      if (action.type === 'TAKE_SINGLE') {
-        const card = state.market[action.marketIndex]
-        if (card) updatedTracker.knownInHand.push(card)
-      } else if (action.type === 'TAKE_EXCHANGE') {
-        // Cards leaving player's hand
-        for (const hi of action.handIndices) {
-          if (hi === -1) continue // camel from herd
-          const card = state.players[0].hand[hi]
-          if (card) {
-            const idx = updatedTracker.knownInHand.findIndex(c => c.id === card.id)
-            if (idx >= 0) updatedTracker.knownInHand.splice(idx, 1)
-            else updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - 1)
-          }
+  function startWaitingPoll(gameId: string): void {
+    stopWaitingPoll()
+    waitingPollTimer = setInterval(() => {
+      const s = get()
+      if (s.mode !== 'online' || s.roomCode !== gameId || s.onlineStatus !== 'waiting') {
+        stopWaitingPoll()
+        return
+      }
+      onlineApi.sync(gameId).then((result) => {
+        if ('moves' in result) {
+          stopWaitingPoll()
+          set({ onlineStatus: 'playing' })
+          get().applyServerView(result.view)
+          set({ lastMoveIndex: result.moveIndex })
         }
-        // Cards entering player's hand from market
-        for (const mi of action.marketIndices) {
-          const card = state.market[mi]
-          if (card && card.type !== 'camel') updatedTracker.knownInHand.push(card)
-        }
-      } else if (action.type === 'SELL') {
-        const soldType = action.good
-        let remaining = action.quantity
-        const newKnown = [...updatedTracker.knownInHand]
-        for (let i = newKnown.length - 1; i >= 0 && remaining > 0; i--) {
-          if (newKnown[i].type === soldType) {
-            newKnown.splice(i, 1)
-            remaining--
-          }
-        }
-        updatedTracker.knownInHand = newKnown
-        updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - remaining)
-      }
-      // TAKE_CAMELS: no hand change
-      set({ fairBotTracker: updatedTracker })
-    }
-
-    if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
-      set({ state: next, error: null, lastMoveDescription: playerDesc })
-      return
-    }
-
-    // vs-ai: AI must move (player 1)
-    runAi(next, difficulty, set, get)
-  },
-
-  nextRound: () => {
-    const { state, mode } = get()
-    if (!state || state.phase !== 'round-end') return
-
-    if (mode === 'online') {
-      socketService.sendNextRound(state.round)
-      return
-    }
-
-    const result = scoreRound(state)
-    const newSeals: [number, number] = [
-      state.seals[0] + (result.sealAwardedTo === 0 ? 1 : 0),
-      state.seals[1] + (result.sealAwardedTo === 1 ? 1 : 0),
-    ]
-
-    const newMatchScores: [number, number] = [
-      get().matchScores[0] + result.scores[0],
-      get().matchScores[1] + result.scores[1],
-    ]
-
-    const { matchLength } = get()
-    const sealsNeeded = Math.floor(matchLength / 2) + 1
-
-    if (newSeals[0] >= sealsNeeded || newSeals[1] >= sealsNeeded) {
-      const isGameOver = true
-      set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
-
-      // Record match
-      if (mode === 'vs-ai' || (mode as string) === 'online') {
-        const { difficulty, opponentFriendCode } = get()
-        useStatsStore.getState().addMatch({
-          opponent_type: (mode as string) === 'online' ? 'online' : difficulty,
-          opponent_id: (mode as string) === 'online' ? opponentFriendCode : null,
-          player_score: newMatchScores[0],
-          opponent_score: newMatchScores[1],
-          won: newSeals[0] > newSeals[1],
-        })
-      }
-    } else {
-      const loser: 0 | 1 | undefined =
-        result.sealAwardedTo === 0 ? 1 :
-        result.sealAwardedTo === 1 ? 0 :
-        undefined
-      const newRoundState = setupRound(newSeals, loser)
-      const { difficulty } = get()
-      set({ state: newRoundState, error: null, matchScores: newMatchScores })
-      if (mode === 'vs-ai' && get().difficulty === 'fair') {
-        set({ fairBotTracker: { knownInHand: [], unknownInHand: newRoundState.players[0].hand.length } })
-      }
-      if (mode === 'vs-ai' && newRoundState.activePlayer === 1) {
-        runAi(newRoundState, difficulty, set, get)
-      }
-    }
-  },
-
-  clearError: () => set({ error: null }),
-
-  joinOnline: async (variant, code) => {
-    set({ onlineStatus: 'connecting' })
-    const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
-
-    socketService.onRoomReady = (playerIndex, seed, serverMatchLength) => {
-      const rng = mulberry32(seed)
-      set({
-        state: setupRound([0, 0], undefined, rng),
-        mode: 'online',
-        matchLength: serverMatchLength as MatchLength,
-        onlinePlayerIndex: playerIndex,
-        onlineStatus: 'playing',
-        error: null,
-        opponentName: null,
-        lastMoveDescription: null,
+      }).catch(() => {
+        // transient — keep polling
       })
-      const { playerName } = get()
-      if (playerName) socketService.sendName(playerName, useStatsStore.getState().friendCode || '')
-    }
-    socketService.onOpponentName = (data) => set({ opponentName: data.name, opponentFriendCode: data.friendCode })
-    socketService.onOpponentAction = (action, syncedState) => get().receiveOpponentAction(action, syncedState)
-    socketService.onRoundStart = (seed) => get().startNextRound(seed)
-    socketService.onOpponentDisconnected = (data) => set({ onlineStatus: 'opponent-disconnected', disconnectTimestamp: data.timestamp })
-    socketService.onOpponentReconnected = () => set({ onlineStatus: 'playing', disconnectTimestamp: null })
-    socketService.onForfeit = () => {
-      const { onlineStatus, onlinePlayerIndex, opponentFriendCode, matchScores } = get()
-      // Guard against double-recording (e.g. a stray repeat FORFEIT emit).
-      if (onlineStatus === 'forfeited') return
-      set({ onlineStatus: 'forfeited', disconnectTimestamp: null })
-      // Receiving FORFEIT always means WE won — the server only sends it to
-      // the surviving/connected player once the opponent's disconnect timer
-      // expires. This is the only way a forfeit win reaches game-over, since
-      // every addMatch() call site otherwise requires a normal scoreRound()
-      // transition. Use whatever matchScores we have so far (best available —
-      // may be [0,0] if the forfeit lands before any round finished).
-      if (onlinePlayerIndex !== null) {
-        const opponentIndex: 0 | 1 = onlinePlayerIndex === 0 ? 1 : 0
-        useStatsStore.getState().addMatch({
-          opponent_type: 'online',
-          opponent_id: opponentFriendCode,
-          player_score: matchScores[onlinePlayerIndex],
-          opponent_score: matchScores[opponentIndex],
-          won: true,
-        })
+    }, 2500)
+  }
+
+  return {
+    state: null,
+    mode: null,
+    error: null,
+    onlinePlayerIndex: null,
+    roomCode: null,
+    onlineStatus: 'idle',
+    difficulty: DEFAULT_TIER_ID,
+    matchLength: 1,
+    aiThinking: false,
+    muted: (() => { try { return localStorage.getItem('vjaipur-muted') } catch { return null } })() === 'true',
+    lastMoveDescription: null,
+    tutorial: false,
+    playerName: useStatsStore.getState().ensureAccount().displayName || '',
+    opponentName: null,
+    matchScores: [0, 0],
+    fairBotTracker: null,
+
+    onlineView: null,
+    pendingMove: false,
+    coveredSeat: false,
+    opponentCovered: false,
+    lastMoveIndex: 0,
+    lastScoredRound: null,
+
+    startGame: (mode) => {
+      const newState = setupRound([0, 0])
+      set({
+        state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0],
+        onlineView: null, pendingMove: false, coveredSeat: false, opponentCovered: false,
+      })
+      if (mode === 'vs-ai' && get().difficulty === 'fair') {
+        set({ fairBotTracker: { knownInHand: [], unknownInHand: newState.players[0].hand.length } })
+      } else {
+        set({ fairBotTracker: null })
       }
-    }
-    socketService.onSelfDisconnected = () => {
-      // Our OWN connection dropped. Make it visible instead of silently
-      // staying 'playing' while the server runs a forfeit timer against us.
-      // Don't clobber a terminal/inactive status (e.g. we already forfeited,
-      // or we're not in a game at all).
-      const { mode, onlineStatus } = get()
-      if (mode !== 'online') return
-      if (onlineStatus === 'forfeited' || onlineStatus === 'idle') return
-      set({ onlineStatus: 'reconnecting' })
-    }
-    socketService.onReconnectFailed = () => {
-      const { mode } = get()
-      if (mode !== 'online') return
-      set({ onlineStatus: 'connection-lost' })
-    }
-    socketService.onConnect = () => {
-      const { mode, roomCode, onlinePlayerIndex } = get()
-      // Reconnect: only attempt rejoin when a game is active
-      if (mode === 'online' && roomCode !== null && onlinePlayerIndex !== null) {
-        socketService.rejoin(roomCode, onlinePlayerIndex).then((ack) => {
-          if (ack.ok && ack.state) {
-            set({ state: ack.state, onlineStatus: 'playing' })
+    },
+
+    dispatch: (action) => {
+      const { state, mode, difficulty } = get()
+      if (!state) return
+
+      if (mode === 'online') {
+        void get().dispatchOnline(action)
+        return
+      }
+
+      const playerDesc = describeAction('YOU', action, state)
+
+      const result = applyAction(state, action)
+      if (!result.ok) { set({ error: result.error }); return }
+
+      const next = result.value
+
+      // Update fair bot tracker with player's action
+      const { fairBotTracker } = get()
+      if (mode === 'vs-ai' && difficulty === 'fair' && fairBotTracker && state) {
+        const updatedTracker = { ...fairBotTracker, knownInHand: [...fairBotTracker.knownInHand] }
+        if (action.type === 'TAKE_SINGLE') {
+          const card = state.market[action.marketIndex]
+          if (card) updatedTracker.knownInHand.push(card)
+        } else if (action.type === 'TAKE_EXCHANGE') {
+          // Cards leaving player's hand
+          for (const hi of action.handIndices) {
+            if (hi === -1) continue // camel from herd
+            const card = state.players[0].hand[hi]
+            if (card) {
+              const idx = updatedTracker.knownInHand.findIndex(c => c.id === card.id)
+              if (idx >= 0) updatedTracker.knownInHand.splice(idx, 1)
+              else updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - 1)
+            }
           }
-        }).catch(() => {
-          set({ onlineStatus: 'forfeited' })
+          // Cards entering player's hand from market
+          for (const mi of action.marketIndices) {
+            const card = state.market[mi]
+            if (card && card.type !== 'camel') updatedTracker.knownInHand.push(card)
+          }
+        } else if (action.type === 'SELL') {
+          const soldType = action.good
+          let remaining = action.quantity
+          const newKnown = [...updatedTracker.knownInHand]
+          for (let i = newKnown.length - 1; i >= 0 && remaining > 0; i--) {
+            if (newKnown[i].type === soldType) {
+              newKnown.splice(i, 1)
+              remaining--
+            }
+          }
+          updatedTracker.knownInHand = newKnown
+          updatedTracker.unknownInHand = Math.max(0, updatedTracker.unknownInHand - remaining)
+        }
+        // TAKE_CAMELS: no hand change
+        set({ fairBotTracker: updatedTracker })
+      }
+
+      if (mode !== 'vs-ai' || next.phase !== 'playing' || next.activePlayer !== 1) {
+        set({ state: next, error: null, lastMoveDescription: playerDesc })
+        return
+      }
+
+      // vs-ai: AI must move (player 1)
+      runAi(next, difficulty, set, get)
+    },
+
+    dispatchOnline: async (action) => {
+      const { onlineView, pendingMove, roomCode, state } = get()
+      if (!onlineView || !roomCode || pendingMove) return
+      if (onlineView.phase !== 'playing') return
+      const mySeat = (onlineView.mySeat === 1 ? 1 : 0) as 0 | 1
+      if (onlineView.game.activePlayer !== mySeat) return
+
+      const playerDesc = state ? describeAction('YOU', action, state) : null
+      const clientMoveId = crypto.randomUUID()
+      outbox.save({ gameId: roomCode, seatIndex: mySeat, action, clientMoveId })
+      set({ pendingMove: true, error: null })
+
+      try {
+        const result = await onlineApi.move(roomCode, mySeat, action, clientMoveId)
+        outbox.clear()
+        get().applyServerView(result.view)
+        set({ pendingMove: false, lastMoveDescription: playerDesc })
+      } catch (err) {
+        if (err instanceof WorkerError && err.status < 500) {
+          // A real 4xx from the worker (illegal move, wrong turn, seat
+          // conflict, ...) — the move definitely did not commit. Clear the
+          // outbox so we don't keep retrying something the server rejected.
+          outbox.clear()
+          set({ pendingMove: false, error: { code: err.code, message: onlineErrorMessage(err.code) } })
+          return
+        }
+        // Network failure or an exhausted 5xx retry: we genuinely don't know
+        // whether it landed. Keep the outbox — the next sync/reconnect drains
+        // it (idempotent via clientMoveId either way) — and surface a
+        // reconnecting affordance instead of a hard error.
+        set({
+          pendingMove: false,
+          error: { code: 'NETWORK', message: "Connection issue — your move will resend automatically." },
         })
       }
-    }
+    },
 
-    if (variant === 'create') {
-      const { matchLength } = get()
-      const newCode = await socketService.createRoom(matchLength)
-      set({ roomCode: newCode, onlineStatus: 'waiting' })
-    } else if (variant === 'join') {
-      if (!code) throw new Error('Code required for join')
-      await socketService.joinRoom(code)
-      set({ roomCode: code.toUpperCase(), onlineStatus: 'waiting' })
-    } else {
-      const { matchLength } = get()
-      socketService.quickMatch(matchLength)
-      set({ onlineStatus: 'waiting' })
-    }
-  },
+    nextRound: () => {
+      const { state, mode, roomCode } = get()
+      if (!state || state.phase !== 'round-end') return
 
-  receiveOpponentAction: (action: Action, syncedState?: GameState) => {
-    const { state, opponentName } = get()
-    if (!state) return
-
-    if (syncedState) {
-      // The server always relays the sender's authoritative post-move state
-      // alongside the action. Trust it unconditionally — do NOT gate on a
-      // local applyAction() replay, which can spuriously fail if our local
-      // state has drifted (e.g. a delayed/lost frame during a blip). Gating
-      // on it discarded the correct incoming state and left the store
-      // un-set, freezing every subsequent opponent action the same way.
-      const oppDesc = describeAction(opponentName || 'Opponent', action, state)
-      set({ state: syncedState, error: null, lastMoveDescription: oppDesc })
-      return
-    }
-
-    // No syncedState (older/degraded relay path) — fall back to local replay.
-    const result = applyAction(state, action)
-    if (result.ok) {
-      const oppDesc = describeAction(opponentName || 'Opponent', action, state)
-      set({ state: result.value, error: null, lastMoveDescription: oppDesc })
-    } else {
-      // Surface a visible error instead of silently doing nothing, which
-      // would otherwise look like a permanent freeze.
-      set({ error: result.error })
-    }
-  },
-
-  startNextRound: (seed) => {
-    const { state } = get()
-    if (!state || state.phase !== 'round-end') return
-    const result = scoreRound(state)
-    const newSeals: [number, number] = [
-      state.seals[0] + (result.sealAwardedTo === 0 ? 1 : 0),
-      state.seals[1] + (result.sealAwardedTo === 1 ? 1 : 0),
-    ]
-
-    const newMatchScores: [number, number] = [
-      get().matchScores[0] + result.scores[0],
-      get().matchScores[1] + result.scores[1],
-    ]
-
-    const { matchLength } = get()
-    const sealsNeeded = Math.floor(matchLength / 2) + 1
-
-    if (newSeals[0] >= sealsNeeded || newSeals[1] >= sealsNeeded) {
-      set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
-
-      // Record match
-      const { onlinePlayerIndex, opponentFriendCode } = get()
-      if (onlinePlayerIndex !== null) {
-        useStatsStore.getState().addMatch({
-          opponent_type: 'online',
-          opponent_id: opponentFriendCode,
-          player_score: newMatchScores[onlinePlayerIndex],
-          opponent_score: newMatchScores[1 - onlinePlayerIndex],
-          won: newSeals[onlinePlayerIndex] >= 2,
-        })
+      if (mode === 'online') {
+        if (!roomCode) return
+        onlineApi.nextRound(roomCode)
+          .then((result) => get().applyServerView(result.view))
+          .catch(() => {
+            set({ error: { code: 'NETWORK', message: "Couldn't start the next round — try again." } })
+          })
+        return
       }
-    } else {
-      const loser: 0 | 1 | undefined =
-        result.sealAwardedTo === 0 ? 1 :
-        result.sealAwardedTo === 1 ? 0 :
-        undefined
-      const rng = mulberry32(seed)
-      set({ state: setupRound(newSeals, loser, rng), error: null, matchScores: newMatchScores })
-    }
-  },
 
-  setOnlineStatus: (status) => set({ onlineStatus: status }),
+      const result = scoreRound(state)
+      const newSeals: [number, number] = [
+        state.seals[0] + (result.sealAwardedTo === 0 ? 1 : 0),
+        state.seals[1] + (result.sealAwardedTo === 1 ? 1 : 0),
+      ]
 
-  setDifficulty: (d) => set({ difficulty: d }),
-  setMatchLength: (l) => set({ matchLength: l }),
+      const newMatchScores: [number, number] = [
+        get().matchScores[0] + result.scores[0],
+        get().matchScores[1] + result.scores[1],
+      ]
 
-  startTutorial: () => set({ tutorial: true }),
-  endTutorial: () => set({ tutorial: false }),
+      const { matchLength } = get()
+      const sealsNeeded = Math.floor(matchLength / 2) + 1
 
-  clearMatches: () => useStatsStore.getState().clearHistory(),
+      if (newSeals[0] >= sealsNeeded || newSeals[1] >= sealsNeeded) {
+        set({ state: { ...state, phase: 'game-over', seals: newSeals }, matchScores: newMatchScores })
 
-  setPlayerName: (name) => {
-    const trimmed = name.trim().slice(0, 24)
-    useStatsStore.getState().setDisplayName(trimmed)
-    set({ playerName: trimmed })
-  },
+        // Record match (vs-ai only — 'local' same-device play was never
+        // recorded, and online matches are archived server-side, never via
+        // addMatch — see applyServerView's match_over branch).
+        if (mode === 'vs-ai') {
+          const { difficulty } = get()
+          useStatsStore.getState().addMatch({
+            opponent_type: difficulty,
+            player_score: newMatchScores[0],
+            opponent_score: newMatchScores[1],
+            won: newSeals[0] > newSeals[1],
+          })
+        }
+      } else {
+        const loser: 0 | 1 | undefined =
+          result.sealAwardedTo === 0 ? 1 :
+          result.sealAwardedTo === 1 ? 0 :
+          undefined
+        const newRoundState = setupRound(newSeals, loser)
+        const { difficulty } = get()
+        set({ state: newRoundState, error: null, matchScores: newMatchScores })
+        if (mode === 'vs-ai' && get().difficulty === 'fair') {
+          set({ fairBotTracker: { knownInHand: [], unknownInHand: newRoundState.players[0].hand.length } })
+        }
+        if (mode === 'vs-ai' && newRoundState.activePlayer === 1) {
+          runAi(newRoundState, difficulty, set, get)
+        }
+      }
+    },
 
-  toggleMute: () => {
-    const muted = !get().muted
-    soundService.setMuted(muted)
-    set({ muted })
-  },
+    clearError: () => set({ error: null }),
 
-  disconnectOnline: () => {
-    socketService.disconnect()
-    socketService.onRoomReady = null
-    socketService.onOpponentAction = null
-    socketService.onRoundStart = null
-    socketService.onOpponentDisconnected = null
-    socketService.onOpponentReconnected = null
-    socketService.onForfeit = null
-    socketService.onConnect = null
-    socketService.onOpponentName = null
-    socketService.onSelfDisconnected = null
-    socketService.onReconnectFailed = null
-    set({ state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null, opponentName: null, opponentFriendCode: null, disconnectTimestamp: null, lastMoveDescription: null })
-  },
+    joinOnline: async (variant, code) => {
+      set({ onlineStatus: 'connecting', error: null })
 
-  // Contract for the exit-to-Home flow: disconnects the socket and resets
-  // every online session field back to a clean idle state. Same reset as
-  // disconnectOnline (kept as a distinct name/action since screens call it
-  // explicitly to leave an online match) — delegates to it rather than
-  // duplicating the callback-teardown/state-reset list.
-  leaveOnline: () => {
-    get().disconnectOnline()
-  },
+      const account = await useStatsStore.getState().ensureVGamesAccount()
+      if (!account) {
+        set({ onlineStatus: 'idle' })
+        throw new Error('Could not authenticate with VGames')
+      }
 
-  forceForfeit: () => {
-    socketService.forceForfeit()
-  },
-}))
+      let gameId: string
+      let seatIndex: 0 | 1
+      let view: ClientView | WaitingRoomView
+
+      if (variant === 'create') {
+        const { matchLength } = get()
+        const res = await onlineApi.createGame(matchLength)
+        gameId = res.gameId
+        seatIndex = 0 // the creator is always seat 0 (worker/src/game-do.ts#handleCreateRoom)
+        view = res.view
+      } else {
+        if (!code) throw new Error('Room code is required to join')
+        const resolved = await onlineApi.resolveCode(code.trim().toUpperCase())
+        gameId = resolved.gameId
+        const res = await onlineApi.join(gameId, get().playerName || undefined)
+        seatIndex = res.seatIndex
+        view = res.view
+      }
+
+      session.save({ gameId, code: gameId, mySeat: seatIndex })
+      session.startHeartbeat(gameId)
+      attachNudge(gameId)
+
+      set({
+        mode: 'online',
+        roomCode: gameId,
+        onlinePlayerIndex: seatIndex,
+        lastScoredRound: null,
+        matchScores: [0, 0],
+        lastMoveIndex: 0,
+        lastMoveDescription: null,
+        error: null,
+      })
+
+      if ('game' in view) {
+        // Join always deals immediately (no host-start ceremony) — the room
+        // is already active.
+        set({ onlineStatus: 'playing' })
+        get().applyServerView(view)
+      } else {
+        // Creator, nobody has joined yet.
+        set({ onlineStatus: 'waiting' })
+        startWaitingPoll(gameId)
+      }
+    },
+
+    applyServerView: (view) => {
+      const state = viewToRenderState(view)
+      const oppRoster = view.players.find((p) => p.seat !== view.mySeat)
+      const mySeatRoster = view.players.find((p) => p.seat === view.mySeat)
+
+      const patch: Partial<GameStore> = {
+        onlineView: view,
+        state,
+        matchLength: view.matchLength as MatchLength,
+        onlinePlayerIndex: (view.mySeat === 1 ? 1 : 0) as 0 | 1,
+        opponentName: oppRoster?.displayName ?? null,
+        coveredSeat: mySeatRoster?.controlledByAi ?? false,
+        opponentCovered: oppRoster?.controlledByAi ?? false,
+      }
+
+      if ((view.phase === 'round_end' || view.phase === 'match_over') && view.lastRoundResult) {
+        const { lastScoredRound, matchScores } = get()
+        if (lastScoredRound !== view.round) {
+          patch.matchScores = [
+            matchScores[0] + view.lastRoundResult.scores[0],
+            matchScores[1] + view.lastRoundResult.scores[1],
+          ]
+          patch.lastScoredRound = view.round
+        }
+      }
+
+      set(patch)
+
+      if (view.phase === 'match_over') {
+        // The match's lifetime is over — stop the heartbeat/nudge channel
+        // (ADDENDUM Q scopes them to "the whole online-match lifetime", which
+        // ends here) and pull the server-authoritative history so the local
+        // career-stats panel picks up this match WITHOUT a local addMatch()
+        // write (the server already wrote the row — see do/archive.ts).
+        session.clear()
+        nudgeSocket?.close()
+        nudgeSocket = null
+        stopWaitingPoll()
+        void useStatsStore.getState().pullVGamesHistory()
+      }
+    },
+
+    onNudge: async () => {
+      const { roomCode, mode, pendingMove, lastMoveIndex } = get()
+      if (mode !== 'online' || !roomCode || pendingMove) return
+      await outbox.drain(roomCode)
+      try {
+        const result = await onlineApi.sync(roomCode, lastMoveIndex)
+        if (!('moves' in result)) {
+          set({ onlineStatus: 'waiting' })
+          return
+        }
+        get().applyServerView(result.view)
+        applyMoveDescription(result.moves, get, set)
+        set({ lastMoveIndex: result.moveIndex, onlineStatus: 'playing' })
+      } catch {
+        // Transient network issue — the next nudge, heartbeat-driven wake, or
+        // foreground reconnect will retry. Nothing to surface mid-flight.
+      }
+    },
+
+    resumeSession: async () => {
+      const saved = session.load()
+      if (!saved) return
+      try {
+        // since=0 (the full log) so matchScores can be rebuilt robustly from
+        // every round_end move rather than trusting in-memory state that
+        // never survived the reload.
+        const result = await onlineApi.sync(saved.gameId, 0)
+        if (!('moves' in result)) {
+          set({
+            mode: 'online', roomCode: saved.gameId, onlinePlayerIndex: saved.mySeat,
+            onlineStatus: 'waiting', lastScoredRound: null, matchScores: [0, 0],
+          })
+          session.startHeartbeat(saved.gameId)
+          attachNudge(saved.gameId)
+          startWaitingPoll(saved.gameId)
+          return
+        }
+        if (result.view.phase === 'match_over') {
+          session.clear()
+          return
+        }
+        const rebuiltScores = computeMatchScoresFromMoves(result.moves)
+        set({
+          mode: 'online', roomCode: saved.gameId, onlinePlayerIndex: saved.mySeat,
+          onlineStatus: 'playing', matchScores: rebuiltScores,
+          lastScoredRound: result.view.phase !== 'playing' ? result.view.round : null,
+        })
+        get().applyServerView(result.view)
+        set({ lastMoveIndex: result.moveIndex })
+        session.startHeartbeat(saved.gameId)
+        attachNudge(saved.gameId)
+      } catch (err) {
+        if (err instanceof WorkerError && err.status === 404) {
+          session.clear()
+        }
+        // Otherwise: unreachable at boot (offline / worker cold) — leave the
+        // session persisted; a later resumeSession() call can pick it up.
+      }
+    },
+
+    reclaimSeat: async () => {
+      const { mode, roomCode } = get()
+      if (mode !== 'online' || !roomCode) return
+      try {
+        const result = await onlineApi.reclaim(roomCode)
+        get().applyServerView(result.view)
+      } catch {
+        set({ error: { code: 'NETWORK', message: 'Could not reclaim your seat — try again.' } })
+      }
+    },
+
+    resignMatch: async () => {
+      const { mode, roomCode } = get()
+      if (mode !== 'online' || !roomCode) return
+      try {
+        const result = await onlineApi.resign(roomCode)
+        get().applyServerView(result.view)
+      } catch {
+        set({ error: { code: 'NETWORK', message: 'Could not resign — check your connection and try again.' } })
+      }
+    },
+
+    setDifficulty: (d) => set({ difficulty: d }),
+    setMatchLength: (l) => set({ matchLength: l }),
+
+    startTutorial: () => set({ tutorial: true }),
+    endTutorial: () => set({ tutorial: false }),
+
+    clearMatches: () => useStatsStore.getState().clearHistory(),
+
+    setPlayerName: (name) => {
+      const trimmed = name.trim().slice(0, 24)
+      useStatsStore.getState().setDisplayName(trimmed)
+      set({ playerName: trimmed })
+    },
+
+    toggleMute: () => {
+      const muted = !get().muted
+      soundService.setMuted(muted)
+      set({ muted })
+    },
+
+    disconnectOnline: () => {
+      const { mode, roomCode, onlineView } = get()
+      // POST /leave ONLY when this is an intentional mid-game (or
+      // still-waiting-for-a-friend) exit — a match that has already ended
+      // needs no server call (design brief: "match_over → no server call").
+      const shouldNotifyServer = mode === 'online' && !!roomCode && onlineView?.phase !== 'match_over'
+      if (shouldNotifyServer && roomCode) {
+        void onlineApi.leave(roomCode).catch(() => {})
+      }
+
+      nudgeSocket?.close()
+      nudgeSocket = null
+      stopWaitingPoll()
+      session.clear()
+      outbox.clear()
+
+      set({
+        state: null, mode: null, onlineStatus: 'idle', onlinePlayerIndex: null, roomCode: null,
+        opponentName: null, lastMoveDescription: null, error: null,
+        onlineView: null, pendingMove: false, coveredSeat: false, opponentCovered: false,
+        lastMoveIndex: 0, lastScoredRound: null, matchScores: [0, 0],
+      })
+    },
+
+    // Contract for the exit-to-Home flow: leaves the online game server-side
+    // (when mid-game/waiting) and resets every online session field back to
+    // a clean idle state. Same reset as disconnectOnline (kept as a distinct
+    // name since screens call it explicitly to leave an online match) —
+    // delegates to it rather than duplicating the teardown/reset list.
+    leaveOnline: () => {
+      get().disconnectOnline()
+    },
+  }
+})
+
+function applyMoveDescription(
+  moves: ClientMove[],
+  get: () => GameStore,
+  set: (partial: Partial<GameStore>) => void,
+): void {
+  if (moves.length === 0) return
+  const onlineView = get().onlineView
+  if (!onlineView) return
+  // Walk newest-first; round_start doesn't need narration (the phase/round
+  // transition itself is visible in the UI), round_end/resign get a short
+  // label, and any real action gets the full public-payload description.
+  for (let i = moves.length - 1; i >= 0; i--) {
+    const m = moves[i]
+    // round_start/round_end don't need narration here — the phase/round
+    // transition and the ScoreCard breakdown already show the round outcome;
+    // skipping them lets the last REAL action's description read naturally
+    // as "Final Play" on RoundEndScreen instead of being clobbered.
+    if (m.type === 'round_start' || m.type === 'round_end') continue
+    const name = m.seatIndex === onlineView.mySeat ? 'YOU' : (get().opponentName || 'Opponent')
+    set({ lastMoveDescription: describePublicMove(name, m.type, m.payload) })
+    return
+  }
+}
 
 // Subscribe to statsStore changes to keep playerName in sync (e.g. after restoration)
 useStatsStore.subscribe((state) => {

@@ -6,7 +6,7 @@ import { ProfileOverlay } from '../components/ProfileOverlay'
 
 export function LobbyScreen() {
   const navigate = useNavigate()
-  const { onlineStatus, roomCode, joinOnline, setOnlineStatus, disconnectOnline, playerName, setPlayerName } = useGameStore()
+  const { onlineStatus, roomCode, joinOnline, disconnectOnline, playerName, setPlayerName } = useGameStore()
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
@@ -39,14 +39,6 @@ export function LobbyScreen() {
       setError('Room not found or full')
       disconnectOnline()
     }
-  }
-
-  function handleQuickMatch() {
-    setError(null)
-    joinOnline('quick').catch(() => {
-      setError('Connection failed')
-      disconnectOnline()
-    })
   }
 
   function handleCancel() {
@@ -112,10 +104,6 @@ export function LobbyScreen() {
         />
         <button onClick={handleJoin} style={{ ...btnStyle, minWidth: 80, padding: '14px 20px' }}>Join</button>
       </div>
-
-      <button onClick={handleQuickMatch} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
-        Quick Match
-      </button>
 
       <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', color: '#888', fontSize: 14, cursor: 'pointer', marginTop: 8 }}>
         ← Back

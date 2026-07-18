@@ -6,28 +6,34 @@ import { GameScreen } from './GameScreen'
 
 export function GameOverScreen() {
   const navigate = useNavigate()
-  const { state, mode, difficulty, matchScores, opponentName, opponentFriendCode, lastMoveDescription, matchLength } = useGameStore()
+  const { state, mode, difficulty, matchScores, opponentName, onlineView, lastMoveDescription, matchLength } = useGameStore()
   const matches = useStatsStore(s => s.matches)
   const [showBoard, setShowBoard] = useState(false)
 
   if (!state || state.phase !== 'game-over') return <Navigate to="/" replace />
 
   const sealsNeeded = Math.floor(matchLength / 2) + 1
-  const winner: 0 | 1 = state.seals[0] >= sealsNeeded ? 0 : 1
+  // Online: trust the server's own winnerSeat (worker/src/do/apply.ts,
+  // ADDENDUM C: seals[seat] >= sealsNeeded ? seat : other) rather than
+  // re-deriving from state.seals — a resign sets winnerSeat WITHOUT changing
+  // seals at all, so the seals-based formula alone would get a resign wrong.
+  const winner: 0 | 1 =
+    mode === 'online' && onlineView?.winnerSeat != null
+      ? onlineView.winnerSeat
+      : (state.seals[0] >= sealsNeeded ? 0 : 1)
   const playerIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
-  
+
   const playerScore = matchScores[playerIndex]
   const opponentScore = matchScores[1 - playerIndex]
   const matchDelta = playerScore - opponentScore
 
-  // Calculate all-time delta vs this specific opponent
+  // Calculate all-time delta. Online: aggregated across ALL online opponents
+  // — the redacted ClientView never exposes the opponent's accountId to key
+  // a per-rival breakdown by (StatsDashboard's "Online Rivals" table, which
+  // reads local match history directly, still breaks it down by
+  // opponent_id where that's available from a synced history row).
   const opponentType = mode === 'online' ? 'online' : difficulty
-  const opponentId = mode === 'online' ? opponentFriendCode : null
-  
-  const relevantMatches = matches.filter(m => 
-    m.opponent_type === opponentType && 
-    (opponentType !== 'online' || m.opponent_id === opponentId)
-  )
+  const relevantMatches = matches.filter(m => m.opponent_type === opponentType)
   const allTimeDelta = relevantMatches.reduce((acc, m) => acc + (m.player_score - m.opponent_score), 0)
 
   function handleBackToMenu() {
@@ -144,7 +150,9 @@ export function GameOverScreen() {
             
             <div style={{ marginTop: 16, height: 1, background: 'rgba(255,255,255,0.05)' }} />
             
-            <div style={{ marginTop: 16, fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>All-Time vs {oppLabel}</div>
+            <div style={{ marginTop: 16, fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 4 }}>
+              {mode === 'online' ? 'All-Time Online' : `All-Time vs ${oppLabel}`}
+            </div>
             <div style={{ fontSize: 20, fontWeight: 800, color: allTimeDelta >= 0 ? '#60c040' : '#ff4060' }}>
               {allTimeDelta >= 0 ? '+' : ''}{allTimeDelta}
             </div>

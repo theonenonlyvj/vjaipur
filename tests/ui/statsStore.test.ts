@@ -40,16 +40,26 @@ vi.mock('../../src/auth/vgamesClient', () => ({
   vgamesLogin: vi.fn(),
 }))
 
+vi.mock('../../src/net/online', () => ({
+  reportMatch: vi.fn(),
+  history: vi.fn(),
+}))
+
 // NOW import the store + mocked collaborators
 import { useStatsStore } from '../../src/store/statsStore'
 import { socketService } from '../../src/socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../../src/auth/vgamesClient'
+import { reportMatch, history } from '../../src/net/online'
 
 describe('statsStore', () => {
   beforeEach(() => {
     useStatsStore.getState().clearStats()
     vi.clearAllMocks()
     localStorageMock.clear()
+    // A harmless default so fire-and-forget pullVGamesHistory() calls (e.g.
+    // from restoreAccount) don't log a spurious warning in tests that aren't
+    // themselves about pullVGamesHistory.
+    vi.mocked(history).mockResolvedValue({ matches: [] })
   })
 
   it('generates an account when ensureAccount is called with Guest name', () => {
@@ -100,42 +110,82 @@ describe('statsStore', () => {
       expect(state.matches[0].timestamp).toBeDefined()
     })
 
-    it('mints a VGames ghost using the local secretKey as the device credential, then syncs the match by token — no plaintext secret round-trip', async () => {
+    it('mints a VGames ghost using the local secretKey as the device credential, then POSTs /stats/report by token — no plaintext secret round-trip', async () => {
       vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-1', accountId: 'vg-acc-1' })
+      vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
 
       await useStatsStore.getState().addMatch(matchData)
 
       const { secretKey, displayName } = useStatsStore.getState()
       expect(vgamesQuick).toHaveBeenCalledWith(secretKey, displayName)
 
-      expect(socketService.syncMatch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          vgamesToken: 'vg-tok-1',
-          match: expect.objectContaining({ ...matchData, timestamp: expect.any(Number) }),
-        })
+      // The device credential/token never rides in the report body itself —
+      // net/online.ts#reportMatch resolves the Bearer token internally from
+      // the store, not from a body field (see http.test.ts).
+      expect(reportMatch).toHaveBeenCalledWith(
+        expect.objectContaining({ ...matchData, timestamp: expect.any(Number) })
       )
-      const payload = vi.mocked(socketService.syncMatch).mock.calls[0][0] as any
+      const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
       expect(payload.password).toBeUndefined()
       expect(payload.secretKey).toBeUndefined()
 
       expect(useStatsStore.getState().vgamesToken).toBe('vg-tok-1')
       expect(useStatsStore.getState().vgamesAccountId).toBe('vg-acc-1')
+      expect(useStatsStore.getState().pendingReports).toHaveLength(0)
     })
 
     it('reuses a cached VGames token across matches instead of re-minting', async () => {
       vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-2', accountId: 'vg-acc-2' })
+      vi.mocked(reportMatch).mockResolvedValue({ ok: true })
       await useStatsStore.getState().addMatch(matchData)
       await useStatsStore.getState().addMatch(matchData)
       expect(vgamesQuick).toHaveBeenCalledTimes(1)
-      expect(socketService.syncMatch).toHaveBeenCalledTimes(2)
+      expect(reportMatch).toHaveBeenCalledTimes(2)
     })
 
-    it('does not sync the match if minting a VGames account fails', async () => {
+    it('queues the match in pendingReports (for a later boot retry) if minting a VGames account fails', async () => {
       vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
       await useStatsStore.getState().addMatch(matchData)
-      expect(socketService.syncMatch).not.toHaveBeenCalled()
+      expect(reportMatch).not.toHaveBeenCalled()
       // local history still recorded
       expect(useStatsStore.getState().matches).toHaveLength(1)
+      expect(useStatsStore.getState().pendingReports).toHaveLength(1)
+      expect(useStatsStore.getState().pendingReports[0]).toMatchObject(matchData)
+    })
+  })
+
+  describe('retryPendingReports', () => {
+    const matchData = { opponent_type: 'ai-easy', player_score: 70, opponent_score: 60, won: true }
+
+    it('is a no-op with nothing pending', async () => {
+      await useStatsStore.getState().retryPendingReports()
+      expect(reportMatch).not.toHaveBeenCalled()
+    })
+
+    it('retries every queued match and clears the ones that succeed', async () => {
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('offline'))
+      await useStatsStore.getState().addMatch(matchData) // lands in pendingReports
+      expect(useStatsStore.getState().pendingReports).toHaveLength(1)
+
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-9', accountId: 'vg-acc-9' })
+      vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+      await useStatsStore.getState().retryPendingReports()
+
+      expect(reportMatch).toHaveBeenCalledTimes(1)
+      expect(useStatsStore.getState().pendingReports).toHaveLength(0)
+    })
+
+    it('leaves a still-failing match queued (does not drop it)', async () => {
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('offline'))
+      await useStatsStore.getState().addMatch(matchData)
+      expect(useStatsStore.getState().pendingReports).toHaveLength(1)
+
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('still offline'))
+      await useStatsStore.getState().retryPendingReports()
+
+      expect(reportMatch).not.toHaveBeenCalled()
+      expect(useStatsStore.getState().pendingReports).toHaveLength(1)
     })
   })
 
@@ -231,11 +281,12 @@ describe('statsStore', () => {
   })
 
   describe('pullVGamesHistory', () => {
-    it('restores matches without clobbering a secured displayName or the local friendCode', async () => {
-      // A signed-in secured account whose Supabase row still lags behind
-      // (guest display_name + synthetic friend_code) — the exact state a fresh
-      // "Create Account" leaves. The pull must restore matches but must NOT
-      // revert the identity (which would flip the account back to "guest").
+    it('restores matches (via GET /stats/history) without clobbering a secured displayName or the local friendCode', async () => {
+      // A signed-in secured account whose cached display_name still lags
+      // behind (guest display_name from before "Create Account" claimed it).
+      // The pull must restore matches but must NOT revert the identity
+      // (ADDENDUM V: "a history pull must NEVER clobber local identity
+      // fields" — which would flip the account back to "guest").
       useStatsStore.setState({
         displayName: 'Alice',
         friendCode: 'VJ-1234',
@@ -244,13 +295,14 @@ describe('statsStore', () => {
         vgamesAccountId: 'vg-acc',
         matches: [],
       })
-      vi.mocked(socketService.pullHistory).mockResolvedValueOnce({
-        ok: true,
+      vi.mocked(history).mockResolvedValueOnce({
         matches: [
-          { opponent_type: 'ai_easy', opponent_id: null, player_score: 10, opponent_score: 5, won: true, timestamp: '2026-01-01T00:00:00.000Z' },
+          {
+            id: 1, opponentType: 'ai_easy', opponentAccountId: null, playerScore: 10, opponentScore: 5,
+            won: true, source: 'client_reported', aiCovered: false, gameUuid: null,
+            timestamp: Date.UTC(2026, 0, 1), // ADDENDUM V: D1's INTEGER column is epoch-ms already
+          },
         ],
-        displayName: 'Guest_9999', // lagging server name — must be ignored
-        friendCode: 'VG-5678', // synthetic cosmetic code — must be ignored
       })
 
       await useStatsStore.getState().pullVGamesHistory()
@@ -259,14 +311,30 @@ describe('statsStore', () => {
       expect(s.matches).toHaveLength(1)
       expect(s.matches[0]).toMatchObject({ opponent_type: 'ai_easy', won: true })
       expect(s.displayName).toBe('Alice') // NOT reverted to the guest name
-      expect(s.friendCode).toBe('VJ-1234') // NOT replaced by the synthetic code
+      expect(s.friendCode).toBe('VJ-1234') // NOT replaced by anything server-side
+    })
+
+    it('maps an online match\'s opponentAccountId onto the local opponent_id field', async () => {
+      useStatsStore.setState({ vgamesToken: 'vg-tok', vgamesAccountId: 'vg-acc', matches: [] })
+      vi.mocked(history).mockResolvedValueOnce({
+        matches: [
+          {
+            id: 2, opponentType: 'online', opponentAccountId: 'acct-rival-1', playerScore: 40, opponentScore: 33,
+            won: true, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-1', timestamp: 1_700_000_000_000,
+          },
+        ],
+      })
+
+      await useStatsStore.getState().pullVGamesHistory()
+
+      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_type: 'online', opponent_id: 'acct-rival-1' })
     })
 
     it('is a no-op without a VGames token', async () => {
-      vi.mocked(socketService.pullHistory).mockClear()
+      vi.mocked(history).mockClear()
       useStatsStore.setState({ vgamesToken: null, matches: [] })
       await useStatsStore.getState().pullVGamesHistory()
-      expect(socketService.pullHistory).not.toHaveBeenCalled()
+      expect(history).not.toHaveBeenCalled()
     })
   })
 

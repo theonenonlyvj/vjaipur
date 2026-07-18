@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RoundEndScreen } from '../../src/screens/RoundEndScreen'
 import { useGameStore } from '../../src/store/gameStore'
@@ -32,24 +32,69 @@ describe('RoundEndScreen', () => {
   })
 })
 
-describe('Forfeit outcome (online)', () => {
-  it('does not show a Back to Menu control when onlineStatus is not forfeited', () => {
+// FORFEIT is gone online — see GameScreen.test.tsx's equivalent note. Match
+// end now routes through the normal navigation guard above.
+describe('online scoring uses the server view, not a local scoreRound() replay', () => {
+  it('uses onlineView.lastRoundResult for the score total instead of recomputing from placeholder opponent tokens', () => {
+    // viewToRenderState's opponent tokens are zero-value placeholders — a
+    // LOCAL scoreRound(state) would (wrongly) credit the opponent 0 points.
+    const onlineView = {
+      mySeat: 0, phase: 'round_end', round: 1, seals: [0, 0], matchLength: 3, winnerSeat: null,
+      lastRoundResult: { camelWinner: 0 as const, scores: [12, 47], bonusTokenCounts: [1, 2], sealAwardedTo: 1 as const },
+      players: [
+        { seat: 0, displayName: 'You', ownerType: 'human' as const, controlledByAi: false },
+        { seat: 1, displayName: 'Rival', ownerType: 'human' as const, controlledByAi: false },
+      ],
+      game: {
+        market: [], myHand: [], oppHandCount: 3, herds: [1, 1] as [number, number],
+        tokens: { diamond: [], gold: [], silver: [], cloth: [], spice: [], leather: [] },
+        bonusTokenCounts: { three: 0, four: 0, five: 0 },
+        myGoodsTokens: [], oppGoodsTokenCount: 2, myBonusTokens: [], oppBonusTokens: [],
+        deckCount: 10, myScore: 12, activePlayer: 0 as const,
+      },
+    }
+    useGameStore.setState({
+      state: { ...setupRound([0, 0], undefined, () => 0.5), phase: 'round-end' as const, seals: [0, 0] },
+      mode: 'online', onlineView: onlineView as any, error: null, matchLength: 3,
+    })
+
     render(<MemoryRouter><RoundEndScreen /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: /back to menu/i })).not.toBeInTheDocument()
+
+    // The opponent's real round score (47), not 0 (what a placeholder-token
+    // replay would produce).
+    expect(screen.getByText('47')).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
   })
 
-  it('shows a Back to Menu control and calls leaveOnline when a forfeit lands while round-end is showing', () => {
-    const leaveOnlineMock = vi.fn()
-    const original = (useGameStore.getState() as any).leaveOnline
-    useGameStore.setState({ mode: 'online', onlineStatus: 'forfeited', leaveOnline: leaveOnlineMock } as any)
+  it('does not double-count the seal star online (MatchState.seals is already post-award at round_end)', () => {
+    const onlineView = {
+      mySeat: 0, phase: 'round_end', round: 1, seals: [0, 1], matchLength: 3, winnerSeat: null,
+      // seals[1] already reflects THIS round's award — sealAwardedTo:1 must
+      // NOT add another +1 on top for seat 1's star count.
+      lastRoundResult: { camelWinner: null, scores: [10, 20], bonusTokenCounts: [0, 0], sealAwardedTo: 1 as const },
+      players: [
+        { seat: 0, displayName: 'You', ownerType: 'human' as const, controlledByAi: false },
+        { seat: 1, displayName: 'Rival', ownerType: 'human' as const, controlledByAi: false },
+      ],
+      game: {
+        market: [], myHand: [], oppHandCount: 3, herds: [1, 1] as [number, number],
+        tokens: { diamond: [], gold: [], silver: [], cloth: [], spice: [], leather: [] },
+        bonusTokenCounts: { three: 0, four: 0, five: 0 },
+        myGoodsTokens: [], oppGoodsTokenCount: 2, myBonusTokens: [], oppBonusTokens: [],
+        deckCount: 10, myScore: 10, activePlayer: 0 as const,
+      },
+    }
+    useGameStore.setState({
+      state: { ...setupRound([0, 0], undefined, () => 0.5), phase: 'round-end' as const, seals: [0, 1] },
+      mode: 'online', onlineView: onlineView as any, error: null, matchLength: 3,
+    })
 
     render(<MemoryRouter><RoundEndScreen /></MemoryRouter>)
-    expect(screen.getByText(/opponent left.*you win/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /back to menu/i }))
-    expect(leaveOnlineMock).toHaveBeenCalledTimes(1)
-
-    // Restore so this mock doesn't leak into other tests in this file
-    useGameStore.setState({ mode: 'local', onlineStatus: 'idle', leaveOnline: original } as any)
+    // totalSeals for matchLength 3 is 2 (floor(3/2)+1) — seat 1 should show
+    // exactly ★☆ (1 filled of 2), not ★★ (which double-counting would give).
+    const stars = screen.getAllByText('★☆')
+    expect(stars.length).toBeGreaterThan(0)
+    expect(screen.queryByText('★★')).not.toBeInTheDocument()
   })
 })
