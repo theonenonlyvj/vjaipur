@@ -410,18 +410,21 @@ describe('AI-covered move payloads are the TRANSLATED PUBLIC shape (FIX 6 regres
   })
 })
 
-describe('cover via the alarm (end-to-end wiring through game-do.ts)', () => {
-  it('an absent ON-TURN human is AI-covered once its turn timer fires', async () => {
+describe('cover via the alarm (end-to-end wiring through game-do.ts) — owner decision 2026-07-18: NO AI takeover, ever', () => {
+  it('an absent ON-TURN human is NEVER covered — the game just PAUSES, even once a (legacy) turn timer fires', async () => {
     const stub = stubFor('alarm-cover-absent')
+    let beforeSnapshot: unknown
     await runInDurableObject(stub, async (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
-      // seat 0 on turn, absent; seat 1 present (keeps isAnyHumanPresent true
-      // so the drive that follows cover doesn't freeze).
-      seedLiveGame(sql, { now: Date.now(), currentSeat: 0, presentSeats: [1] })
-      // Arm in the FUTURE so the platform doesn't auto-fire it early (which
-      // would race the explicit runDurableObjectAlarm below); that helper
-      // force-fires regardless of the scheduled time, and the alarm handler's
-      // due-detection floors its threshold at min(fire_at) either way.
+      // seat 0 on turn, absent; seat 1 present.
+      const { repo } = seedLiveGame(sql, { now: Date.now(), currentSeat: 0, presentSeats: [1] })
+      beforeSnapshot = repo.getSnapshot()
+      // A leftover 'turn' timer (as if armed by a pre-this-change deploy)
+      // must be a harmless no-op now — arm in the FUTURE so the platform
+      // doesn't auto-fire it early (which would race the explicit
+      // runDurableObjectAlarm below); that helper force-fires regardless of
+      // the scheduled time, and the alarm handler's due-detection floors its
+      // threshold at min(fire_at) either way.
       setTimer(sql, 'turn', 0, Date.now() + 60_000)
       await rearmAlarm(state, sql)
     })
@@ -431,8 +434,14 @@ describe('cover via the alarm (end-to-end wiring through game-do.ts)', () => {
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
       const repo = new GameRepository(sql)
-      expect(repo.getSeats()[0]!.controlled_by_ai).toBe(true)
-      expect(hasTimer(sql, 'turn', 0)).toBe(false)
+      // Never-forfeit + no-AI-takeover: the seat stays human-controlled, no
+      // move was appended, the turn/snapshot are exactly as they were — the
+      // game simply paused on the absent seat's turn.
+      expect(repo.getSeats()[0]!.controlled_by_ai).toBe(false)
+      expect(hasTimer(sql, 'turn', 0)).toBe(false) // legacy deadline cleared, not acted on
+      expect(repo.getMeta()!.current_seat).toBe(0)
+      expect(repo.getMovesSince(0).length).toBe(0)
+      expect(repo.getSnapshot()).toEqual(beforeSnapshot)
     })
   })
 
@@ -458,14 +467,15 @@ describe('cover via the alarm (end-to-end wiring through game-do.ts)', () => {
   })
 })
 
-describe('round_wait auto-advance (ADDENDUM J)', () => {
-  it('after ROUND_WAIT_MS, round_end auto-advances past an absent seat without them clicking next-round', async () => {
+describe('round_wait NO LONGER auto-advances (owner decision 2026-07-18: absence pauses round_end too)', () => {
+  it('past the old ROUND_WAIT_MS deadline, round_end does NOT auto-advance past an absent seat — the present player must press Continue', async () => {
     const stub = stubFor('round-wait-advance')
     await runInDurableObject(stub, async (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
-      // seat 0 present (the one who would otherwise be "stuck"), seat 1
-      // absent -- proves the present player is never stuck on the absent one.
+      // seat 0 present, seat 1 absent.
       seedLiveGame(sql, { now: Date.now(), phase: 'round_end', round: 1, presentSeats: [0] })
+      // A leftover 'round_wait' timer (as if armed by a pre-this-change
+      // deploy) must be a harmless no-op now.
       setTimer(sql, 'round_wait', 1, Date.now() + 60_000)
       await rearmAlarm(state, sql)
     })
@@ -476,16 +486,16 @@ describe('round_wait auto-advance (ADDENDUM J)', () => {
       const sql = state.storage.sql as unknown as SqlLike
       const repo = new GameRepository(sql)
       const meta = repo.getMeta()!
-      expect(meta.phase).toBe('playing') // auto-advanced to the next round
-      expect(meta.round).toBe(2)
-      expect(hasTimer(sql, 'round_wait', 1)).toBe(false)
-      // a fresh round_start move was appended narrating the transition
+      expect(meta.phase).toBe('round_end') // NOT auto-advanced — still paused
+      expect(meta.round).toBe(1)
+      expect(hasTimer(sql, 'round_wait', 1)).toBe(false) // legacy deadline cleared, not acted on
+      // no fresh round_start move was appended — nothing was dealt
       const rows = repo.getMovesSince(0)
-      expect(rows.some((r) => r.type === 'round_start')).toBe(true)
+      expect(rows.some((r) => r.type === 'round_start')).toBe(false)
     })
   })
 
-  it('fires on EITHER seat`s deadline (seat 0 absent this time, seat 1 present)', async () => {
+  it('does not auto-advance regardless of WHICH seat`s (legacy) deadline fires (seat 0 absent this time, seat 1 present)', async () => {
     const stub = stubFor('round-wait-advance-other-seat')
     await runInDurableObject(stub, async (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
@@ -499,12 +509,12 @@ describe('round_wait auto-advance (ADDENDUM J)', () => {
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
       const repo = new GameRepository(sql)
-      expect(repo.getMeta()!.phase).toBe('playing')
-      expect(repo.getMeta()!.round).toBe(2)
+      expect(repo.getMeta()!.phase).toBe('round_end')
+      expect(repo.getMeta()!.round).toBe(1)
     })
   })
 
-  it('a present player is never armed in the first place (no auto-advance needed)', async () => {
+  it('a present player is never armed in the first place (armRoundWaitIfAbsent itself still no-ops on a present seat — direct unit coverage)', async () => {
     const stub = stubFor('round-wait-both-present')
     await runInDurableObject(stub, async (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
@@ -523,16 +533,21 @@ describe('round_wait auto-advance (ADDENDUM J)', () => {
   })
 })
 
-describe('round_wait auto-advance re-drives the AI immediately (FIX 2)', () => {
-  it('when the auto-advanced round opens on an AI-covered seat, the AI moves in the SAME alarm fire — no further heartbeat needed', async () => {
+describe('round_wait no longer drives anything, even a (legacy) AI-covered opener (supersedes old FIX 2)', () => {
+  it('a pre-existing round_wait deadline + an AI-covered opening seat: the alarm neither advances the round NOR drives the AI — everything stays exactly as seeded', async () => {
     const stub = stubFor('round-wait-redrives-ai')
     const seed = 1
 
-    // Work out (deterministically, from the same seed/logic advanceRoundInternal
-    // uses) which seat opens round 2, BEFORE seeding, so we can mark THAT
-    // exact seat AI-covered + absent and the other present. This mirrors
-    // do/apply.ts's ADDENDUM C/F prevLoser derivation and setupRound's
-    // `activePlayer: prevLoser ?? 0`.
+    // Work out (deterministically) which seat WOULD open round 2, purely to
+    // mark that seat AI-covered (e.g. via a prior /leave) + absent and the
+    // other present — mirrors do/apply.ts's ADDENDUM C/F prevLoser
+    // derivation and setupRound's `activePlayer: prevLoser ?? 0`. Under the
+    // old ("FIX 2") behavior this combination would auto-advance AND
+    // immediately drive the AI-covered opener in the SAME alarm fire; under
+    // the new no-AI-takeover model, round_wait is dead — this proves NEITHER
+    // effect happens anymore, even with the most favorable-to-the-old-bug
+    // setup (a round_wait timer pre-armed AND an AI-covered seat waiting to
+    // be dealt into).
     const dealt = setupRound([0, 0], undefined, mulberry32(seed))
     const result = scoreRound(dealt)
     const openerSeat: 0 | 1 = result.sealAwardedTo === 0 ? 1 : result.sealAwardedTo === 1 ? 0 : 0
@@ -561,21 +576,15 @@ describe('round_wait auto-advance re-drives the AI immediately (FIX 2)', () => {
       const sql = state.storage.sql as unknown as SqlLike
       const repo = new GameRepository(sql)
       const meta = repo.getMeta()!
-      expect(meta.phase).toBe('playing') // auto-advanced to round 2
-      expect(meta.round).toBe(2)
+      expect(meta.phase).toBe('round_end') // still paused — NOT auto-advanced
+      expect(meta.round).toBe(1)
+      expect(hasTimer(sql, 'round_wait', openerSeat)).toBe(false) // legacy deadline cleared, not acted on
 
-      // Before FIX 2, nothing further would happen here until the next heal
-      // tick/heartbeat: the present player would just watch the AI-covered
-      // opening seat sit idle. FIX 2 folds the post-deal wheel (incl.
-      // driveIfAI) into advanceRoundInternal itself, so a real AI move for
-      // the AI-covered OPENING seat already landed in round 2 within this
-      // SAME alarm invocation — Jaipur has no "extra turn" mechanic, so that
-      // single AI move immediately hands the turn back to the present seat.
-      const round2Moves = repo.getMovesSince(0).filter((r) => r.round === 2 && r.type !== 'round_start')
-      expect(round2Moves.length).toBeGreaterThan(0)
-      expect(round2Moves[0]!.by_ai).toBe(true)
-      expect(round2Moves[0]!.seat_index).toBe(openerSeat) // the AI-covered opening seat actually moved
-      expect(meta.current_seat).toBe(presentSeat) // turn already passed back to the human
+      // Nothing was dealt, so there is no round 2 at all — and definitely no
+      // AI move (the seat stays AI-"covered" from the seed but is never
+      // driven — no code path ever calls driveIfAI for it here).
+      expect(repo.getMovesSince(0).filter((r) => r.round === 2).length).toBe(0)
+      expect(repo.getSeats()[openerSeat]!.controlled_by_ai).toBe(true) // untouched from seeding
     })
   })
 })
@@ -683,28 +692,31 @@ describe('POST /heartbeat', () => {
   })
 })
 
-describe('POST /leave', () => {
-  it("instantly covers the caller's own seat (does not wait for AWAY_TURN_MS, is not a resign)", async () => {
-    const stub = stubFor('leave-covers-own-seat')
+describe('POST /leave (graceful step-away — no AI cover, no forfeit, resumable)', () => {
+  it("marks the caller's seat away WITHOUT AI-covering it; the match stays active and fully resumable", async () => {
+    const stub = stubFor('leave-graceful')
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
-      // seat 0 is present and OFF turn — proves /leave covers unconditionally,
-      // not merely by expiring some deadline.
       seedLiveGame(sql, { now: Date.now(), currentSeat: 1, presentSeats: [0, 1] })
     })
 
     const res = await post(stub, '/leave', 'test:acct-0:P0')
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { ok: boolean; seat: number }
-    expect(body).toEqual({ ok: true, seat: 0 })
+    expect(await res.json()).toEqual({ ok: true, seat: 0 })
 
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql as unknown as SqlLike
       const repo = new GameRepository(sql)
-      expect(repo.getSeats()[0]!.controlled_by_ai).toBe(true)
+      // Post no-AI-takeover ruling: leaving NEVER hands your seat to an AI.
+      expect(repo.getSeats()[0]!.controlled_by_ai).toBe(false)
+      // The seat is marked away NOW so the opponent sees "away" immediately and
+      // the /claim-win grace starts from this instant.
+      expect(seatIndexPresent(repo, 0, Date.now())).toBe(false)
       const meta = repo.getMeta()!
-      expect(meta.status).toBe('active') // still a live match -- NOT a resign
+      expect(meta.status).toBe('active') // still a live match — NOT a resign, NOT abandoned
       expect(meta.phase).not.toBe('match_over')
+      // Seat is still OWNED — the leaver can reopen and resume.
+      expect(repo.getSeats()[0]!.owner_account_id).toBe('acct-0')
     })
   })
 })

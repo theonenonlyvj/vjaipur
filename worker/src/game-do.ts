@@ -11,8 +11,6 @@ import { buildClientView, buildWaitingRoomView, toClientMove } from './do/view'
 import { driveIfAI, type DriveDeps } from './do/drive'
 import {
   autoCover,
-  armDisconnectCoverIfAbsent,
-  armRoundWaitIfAbsent,
   isAnyHumanPresent,
   seatIndexPresent,
   maxLastSeen,
@@ -20,7 +18,7 @@ import {
 } from './do/presence'
 import { setTimer, clearTimer, hasTimer, dueTimers, minFireAt, rearmAlarm, creditEvictionGap } from './do/timers'
 import { floorMove } from './do/floor'
-import { GLOBAL_SEAT, HEAL_MS, PAUSE_ABANDON_MS, PRESENCE_MS } from './do/constants'
+import { CLAIM_GRACE_MS, GLOBAL_SEAT, HEAL_MS, PAUSE_ABANDON_MS, PRESENCE_MS } from './do/constants'
 
 /**
  * Wave 1 (foundation) Env, extended nowhere (Wave 4 adds CLIENT_ORIGIN-driven
@@ -128,6 +126,7 @@ export class GameDO extends DurableObject<Env> {
     if (request.method === 'GET' && path === '/sync') return this.handleSync(request, url)
     if (request.method === 'POST' && path === '/next-round') return this.handleNextRound(request)
     if (request.method === 'POST' && path === '/resign') return this.handleResign(request)
+    if (request.method === 'POST' && path === '/claim-win') return this.handleClaimWin(request)
 
     // WAVE 3: presence/timers/drive — stubs only, not wired into any Wave 2
     // call path (no handler above awaits or depends on these).
@@ -280,25 +279,29 @@ export class GameDO extends DurableObject<Env> {
   }
 
   /**
-   * The `heal` self-tick: while active, keep re-driving (+ re-arming both
-   * absence covers) as a safety net and, when ZERO humans have been present
+   * The `heal` self-tick: while active, when ZERO humans have been present
    * for longer than the abandon window, mark the game abandoned (recoverable
-   * by replay if reopened). While humans are present (or the abandon window
-   * has not elapsed) it re-arms itself. `driveIfAI`/`armDisconnectCoverIfAbsent`/
-   * `armRoundWaitIfAbsent` are each independently phase-guarded (ADDENDUM K),
-   * so calling all three unconditionally here is safe at every phase — they
-   * simply no-op outside the phase they apply to.
+   * by replay if reopened) — the only thing absence alone can ever resolve
+   * (never a forfeit). While humans are present (or the abandon window has
+   * not elapsed) it just re-arms itself and returns.
+   *
+   * Owner's decision (2026-07-18, no-AI-takeover rework): this used to ALSO
+   * safety-re-drive any AI-covered seat and re-arm both absence covers
+   * (`driveIfAI`/`armDisconnectCoverIfAbsent`/`armRoundWaitIfAbsent`) every
+   * tick while a human watched. That machinery drove/armed COVER FROM
+   * ABSENCE specifically — the thing Vijay explicitly no longer wants: an
+   * absent player's turn now simply PAUSES (see `CLAIM_GRACE_MS`'s
+   * docstring), never auto-covers, never auto-advances. Those three calls
+   * are removed here; the functions themselves stay defined (still
+   * unit/fuzz-tested, and `driveIfAI` still matters for `/leave`'s
+   * deliberate, human-initiated AI-cover — see `handleLeave`/`handleHeartbeat`,
+   * which are untouched) — this self-tick just no longer invokes them.
    */
   private healTick(sql: SqlLike, now: number): void {
     const meta = this.repo.getMeta()
     if (!meta || meta.status !== 'active') return // terminal -> stop ticking
 
     if (isAnyHumanPresent(this.repo, now)) {
-      driveIfAI(this.driveDeps(), this.repo, sql, now) // safety re-drive
-      // Backstop: catches a player who was present then went dark mid-turn
-      // (no socket-close event ever fires for a locked phone) or mid-round_end.
-      armDisconnectCoverIfAbsent(this.repo, sql, now)
-      armRoundWaitIfAbsent(this.repo, sql, now)
       setTimer(sql, 'heal', GLOBAL_SEAT, now + HEAL_MS)
       return
     }
@@ -314,25 +317,26 @@ export class GameDO extends DurableObject<Env> {
   }
 
   /**
-   * ADDENDUM J/M: the internal next-round-advance path, shared by
-   * `POST /next-round` (a human-initiated advance) and the alarm's
-   * `round_wait` case (a server-initiated advance so a present player is
-   * never stuck waiting on an absent one to click Continue). Mirrors
-   * `handleNextRound`'s deal logic exactly (`prevLoser` from `scoreRound` of
-   * the just-ended snapshot). Idempotent per round: the phase check re-runs
-   * INSIDE the synchronous span, so a racing second caller/timer is a benign
-   * no-op. Returns whether a deal actually happened.
+   * The internal next-round-advance path — the deal helper `POST /next-round`
+   * calls (`handleNextRound`). Mirrors `handleNextRound`'s deal logic exactly
+   * (`prevLoser` from `scoreRound` of the just-ended snapshot). Idempotent
+   * per round: the phase check re-runs INSIDE the synchronous span, so a
+   * racing second caller is a benign no-op. Returns whether a deal actually
+   * happened.
    *
-   * FIX 2: this is now the SINGLE source of the ADDENDUM M post-deal wheel
-   * (`ensureHeal` -> `driveIfAI` -> `armDisconnectCoverIfAbsent` ->
-   * `rearmAlarm`), run HERE right after a deal actually happens — not just by
-   * `handleNextRound`. Previously the alarm's `round_wait` case called this
-   * method and then did NOTHING else: if the freshly-dealt round opened on an
-   * already-AI-covered (absent-opponent) seat, the present player watched
-   * nothing happen until the next heal tick or heartbeat (up to `HEAL_MS`,
-   * ~60s) rather than seeing the AI move immediately. Folding the wheel in
-   * here means every caller (both `handleNextRound` and the alarm path) gets
-   * identical, immediate post-deal behavior for free.
+   * Owner's decision (2026-07-18, no-AI-takeover rework): this was ALSO
+   * previously the alarm's `round_wait` case's target — a server-initiated
+   * forced advance so a present player was never stuck waiting on an absent
+   * one to click Continue. That auto-advance-on-absence is gone (round_end
+   * now simply PAUSES like every other absent turn — see `CLAIM_GRACE_MS`'s
+   * docstring for the present player's new resolution), so `round_wait` is
+   * never armed anymore and the alarm no longer calls this method at all —
+   * `POST /next-round` (a human pressing Continue) is its only caller now.
+   * The post-deal wheel is correspondingly trimmed: `driveIfAI`/
+   * `armDisconnectCoverIfAbsent` drove/armed COVER FROM ABSENCE specifically
+   * and are dropped (there is no AI to drive into a freshly-opened round);
+   * `ensureHeal` + `rearmAlarm` stay (the abandon-after-long-inactivity heal
+   * tick is unrelated to AI-cover and still needs to stay armed).
    */
   private async advanceRoundInternal(now: number): Promise<boolean> {
     const meta = this.repo.getMeta()
@@ -354,13 +358,8 @@ export class GameDO extends DurableObject<Env> {
     if (dealt) {
       const freshMeta = this.repo.getMeta()!
       this.nudge(freshMeta.move_index)
-      // ADDENDUM M / FIX 2: the post-deal wheel, run unconditionally after
-      // every successful deal so an already-absent/AI opening seat is driven
-      // immediately rather than waiting for the next heal tick.
       const sql = this.ctx.storage.sql as unknown as SqlLike
       this.ensureHeal(sql, now)
-      driveIfAI(this.driveDeps(), this.repo, sql, now)
-      armDisconnectCoverIfAbsent(this.repo, sql, now)
       await rearmAlarm(this.ctx, sql)
     }
     return dealt
@@ -493,16 +492,21 @@ export class GameDO extends DurableObject<Env> {
     await rearmAlarm(this.ctx, sql)
 
     const freshMeta = this.repo.getMeta()!
-    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seatIndex, this.repo.getSeats())
+    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seatIndex, this.repo.getSeats(), now)
     return json({ moveIndex: freshMeta.move_index, view })
   }
 
   /**
-   * POST /leave — intentional leave (NOT a resign — the match keeps going,
-   * the seat is just AI-covered). requireAuth; the caller's OWN seat is
-   * AI-covered IMMEDIATELY (skips the AWAY_TURN_MS window a silent drop
-   * waits for) and an `ai_cover` toast is broadcast. The seat stays owned so
-   * the player can `/reclaim` it if they return.
+   * POST /leave — graceful "step away, resume later" (NOT a resign, NOT a
+   * forfeit, and — since Vijay's 2026-07-18 no-AI-takeover ruling — NO AI
+   * cover). The match keeps going, the seat stays OWNED, and the game persists
+   * (the whole point of the DO: reopen it from "Your games" anytime). We simply
+   * mark this seat away NOW (set `disconnected_at`, stale `last_seen_at`) so the
+   * opponent immediately sees "away" and the CLAIM_GRACE_MS window for their
+   * optional /claim-win starts from this instant instead of waiting for the
+   * heartbeat to lapse. The leaver `/reclaim`s or just re-syncs on return. The
+   * game is never auto-ended from a leave — only the present player can end it
+   * (via /claim-win once the grace elapses), or it abandons after ~7 idle days.
    */
   private async handleLeave(request: Request): Promise<Response> {
     const auth = await requireAuth(request, this.env)
@@ -518,16 +522,15 @@ export class GameDO extends DurableObject<Env> {
     const now = Date.now()
     this.onWake(sql, now)
 
-    // Instant cover (skip the grace/turn window): flip controlled_by_ai, arm
-    // an immediate drive. (No promoteHost call: vjaipur's host is always
-    // seat 0 with no separate host-start ceremony — see do/presence.ts.)
-    this.ctx.storage.transactionSync(() => {
-      autoCover(this.coverDeps(), this.repo, sql, seat.seat_index, now)
-    })
-    this.ensureHeal(sql, now)
-    driveIfAI(this.driveDeps(), this.repo, sql, now)
+    // Mark this seat away immediately — NO AI cover, NO forfeit, seat kept.
+    // last_seen_at is pushed back past PRESENCE_MS so the opponent's view flips
+    // to "away" and claimWinAvailable becomes true after CLAIM_GRACE_MS from now.
+    this.repo.setDisconnectedAt(seat.seat_index, now)
+    this.repo.setPresence(seat.seat_index, now - PRESENCE_MS - 1)
+    // Nudge the opponent so their client reflects the away state promptly.
+    this.nudge(meta.move_index)
+    this.ensureHeal(sql, now) // keep the ~7-day abandon backstop armed
     await rearmAlarm(this.ctx, sql)
-    this.ctx.waitUntil(this.runArchiveTick(now))
     return json({ ok: true, seat: seat.seat_index })
   }
 
@@ -599,18 +602,24 @@ export class GameDO extends DurableObject<Env> {
       for (const t of dueTimers(sql, threshold)) {
         switch (t.kind) {
           case 'grace':
-          case 'turn': {
-            // A returning human (fresh heartbeat within the presence window)
-            // is spared; only an actually-absent seat is covered.
-            if (seatIndexPresent(this.repo, t.seat, now)) {
-              clearTimer(sql, 'grace', t.seat)
-              clearTimer(sql, 'turn', t.seat)
-            } else {
-              autoCover(this.coverDeps(), this.repo, sql, t.seat, now)
-            }
+          case 'turn':
+            // Owner's decision (2026-07-18, no-AI-takeover rework): these
+            // kinds are never armed by any live handler anymore (see
+            // presence.ts's `armDisconnectCoverIfAbsent` — it still exists,
+            // unit-tested, but nothing calls it) — an absent on-turn seat now
+            // simply PAUSES the game (never auto-covered). This case only
+            // fires at all if a pre-existing timer row from before this
+            // change is still sitting in an already-live game's wheel;
+            // clearing it (never `autoCover`) is a harmless one-time
+            // cleanup, not a live behavior.
+            clearTimer(sql, 'grace', t.seat)
+            clearTimer(sql, 'turn', t.seat)
             break
-          }
           case 'ai_step':
+            // Still real: `/leave` (untouched — a deliberate, human-initiated
+            // "hand my seat to AI while I step away", not an absence auto-cover)
+            // arms this, and `driveIfAI` is still the only path that ever
+            // produces an AI move.
             clearTimer(sql, 'ai_step', t.seat)
             driveIfAI(this.driveDeps(), this.repo, sql, now)
             break
@@ -619,23 +628,15 @@ export class GameDO extends DurableObject<Env> {
             this.healTick(sql, now)
             break
           case 'round_wait':
-            // ADDENDUM J: dispatch straight to the internal next-round
-            // advance — never driveIfAI/autoCover — firing when EITHER
-            // seat's deadline expires. FIX 2: advanceRoundInternal now runs
-            // its own post-deal wheel (incl. driveIfAI), so a present player
-            // is never stalled waiting for the next heal tick if the round
-            // opens on an AI-covered seat.
+            // Owner's decision (2026-07-18): never armed anymore (round_end
+            // now pauses like every other absent turn — the present player's
+            // resolution is POST /claim-win, not a forced advance). Same
+            // harmless legacy-row cleanup as grace/turn above — never
+            // `advanceRoundInternal`.
             clearTimer(sql, 'round_wait', t.seat)
-            await this.advanceRoundInternal(now)
             break
         }
       }
-      // If the turn now rests on a silently-absent human (e.g. an AI chain
-      // or floor just advanced onto them), arm their cover deadline so the
-      // next alarm can take the seat over. Likewise re-evaluate round_wait
-      // in case the wheel just landed the match in round_end.
-      armDisconnectCoverIfAbsent(this.repo, sql, now)
-      armRoundWaitIfAbsent(this.repo, sql, now)
       await rearmAlarm(this.ctx, sql)
       // Archive any AI/floor/round-advance moves the wheel just committed.
       this.ctx.waitUntil(this.runArchiveTick(now))
@@ -734,7 +735,7 @@ export class GameDO extends DurableObject<Env> {
       const view =
         meta.status === 'waiting'
           ? buildWaitingRoomView(this.repo)
-          : buildClientView(this.repo.getSnapshot()!, meta, already.seat_index, seats)
+          : buildClientView(this.repo.getSnapshot()!, meta, already.seat_index, seats, Date.now())
       return json({ seatIndex: already.seat_index, status: meta.status, view })
     }
 
@@ -770,18 +771,17 @@ export class GameDO extends DurableObject<Env> {
     if (!joined) return json({ error: 'room_full' }, 409)
 
     this.ctx.waitUntil(archiveSeats(this.env.DB, this.repo, Date.now()))
-    // ADDENDUM M's post-deal wheel: ensureHeal -> driveIfAI ->
-    // armDisconnectCoverIfAbsent -> rearmAlarm. driveIfAI is a no-op today
-    // (Jaipur is 2-human-only tonight, so there is no AI-opening-seat case),
-    // but the just-joined seat may already be silently absent (never
-    // heartbeated) at join time, so arming its cover here (rather than
-    // waiting for the first heal tick) matters for real.
+    // Owner's decision (2026-07-18, no-AI-takeover rework): this used to ALSO
+    // drive an AI-opening seat and arm cover for a silently-absent just-joined
+    // seat (`driveIfAI`/`armDisconnectCoverIfAbsent`) — both dropped (no seat
+    // is ever auto-covered from absence anymore; a silently-absent seat just
+    // pauses the game on its turn, same as any other absence). `ensureHeal`
+    // stays armed (the abandon-after-long-inactivity path is unrelated) and
+    // the platform alarm still needs re-arming after touching the wheel.
+    const now = Date.now()
     {
       const sql = this.ctx.storage.sql as unknown as SqlLike
-      const now = Date.now()
       this.ensureHeal(sql, now)
-      driveIfAI(this.driveDeps(), this.repo, sql, now)
-      armDisconnectCoverIfAbsent(this.repo, sql, now)
       await rearmAlarm(this.ctx, sql)
     }
 
@@ -790,7 +790,7 @@ export class GameDO extends DurableObject<Env> {
     const joinedSeat = freshSeats.find((s) => s.owner_account_id === auth.accountId)!
     this.broadcast({ type: 'started' })
 
-    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, joinedSeat.seat_index, freshSeats)
+    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, joinedSeat.seat_index, freshSeats, now)
     return json({ seatIndex: joinedSeat.seat_index, status: freshMeta.status, view })
   }
 
@@ -849,15 +849,14 @@ export class GameDO extends DurableObject<Env> {
     const now = Date.now()
     const sql = this.ctx.storage.sql as unknown as SqlLike
     this.ensureHeal(sql, now)
-    driveIfAI(this.driveDeps(), this.repo, sql, now)
-    armDisconnectCoverIfAbsent(this.repo, sql, now)
+    // Owner's decision (2026-07-18, no-AI-takeover rework): this used to ALSO
+    // drive a newly-current AI-covered seat and arm both absence covers
+    // (`driveIfAI`/`armDisconnectCoverIfAbsent`/`armRoundWaitIfAbsent` on
+    // round_end) — all dropped. A move landing on an absent seat's turn (or
+    // ending the round with the other seat absent) now just PAUSES; the
+    // present player's resolution is `POST /claim-win`, not an auto-cover or
+    // a forced round-advance.
     const freshMeta = this.repo.getMeta()
-    if (freshMeta && freshMeta.phase === 'round_end') {
-      // ADDENDUM J: this move just ended the round — arm round_wait for
-      // whichever seat(s) are absent humans so a present opponent is never
-      // stuck waiting on an absent one to click Continue.
-      armRoundWaitIfAbsent(this.repo, sql, now)
-    }
     if (freshMeta && freshMeta.phase === 'match_over') {
       // A move naturally ended the match (a seat reached sealsNeeded). Same
       // defect class as resign: purge EVERY outstanding wheel timer for both
@@ -919,7 +918,7 @@ export class GameDO extends DurableObject<Env> {
 
     return json({
       moveIndex: meta.move_index,
-      view: buildClientView(snapshot, meta, ownSeat.seat_index, this.repo.getSeats()),
+      view: buildClientView(snapshot, meta, ownSeat.seat_index, this.repo.getSeats(), Date.now()),
       moves,
     })
   }
@@ -948,6 +947,8 @@ export class GameDO extends DurableObject<Env> {
 
     if (meta.phase === 'match_over') return json({ error: 'match_over' }, 409)
 
+    const now = Date.now()
+
     if (meta.phase !== 'round_end') {
       // Not (yet, or any longer) in round_end — either a race with another
       // caller who already dealt (benign) or a genuinely wrong-phase call.
@@ -955,21 +956,18 @@ export class GameDO extends DurableObject<Env> {
       if (!snapshot) return json({ error: 'no_snapshot' }, 404)
       return json({
         already: true,
-        view: buildClientView(snapshot, meta, seat.seat_index, this.repo.getSeats()),
+        view: buildClientView(snapshot, meta, seat.seat_index, this.repo.getSeats(), now),
       })
     }
 
-    // FIX 2: delegate to advanceRoundInternal — the SINGLE source of the
-    // deal + ADDENDUM M post-deal wheel, shared with the alarm's
-    // `round_wait` auto-advance path, so both callers get identical,
-    // immediate post-deal behavior (an already-absent/AI opening seat is
-    // driven right away, not just here). Rebuild the view AFTER the call in
-    // case driveIfAI advanced the state further.
-    const now = Date.now()
+    // Delegate to advanceRoundInternal — the SINGLE source of the deal +
+    // post-deal wheel (ensureHeal/rearmAlarm — no AI-cover wheel anymore,
+    // see its docstring). Rebuild the view AFTER the call in case anything
+    // advanced the state further.
     const dealt = await this.advanceRoundInternal(now)
 
     const freshMeta = this.repo.getMeta()!
-    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats())
+    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats(), now)
     return json(dealt ? { view } : { already: true, view })
   }
 
@@ -1053,7 +1051,109 @@ export class GameDO extends DurableObject<Env> {
     this.ctx.waitUntil(this.runArchiveTick(now))
     this.nudge(freshMeta.move_index)
 
-    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats())
+    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats(), now)
+    return json({ view })
+  }
+
+  /**
+   * POST /claim-win — NEW (owner's decision, 2026-07-18): the present
+   * player's manual resolution when the opponent has genuinely, continuously
+   * gone dark. Replaces AI-takeover as the "opponent ghosted" answer — Jaipur
+   * is 2p, and an AI finishing the match wearing the absent player's name
+   * would be misleading (muddies stats, reads as them still "playing"); the
+   * new model is: absence just PAUSES the game on their turn, and the
+   * present player alone gets to decide when enough is enough.
+   *
+   * requireAuth; seat owner; not already `match_over` (mirrors
+   * `handleResign`'s shape exactly for these first three checks — same
+   * error codes, same idempotency-via-race-recheck pattern). The ONE thing
+   * this endpoint adds beyond resign: it VALIDATES the OTHER seat is
+   * genuinely absent before allowing the claim — NOT merely
+   * `!seatIndexPresent` (that only proves "no heartbeat in the last
+   * `PRESENCE_MS`", true for anyone mid-reconnect) but continuously absent
+   * for `CLAIM_GRACE_MS` LONGER on top of that, so a brief network blip can
+   * never be raced into a stolen win. A seat that has never once heartbeated
+   * (`last_seen_at === null`) can never be claimed against here either —
+   * that is "not yet measured", not "measured and gone" (see the null guard
+   * below; mirrors `buildClientView`'s `claimWinAvailable` — same formula,
+   * checked independently server-side rather than trusted from the client).
+   * A present/recently-seen opponent gets 409 `opponent_present`.
+   *
+   * On success: appends a server-minted `claim_win` move (never `by_ai` —
+   * this is the CLAIMER's own action, just one that ends the match on the
+   * absent seat's behalf), reuses the `'resigned'` terminal status (same
+   * stats bucket as an explicit resignation — "opponent abandoned" and
+   * "opponent resigned" are the same shape for leaderboard/history
+   * purposes), sets `winner_seat` to the CLAIMER, and sweeps the whole timer
+   * wheel via `stopWheelTimers` — identical terminal-state hygiene to
+   * `handleResign`. Idempotent: a second call after `match_over` hits the
+   * same 409 the first phase check would.
+   */
+  private async handleClaimWin(request: Request): Promise<Response> {
+    const auth = await requireAuth(request, this.env)
+    if (auth instanceof Response) return auth
+
+    const meta = this.repo.getMeta()
+    if (!meta) return json({ error: 'game_not_found' }, 404)
+
+    const seat = this.repo.seatOwnedBy(auth.accountId)
+    if (!seat) return json({ error: 'not_your_seat' }, 403)
+
+    if (meta.phase === 'match_over') return json({ error: 'match_over' }, 409)
+
+    const otherIndex: 0 | 1 = seat.seat_index === 0 ? 1 : 0
+    const now = Date.now()
+    const sql = this.ctx.storage.sql as unknown as SqlLike
+
+    const otherSeat = this.repo.getSeats()[otherIndex]
+    const otherGenuinelyAbsent =
+      !!otherSeat &&
+      !seatIndexPresent(this.repo, otherIndex, now) &&
+      otherSeat.last_seen_at != null &&
+      now - otherSeat.last_seen_at >= CLAIM_GRACE_MS
+    if (!otherGenuinelyAbsent) return json({ error: 'opponent_present' }, 409)
+
+    this.ctx.storage.transactionSync(() => {
+      const freshMeta = this.repo.getMeta()!
+      if (freshMeta.phase === 'match_over') return // raced — already resolved
+      const moveIndex = freshMeta.move_index + 1
+      this.repo.insertMove({
+        move_index: moveIndex,
+        round: freshMeta.round,
+        turn_number: this.repo.countTurnCompletingMoves(),
+        seat_index: seat.seat_index,
+        type: 'claim_win',
+        payload: JSON.stringify({ type: 'claim_win', seat: seat.seat_index }),
+        by_ai: false,
+        ai_difficulty: null,
+        controlling_account_id: seat.owner_account_id,
+        client_move_id: null,
+        reverted: false,
+        created_at: now,
+      })
+      this.repo.putMeta({
+        ...freshMeta,
+        status: 'resigned',
+        phase: 'match_over',
+        winner_seat: seat.seat_index as 0 | 1,
+        move_index: moveIndex,
+      })
+
+      // Same terminal-state hygiene as handleResign/handleMove's natural
+      // match-over path: purge the whole timer wheel so nothing zombie-ticks
+      // a dead match.
+      this.stopWheelTimers(sql)
+    })
+
+    const freshMeta = this.repo.getMeta()!
+    await rearmAlarm(this.ctx, sql)
+    // Route through the terminal-aware runArchiveTick (its terminal branch
+    // calls archiveMatchEnd internally, idempotent) so D1's
+    // games.status/ended_at AND the matches stats rows both finalize.
+    this.ctx.waitUntil(this.runArchiveTick(now))
+    this.nudge(freshMeta.move_index)
+
+    const view = buildClientView(this.repo.getSnapshot()!, freshMeta, seat.seat_index, this.repo.getSeats(), now)
     return json({ view })
   }
 }
