@@ -9,7 +9,9 @@ interface CamelStackProps {
   onRemoveCamel: () => void
 }
 
-const CAMEL_ICON = 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F42A.svg'
+// Bundled locally in public/assets/cards/ (previously hotlinked from an
+// external raw-content host — see docs/assets.md). Same file Card.tsx uses.
+const CAMEL_ICON = '/assets/cards/1F42A.svg'
 
 export function CamelStack({ herd, camelsUsed, inExchange, onUseHerdCamel, onRemoveCamel }: CamelStackProps) {
   const [isMobile, setIsMobile] = useState(false)
@@ -106,9 +108,12 @@ export function CamelStack({ herd, camelsUsed, inExchange, onUseHerdCamel, onRem
             zIndex: 1,
           }}
         >
+          {/* Linen Texture Overlay — local, self-contained SVG noise tile
+              (public/assets/textures/linen.svg), replacing a dead external
+              texture-site hotlink (see docs/assets.md). */}
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundImage: "url('https://www.transparenttextures.com/patterns/linen.png')",
+            backgroundImage: "url('/assets/textures/linen.svg')",
             opacity: 0.25,
             pointerEvents: 'none',
             zIndex: 1,

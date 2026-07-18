@@ -8,6 +8,7 @@ Public assets:
 - `public/og-image.png`
 - `public/sounds/*.wav`
 - `public/assets/cards/*.svg` (bundled OpenMoji icons)
+- `public/assets/textures/linen.svg` (local, self-contained noise texture)
 
 Reference assets:
 
@@ -50,23 +51,23 @@ All are 100% synthetic (no third-party audio, no license concerns).
 
 **Updated 2026-07-18.** Card type icons were previously hotlinked from
 `raw.githubusercontent.com` (OpenMoji SVGs); they are now vendored locally
-in `public/assets/cards/` and referenced via `Card.tsx` as
-`/assets/cards/<HEX>.svg`. This removes the runtime dependency on GitHub's
-raw content host for card rendering.
+in `public/assets/cards/` and referenced as `/assets/cards/<HEX>.svg` by
+both `Card.tsx` and `CamelStack.tsx` (the latter's camel icon was still
+hotlinking `raw.githubusercontent.com` directly until this update — it now
+points at the same bundled `1F42A.svg`). This removes the runtime
+dependency on GitHub's raw content host for card rendering.
 
-The linen texture overlay in `Card.tsx` (and in `CamelStack.tsx`, which is
-outside this change's scope) **remains hotlinked** to
-`https://www.transparenttextures.com/patterns/linen.png`. That download was
-attempted (direct, then retried with a browser User-Agent) and failed both
-times with an HTTP 404 — and a Wayback Machine CDX lookup shows every
-capture of that URL since at least February 2025 has also returned 404, so
-this is not a transient host hiccup: the plain "linen" pattern appears to
-have been removed or renamed on the live site. No working copy of the exact
-original asset could be sourced, so per the documented fallback it was left
-hotlinked (see the `NOTE` comment beside it in `Card.tsx`). Follow-up
-options: pick a replacement pattern from the site's current catalog (e.g.
-`stressed-linen.png`, `low-contrast-linen.png`) and vendor that instead, or
-remove the texture overlay entirely.
+**Updated 2026-07-18 (again).** The linen texture overlay in `Card.tsx` and
+`CamelStack.tsx` was hotlinked to
+`https://www.transparenttextures.com/patterns/linen.png`, which 404s on the
+live host (confirmed dead — see the "Texture — linen pattern" entry below
+for the investigation). It has been replaced with a local, self-contained
+SVG noise tile at `public/assets/textures/linen.svg`
+(`feTurbulence`-generated grain, no raster data, no external dependency),
+referenced as `/assets/textures/linen.svg` at the same `opacity: 0.25`
+overlay the old hotlink used, so the visual weight on the card face is
+unchanged. Both components now have zero runtime dependency on external
+hosts.
 
 ## Attribution
 
@@ -83,21 +84,28 @@ remove the texture overlay entirely.
   - `1F97B.svg` (billed cap / cloth stand-in) → cloth
   - `1F966.svg` (broccoli) → spice
   - `1F462.svg` (woman's boot) → leather
-  - `1F42A.svg` (camel) → camel
+  - `1F42A.svg` (camel) → camel — used by both `Card.tsx` and
+    `CamelStack.tsx`
 - Attribution requirement: retain this notice when redistributing —
   "Icons by OpenMoji — the open-source emoji and icon project. License:
   CC BY-SA 4.0."
 
-### Texture — linen pattern
+### Texture — `public/assets/textures/linen.svg`
 
-- Source: transparenttextures.com
-  (`https://www.transparenttextures.com/patterns/linen.png`)
-- License: free to use, attribution appreciated (per
-  transparenttextures.com site terms)
-- Status: **not bundled** — the exact `linen.png` asset returns 404 on the
-  live host and has no working Wayback Machine capture; attempted 2026-07-18
-  (direct + browser User-Agent retry), both failed. Left hotlinked in
-  `Card.tsx` (and `CamelStack.tsx`) pending a replacement pattern or removal.
+- Source: generated locally, 2026-07-18 — a small (40x40) `feTurbulence`
+  fractal-noise SVG with a `feColorMatrix` alpha tint, tiled by CSS as a
+  card-surface overlay at `opacity: 0.25` in `Card.tsx` and
+  `CamelStack.tsx`.
+- License: none needed — 100% original/synthetic, no third-party material.
+- Prior asset (superseded): the original overlay was hotlinked to
+  `https://www.transparenttextures.com/patterns/linen.png`
+  (free to use, attribution appreciated per transparenttextures.com site
+  terms). That URL returns 404 on the live host and has no working Wayback
+  Machine capture; attempted 2026-07-18 (direct + browser User-Agent
+  retry), both failed, and a CDX lookup showed every capture since at
+  least February 2025 has also 404'd — not a transient hiccup. No working
+  copy of the exact original asset could be sourced, so it was replaced
+  with the local synthetic texture above rather than left hotlinked.
 
 ### Audio — `public/sounds/*.wav`
 

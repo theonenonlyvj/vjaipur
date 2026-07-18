@@ -13,7 +13,7 @@ const BG: Record<CardType, string> = {
 }
 
 // Map types to OpenMoji HEX codes. Bundled locally in public/assets/cards/
-// (previously hotlinked from raw.githubusercontent.com — see docs/assets.md).
+// (previously hotlinked from an external raw-content host — see docs/assets.md).
 const ICON_URLS: Record<CardType, string> = {
   diamond: '/assets/cards/1F48E.svg',
   gold:    '/assets/cards/1F4B0.svg',
@@ -82,14 +82,12 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
         overflow: 'hidden',
       }}
     >
-      {/* Linen Texture Overlay
-          NOTE: still hotlinked. transparenttextures.com/patterns/linen.png
-          returns 404 on the live host as of 2026-07-18 (confirmed dead, not
-          a transient hiccup — see docs/assets.md). Left hotlinked per the
-          documented fallback since no working copy could be sourced. */}
+      {/* Linen Texture Overlay — local, self-contained SVG noise tile
+          (public/assets/textures/linen.svg), replacing a dead external
+          texture-site hotlink (see docs/assets.md). */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-        backgroundImage: "url('https://www.transparenttextures.com/patterns/linen.png')",
+        backgroundImage: "url('/assets/textures/linen.svg')",
         opacity: 0.25,
         pointerEvents: 'none',
         zIndex: 1,

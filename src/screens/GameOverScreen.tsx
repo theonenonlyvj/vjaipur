@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { useStatsStore } from '../store/statsStore'
 import { GameScreen } from './GameScreen'
+import { getTierLabel } from '../ai/tiers'
 
 export function GameOverScreen() {
   const navigate = useNavigate()
@@ -41,7 +42,10 @@ export function GameOverScreen() {
     navigate('/')
   }
 
-  const oppLabel = mode === 'vs-ai' ? `AI (${difficulty})` : (opponentName || 'Opponent')
+  // vs-AI: resolve the stored tier id (e.g. "hard3") to its display label
+  // ("Omniscient Bot"). Online: the opponent is a human name, not a tier —
+  // never run it through the tier-label map.
+  const oppLabel = mode === 'vs-ai' ? `AI (${getTierLabel(difficulty)})` : (opponentName || 'Opponent')
 
   return (
     <div style={{
