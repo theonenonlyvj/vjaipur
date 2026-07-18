@@ -12,15 +12,16 @@ const BG: Record<CardType, string> = {
   camel:   'linear-gradient(135deg, #d0a860, #604010)',
 }
 
-// Map types to OpenMoji HEX codes or reliable SVG sources
+// Map types to OpenMoji HEX codes. Bundled locally in public/assets/cards/
+// (previously hotlinked from raw.githubusercontent.com — see docs/assets.md).
 const ICON_URLS: Record<CardType, string> = {
-  diamond: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F48E.svg',
-  gold:    'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F4B0.svg',
-  silver:  'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/2694.svg',
-  cloth:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F97B.svg',
-  spice:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F966.svg',
-  leather: 'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F462.svg',
-  camel:   'https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/svg/1F42A.svg',
+  diamond: '/assets/cards/1F48E.svg',
+  gold:    '/assets/cards/1F4B0.svg',
+  silver:  '/assets/cards/2694.svg',
+  cloth:   '/assets/cards/1F97B.svg',
+  spice:   '/assets/cards/1F966.svg',
+  leather: '/assets/cards/1F462.svg',
+  camel:   '/assets/cards/1F42A.svg',
 }
 
 const ACCENT: Record<CardType, string> = {
@@ -81,7 +82,11 @@ export function CardView({ card, selected = false, onClick, size = 'md' }: Props
         overflow: 'hidden',
       }}
     >
-      {/* Linen Texture Overlay */}
+      {/* Linen Texture Overlay
+          NOTE: still hotlinked. transparenttextures.com/patterns/linen.png
+          returns 404 on the live host as of 2026-07-18 (confirmed dead, not
+          a transient hiccup — see docs/assets.md). Left hotlinked per the
+          documented fallback since no working copy could be sourced. */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
         backgroundImage: "url('https://www.transparenttextures.com/patterns/linen.png')",
