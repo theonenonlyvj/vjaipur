@@ -11,3 +11,6 @@ dist/
 !.env.example
 
 reference/*.zip
+
+# generated stats-migration artifacts (contain account ids)
+worker/scripts/out/

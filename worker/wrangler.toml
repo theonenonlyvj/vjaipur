@@ -25,7 +25,7 @@ new_sqlite_classes = ["GameDO"]
 [[d1_databases]]
 binding = "DB"
 database_name = "vjaipur"
-database_id = "PLACEHOLDER_REPLACE_AT_DEPLOY" # `wrangler d1 create vjaipur` prints the real id
+database_id = "f363488e-1672-4104-851c-ccba73573820" # `wrangler d1 create vjaipur`, 2026-07-18
 
 # Cron sweep (1-min is the Cloudflare floor): pokes stale active games so their
 # DO alarm/heal path re-drives/abandons them and drains any unflushed archive.
