@@ -137,3 +137,33 @@ Decisions (Vijay, 2026-07-18):
   Client default worker URL baked (`src/net/http.ts`, prod builds only), so no
   Render env var needed. Render auto-deploying the static client. Polling for the
   new bundle. **ROLLBACK: `git push origin checkpoint-2026-07-18-pre-online-worker^{}:main --force-with-lease`** (client returns to the Socket.IO relay, still running).
+
+## 2026-07-18 (later) — post-cutover: no-AI-takeover, claim-win/resume-later, cosmetics, presence
+Vijay's feedback: 60s AI-takeover too quick; for 1:1 an AI finishing wearing a
+friend's name is weird. His idea: "claim win OR resume later."
+- **AI takeover REMOVED for 1:1** (`cf03cba`): silent absence just PAUSES on that
+  seat (never auto-moves/flips to AI). Present player never touched. driveIfAI/
+  floor/autoCover kept dormant (still fuzz/unit-tested; future AI/lobby mode).
+- **`POST /claim-win`**: present player ends the match in their favor, but only
+  after the opponent is genuinely absent ≥ CLAIM_GRACE_MS (60s) w/ a real prior
+  heartbeat (else 409 opponent_present, server-revalidated). ClientView carries
+  `opponentPresent` + `claimWinAvailable`.
+- **Graceful `/leave`** = "step away, resume later": marks seat away NOW but keeps
+  it owned + game active; the DO persists it (reopen from "Your games"). No
+  forfeit anywhere; a game ends only via resign / claim-win / ~7-day abandon (no
+  result on anyone).
+- **Client UX** (`d9d23d7`): banner → 3 calm states (present → nothing; away →
+  "Waiting for {name} to return…" + always "Leave & resume later"; claimable → +
+  "Claim win"). Dead cover/reclaim removed. "Your games" resume list on Lobby.
+- **Cosmetics** (`dea922a`): linen hotlink → bundled feTurbulence SVG; camel →
+  local /assets; GameOver shows getTierLabel ("Omniscient Bot").
+- **Presence-at-kickoff** (`bc2f99f`): worker stamps both seats present at deal;
+  client heartbeat fires immediately → no spurious "away" at start/resume
+  (live-probed opponentPresent=true right after join).
+- **DEPLOYED + VERIFIED:** worker v1f045c0e; client bundle DRK8DdrO (has claim-win/
+  "to return"/"resume later"/"Your games"). Full-match e2e + claim-win e2e +
+  presence probe all pass on prod. D1 cleaned (77 migrated matches + real names
+  kept). Tests: worker 207 / client 465 / server 48.
+- **Follow-up:** /my-games returns no opponent name → resume list shows code/status
+  not "vs Sureka" (small worker join to add it). **STILL HOLDING** the old Render
+  Node backend + Supabase decommission until Vijay plays + confirms.
