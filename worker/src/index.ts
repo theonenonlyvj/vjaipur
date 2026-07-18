@@ -214,9 +214,9 @@ async function handleMyGames(request: Request, env: Env): Promise<Response> {
   })
 }
 
-const GAME_SUBROUTE = /^\/games\/([^/]+)\/(join|sync|move|heartbeat|reclaim|leave|next-round|resign|socket)$/
+const GAME_SUBROUTE = /^\/games\/([^/]+)\/(join|sync|move|heartbeat|reclaim|leave|next-round|resign|claim-win|socket)$/
 
-/** `ALL /games/:id/(join|sync|move|heartbeat|reclaim|leave|next-round|resign|socket)`
+/** `ALL /games/:id/(join|sync|move|heartbeat|reclaim|leave|next-round|resign|claim-win|socket)`
  *  — forward to the DO stub. The WS upgrade (`socket`) is forwarded as the
  *  ORIGINAL, untouched `Request` (Cloudflare ties a WebSocket pair to the
  *  exact incoming `Request` object; reconstructing a new one via

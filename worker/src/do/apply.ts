@@ -93,7 +93,7 @@ export function applyAndPersist(repo: GameRepository, params: ApplyParams): Appl
   // CURRENT snapshot for the (now authz-verified) seat. Checked before the
   // TURN check so a reconnect retry never surfaces a false "not your turn".
   if (params.clientMoveId != null && repo.moveExistsByClientId(params.clientMoveId)) {
-    return { duplicate: true, view: buildClientView(snapshot, meta, params.seatIndex, seats) }
+    return { duplicate: true, view: buildClientView(snapshot, meta, params.seatIndex, seats, now) }
   }
 
   // (c2) reclaim-race guard (Wave 3) — re-read turn + AI-control from the
@@ -201,5 +201,9 @@ export function applyAndPersist(repo: GameRepository, params: ApplyParams): Appl
   repo.putSnapshot(newState)
   repo.putMeta(newMeta)
 
-  return { ok: true, moveIndex: newMeta.move_index, view: buildClientView(newState, newMeta, params.seatIndex, seats) }
+  return {
+    ok: true,
+    moveIndex: newMeta.move_index,
+    view: buildClientView(newState, newMeta, params.seatIndex, seats, now),
+  }
 }

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { applyAction, setupRound, type Action, type Good } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
 import { GameRepository, type SqlLike } from '../src/do/storage'
-import { GLOBAL_SEAT } from '../src/do/constants'
+import { CLAIM_GRACE_MS, GLOBAL_SEAT } from '../src/do/constants'
 import { hasTimer, setTimer } from '../src/do/timers'
 import { applyD1Schema } from './helpers'
 
@@ -382,6 +382,114 @@ describe('resign', () => {
       expect(repo.getMovesSince(0).length).toBe(movesBefore)
       expect(repo.getSeats().every((s) => !s.controlled_by_ai)).toBe(true)
     })
+  })
+})
+
+describe('claim-win (owner decision 2026-07-18: no AI takeover — the present player claims after genuine, sustained absence)', () => {
+  it('opponent present/recently-heartbeated → 409 opponent_present, NO state change', async () => {
+    const { stub, tokens } = await createAndJoin('claim-present', 3)
+    // Establish clear, fresh presence for the opponent (seat 1) via a real heartbeat.
+    const hb = await stub.fetch(req('/heartbeat', { token: tokens[1], body: {} }))
+    expect(hb.status).toBe(200)
+
+    const before = (await sync(stub, tokens[0])).body
+
+    const res = await stub.fetch(req('/claim-win', { token: tokens[0], body: {} }))
+    expect(res.status).toBe(409)
+    expect((await readJson(res)).error).toBe('opponent_present')
+
+    const after = (await sync(stub, tokens[0])).body
+    expect(after.moveIndex).toBe(before.moveIndex) // nothing committed
+    expect(after.view.phase).not.toBe('match_over')
+  })
+
+  it('a NEVER-heartbeated opponent (last_seen_at still null right after join) is NOT claimable either — "not yet measured" is not "measured and gone"', async () => {
+    const { stub, tokens } = await createAndJoin('claim-never-seen', 3)
+    // Neither seat has ever heartbeated yet (join doesn't call setPresence).
+    const res = await stub.fetch(req('/claim-win', { token: tokens[0], body: {} }))
+    expect(res.status).toBe(409)
+    expect((await readJson(res)).error).toBe('opponent_present')
+  })
+
+  it('opponent genuinely, continuously absent (stale well past CLAIM_GRACE_MS) → 200, match_over, winner = claimer, exactly one claim_win move, EVERY wheel timer swept, and exactly one matches row per human seat even after a re-tick (idempotent)', async () => {
+    const { stub, tokens } = await createAndJoin('claim-absent', 3)
+
+    const now = Date.now()
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const repo = new GameRepository(sql)
+      repo.setPresence(0, now) // claimer (seat 0) freshly present
+      repo.setPresence(1, now - CLAIM_GRACE_MS - 5_000) // opponent stale well past the grace window
+      // Arm a scattering of leftover timers too (mirrors the resign FIX-3
+      // test's "sweeps everything" coverage) — claim-win must sweep these
+      // exactly like resign does.
+      setTimer(sql, 'turn', 0, now + 60_000)
+      setTimer(sql, 'grace', 1, now + 60_000)
+      setTimer(sql, 'ai_step', 1, now)
+      setTimer(sql, 'round_wait', 0, now + 30_000)
+      setTimer(sql, 'heal', GLOBAL_SEAT, now + 60_000)
+    })
+
+    const res = await stub.fetch(req('/claim-win', { token: tokens[0], body: {} }))
+    expect(res.status).toBe(200)
+    const body = await readJson(res)
+    expect(body.view.phase).toBe('match_over')
+    expect(body.view.winnerSeat).toBe(0)
+
+    const moves = (await sync(stub, tokens[0])).body.moves
+    const claimMoves = moves.filter((m: any) => m.type === 'claim_win')
+    expect(claimMoves.length).toBe(1)
+    expect(claimMoves[0].seatIndex).toBe(0)
+    expect(claimMoves[0].byAi).toBe(false)
+    expect(claimMoves[0].payload).toEqual({ type: 'claim_win', seat: 0 })
+
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      for (const seat of [0, 1] as const) {
+        expect(hasTimer(sql, 'turn', seat)).toBe(false)
+        expect(hasTimer(sql, 'grace', seat)).toBe(false)
+        expect(hasTimer(sql, 'ai_step', seat)).toBe(false)
+        expect(hasTimer(sql, 'round_wait', seat)).toBe(false)
+      }
+      expect(hasTimer(sql, 'heal', GLOBAL_SEAT)).toBe(false)
+    })
+
+    // A re-call after match_over is a benign 409 (idempotent, mirrors resign).
+    const second = await stub.fetch(req('/claim-win', { token: tokens[1], body: {} }))
+    expect(second.status).toBe(409)
+    expect((await readJson(second)).error).toBe('match_over')
+
+    const gameUuid = await runInDurableObject(stub, (_instance, state) =>
+      new GameRepository(state.storage.sql as unknown as SqlLike).getMeta()!.game_uuid,
+    )
+    await stub.fetch(new Request('https://do/tick', { method: 'POST' })) // re-tick
+
+    const gameRow = await DB().prepare(`SELECT status, ended_at FROM games WHERE game_uuid = ?`).bind(gameUuid).first<any>()
+    expect(gameRow.status).toBe('resigned') // claim-win reuses the resigned stats bucket
+    expect(gameRow.ended_at).toBeTruthy()
+
+    await stub.fetch(new Request('https://do/tick', { method: 'POST' })) // a SECOND re-tick
+
+    const rows = (await DB().prepare(`SELECT * FROM matches WHERE game_uuid = ?`).bind(gameUuid).all<any>()).results
+    expect(rows.length).toBe(2) // one per human seat, never duplicated by repeated ticks
+    const claimerRow = rows.find((r: any) => r.account_id === ALICE_ID) as any
+    expect(claimerRow.won).toBe(1)
+    const otherRow = rows.find((r: any) => r.account_id === BOB_ID) as any
+    expect(otherRow.won).toBe(0)
+  })
+
+  it('/claim-win after match_over (via resign) is rejected 409 match_over', async () => {
+    const { stub, tokens } = await createAndJoin('claim-after-over', 3)
+    await stub.fetch(req('/resign', { token: tokens[0], body: {} }))
+    const res = await stub.fetch(req('/claim-win', { token: tokens[1], body: {} }))
+    expect(res.status).toBe(409)
+    expect((await readJson(res)).error).toBe('match_over')
+  })
+
+  it('a caller who owns no seat gets 403 not_your_seat', async () => {
+    const { stub } = await createAndJoin('claim-foreign', 3)
+    const res = await stub.fetch(req('/claim-win', { token: 'test:acct-stranger:Eve', body: {} }))
+    expect(res.status).toBe(403)
   })
 })
 

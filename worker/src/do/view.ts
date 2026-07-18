@@ -8,6 +8,8 @@ import type {
   TokenPiles,
 } from '../../../src/engine'
 import type { GameRepository, MatchPhase, MetaRow, MoveRow, SeatRow } from './storage'
+import { isSeatPresent } from './presence'
+import { CLAIM_GRACE_MS } from './constants'
 
 /**
  * ADDENDUM I — the redaction-critical view builder. `ClientView` is a CLOSED
@@ -46,6 +48,19 @@ export type ClientView = {
   /** Full RoundResult (scores + camelWinner + sealAwardedTo) — ONLY populated
    *  at `round_end`/`match_over` (scores are private information mid-round). */
   lastRoundResult: RoundResult | null
+  /** NEW (owner's decision 2026-07-18, no-AI-takeover rework): is the
+   *  OPPONENT currently present (heartbeated within `PRESENCE_MS`)? Lets the
+   *  client show a "waiting for them" state instead of silently freezing —
+   *  a pure presence boolean, never a hidden-info leak. */
+  opponentPresent: boolean
+  /** NEW: may THIS seat call `POST /claim-win` right now? True iff the
+   *  opponent is absent AND has been continuously absent for at least
+   *  `CLAIM_GRACE_MS` beyond that (never merely `!opponentPresent` — see
+   *  `CLAIM_GRACE_MS`'s docstring) AND the match isn't already over. The
+   *  server re-validates this independently at `POST /claim-win` time — this
+   *  is purely a client affordance (when to show/enable the button), never
+   *  itself trusted as authorization. */
+  claimWinAvailable: boolean
   players: ClientPlayer[]
   game: {
     market: Card[]
@@ -102,6 +117,7 @@ export function buildClientView(
   meta: MetaRow,
   seatIndex: number,
   seats: SeatRow[],
+  now: number = Date.now(),
 ): ClientView {
   const mine = seatIndex === 0 ? 0 : 1
   const oppIndex = mine === 0 ? 1 : 0
@@ -111,6 +127,20 @@ export function buildClientView(
   const lastRoundResult: RoundResult | null =
     meta.phase === 'round_end' || meta.phase === 'match_over' ? scoreRound(state) : null
 
+  const oppSeat = seats[oppIndex]
+  const opponentPresent = !!oppSeat && isSeatPresent(oppSeat, now)
+  // NULL last_seen_at (never heartbeated yet — e.g. the instant after
+  // /join, before their first heartbeat lands) must NEVER read as claimable:
+  // `now - null` coerces to `now`, which would make a freshly-seated,
+  // simply-not-heartbeated-YET opponent look "long absent" from turn one.
+  // Only a REAL absence measurement (a genuine, aging last_seen_at) counts.
+  const claimWinAvailable =
+    !!oppSeat &&
+    !opponentPresent &&
+    oppSeat.last_seen_at != null &&
+    now - oppSeat.last_seen_at >= CLAIM_GRACE_MS &&
+    meta.phase !== 'match_over'
+
   return {
     mySeat: seatIndex,
     phase: meta.phase,
@@ -119,6 +149,8 @@ export function buildClientView(
     matchLength: meta.match_length,
     winnerSeat: meta.winner_seat,
     lastRoundResult,
+    opponentPresent,
+    claimWinAvailable,
     players: buildPlayerRoster(seats),
     game: {
       market: state.market,

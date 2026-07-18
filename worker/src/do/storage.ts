@@ -186,8 +186,53 @@ const migrateV1: Migration = (sql) => {
   `)
 }
 
+/**
+ * NEW (owner's decision, 2026-07-18): widen `moves.type`'s CHECK constraint
+ * to allow `'claim_win'` — the server-minted terminal move `POST /claim-win`
+ * appends (see `game-do.ts`'s `handleClaimWin`). SQLite has no
+ * `ALTER TABLE ... ADD CONSTRAINT` / `MODIFY CHECK`, so widening a CHECK
+ * requires the standard rebuild dance: create the new-shape table under a
+ * temp name, copy every existing row across with a straight
+ * `INSERT ... SELECT *` (safe ONLY because the column list/order below is
+ * byte-identical to migrateV1's — verified by inspection), drop the old
+ * table, rename. Runs at most once per DO (`runMigrations`'s
+ * schema_version gate), so it never needs to be idempotent on its own.
+ */
+const migrateV2: Migration = (sql) => {
+  sql.exec(`
+    CREATE TABLE moves_v2 (
+      move_index             INTEGER PRIMARY KEY,
+      round                  INTEGER NOT NULL,
+      turn_number             INTEGER NOT NULL,
+      seat_index              INTEGER NOT NULL,
+      type                     TEXT    NOT NULL
+                                 CHECK (type IN ('TAKE_SINGLE', 'TAKE_CAMELS', 'TAKE_EXCHANGE', 'SELL',
+                                                  'round_start', 'round_end', 'resign', 'claim_win')),
+      payload                  TEXT    NOT NULL,
+      by_ai                    INTEGER NOT NULL DEFAULT 0,
+      ai_difficulty            TEXT,
+      controlling_account_id   TEXT,
+      client_move_id           TEXT,
+      reverted                 INTEGER NOT NULL DEFAULT 0,
+      created_at               INTEGER NOT NULL,
+      UNIQUE (client_move_id)
+    )
+  `)
+  sql.exec(`
+    INSERT INTO moves_v2
+      (move_index, round, turn_number, seat_index, type, payload, by_ai,
+       ai_difficulty, controlling_account_id, client_move_id, reverted, created_at)
+    SELECT
+      move_index, round, turn_number, seat_index, type, payload, by_ai,
+      ai_difficulty, controlling_account_id, client_move_id, reverted, created_at
+    FROM moves
+  `)
+  sql.exec(`DROP TABLE moves`)
+  sql.exec(`ALTER TABLE moves_v2 RENAME TO moves`)
+}
+
 /** Ordered migration list. Index i is schema version (i+1). */
-export const MIGRATIONS: Migration[] = [migrateV1]
+export const MIGRATIONS: Migration[] = [migrateV1, migrateV2]
 
 /**
  * Idempotent forward migrator. Safe to run on every DO boot: creates the
@@ -245,7 +290,15 @@ export type SeatRow = {
   disconnected_at: number | null
 }
 
-export type MoveType = 'TAKE_SINGLE' | 'TAKE_CAMELS' | 'TAKE_EXCHANGE' | 'SELL' | 'round_start' | 'round_end' | 'resign'
+export type MoveType =
+  | 'TAKE_SINGLE'
+  | 'TAKE_CAMELS'
+  | 'TAKE_EXCHANGE'
+  | 'SELL'
+  | 'round_start'
+  | 'round_end'
+  | 'resign'
+  | 'claim_win'
 
 export type MoveRow = {
   move_index: number
