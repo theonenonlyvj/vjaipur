@@ -91,7 +91,16 @@ export type AuthOk = { accountId: string; displayName: string }
  *  of fabricating "Player N" downstream in multiple places. */
 const DEFAULT_DISPLAY_NAME = 'Player'
 
-export type AuthEnv = { VGAMES_URL: string }
+export type AuthEnv = {
+  VGAMES_URL: string
+  /** Service binding to the vgames-identity Worker (wrangler.toml [[services]]).
+   *  Preferred over a public fetch() because a top-level Worker's public
+   *  fetch to another workers.dev Worker on the same account is blocked/looped
+   *  by Cloudflare (401s every worker-level authed route) — the binding is a
+   *  direct isolate call. Optional so the 'test' seam + local dev without the
+   *  binding still work (they fall back to the injected/global fetch). */
+  IDENTITY?: Fetcher
+}
 
 function unauthorized(reason: string): Response {
   return new Response(JSON.stringify({ error: 'unauthorized', reason }), {
@@ -125,7 +134,17 @@ async function resolveAuth(token: string, env: AuthEnv, fetchImpl: typeof fetch)
 
   // ---- real introspection -------------------------------------------------
   try {
-    const res = await fetchImpl(`${env.VGAMES_URL}/auth/introspect`, {
+    // Prefer the service binding (direct isolate-to-isolate) over a public
+    // fetch: a top-level Worker fetching another workers.dev Worker on the same
+    // account is blocked/looped by Cloudflare, which 401'd every worker-level
+    // authed route (/my-games, /stats/*). The binding routes on the request
+    // PATH (hostname ignored), so we keep the same /auth/introspect path. When
+    // the binding is absent (tests, local dev), fall back to the injected/
+    // global fetch against VGAMES_URL. A caller-injected fetchImpl (tests)
+    // always wins so network spies keep working.
+    const useBinding = fetchImpl === fetch && env.IDENTITY != null
+    const doFetch: typeof fetch = useBinding ? env.IDENTITY!.fetch.bind(env.IDENTITY) : fetchImpl
+    const res = await doFetch(`${env.VGAMES_URL}/auth/introspect`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token }),

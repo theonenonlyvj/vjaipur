@@ -35,6 +35,11 @@ export interface Env {
    *  wrangler.toml [vars]. `'test'` is the offline test seam — see
    *  do/authctx.ts and worker/vitest.config.ts. */
   VGAMES_URL: string
+  /** Service binding to the vgames-identity Worker (wrangler.toml [[services]]).
+   *  Used by authctx.resolveAuth for token introspection — a direct isolate
+   *  call that works from the top-level Worker (a public fetch to another
+   *  workers.dev Worker on the same account is blocked/looped by Cloudflare). */
+  IDENTITY?: Fetcher
   /** The exact browser origin allowed by CORS (the Render static-site URL).
    *  Unset only in local dev, where CORS falls back to a permissive `*`. */
   CLIENT_ORIGIN?: string

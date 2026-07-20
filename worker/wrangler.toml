@@ -39,6 +39,17 @@ crons = ["* * * * *"]
 [vars]
 VGAMES_URL = "https://vgames-identity.theonenonlyvj.workers.dev"
 
+# Service binding to the shared identity Worker. A top-level Worker's public
+# fetch() to another *.workers.dev Worker on the same account gets blocked/
+# looped by Cloudflare (401s every worker-level authed route: /my-games,
+# /stats/*), even though a Durable Object's identical fetch egresses fine.
+# The binding is a direct isolate-to-isolate call (no public round-trip) and is
+# preferred by authctx.ts's resolveAuth when present; VGAMES_URL stays as the
+# fallback (and is still used for the request PATH the binding routes on).
+[[services]]
+binding = "IDENTITY"
+service = "vgames-identity"
+
 # JWT_SECRET is DELIBERATELY NOT set here, and unlike viota's worker, it is
 # NEVER needed at all: vjaipur-worker does not co-host identity and never
 # verifies a JWT signature locally. Every Bearer token is verified by calling
