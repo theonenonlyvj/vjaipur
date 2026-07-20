@@ -145,7 +145,7 @@ const taglineStyle: CSSProperties = {
 // keyed off the stable engine id. Labels/taglines themselves come from
 // src/ai/tiers.ts; this just picks a color.
 const tierAccentStyle: Partial<Record<string, CSSProperties>> = {
-  fair: { borderColor: '#40a0ff', background: '#001a3a', color: '#80c0ff' },
+  hard2: { borderColor: '#40a0ff', background: '#001a3a', color: '#80c0ff' },
   hard3: { borderColor: '#ff3030', background: '#1a0000', color: '#ff9090' },
 }
 

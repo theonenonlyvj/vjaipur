@@ -60,7 +60,10 @@ export function getWorkerBridge2(): WorkerBridge {
   if (!_bridge2) {
     _bridge2 = new WorkerBridge(
       // @ts-ignore
-      () => new Worker(new URL('./aiWorker2.ts', import.meta.url), { type: 'module' })
+      () => new Worker(new URL('./aiWorker2.ts', import.meta.url), { type: 'module' }),
+      3000,  // hardAi2's own think budget is ~1500ms (BUDGET_MS in hardAi2.ts) — 3000ms
+             // leaves comfortable headroom for worker spin-up/postMessage overhead so a
+             // legitimate in-budget move is never killed by this timeout.
     )
   }
   return _bridge2
