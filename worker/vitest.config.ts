@@ -16,6 +16,19 @@ export default defineConfig({
       // out to the network — see do/authctx.ts.
       miniflare: {
         bindings: { VGAMES_URL: 'test' },
+        // wrangler.toml declares a [[services]] IDENTITY binding to the real
+        // vgames-identity Worker (the fix for Cloudflare blocking top-level
+        // worker->workers.dev fetches). That Worker doesn't exist in the test
+        // project, so miniflare can't boot the binding — provide a stub. Tests
+        // never hit it anyway: VGAMES_URL='test' routes auth through the
+        // do/authctx.ts test seam BEFORE any binding/network fetch.
+        serviceBindings: {
+          IDENTITY: () =>
+            new Response(JSON.stringify({ valid: false }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+        },
       },
     }),
   ],
