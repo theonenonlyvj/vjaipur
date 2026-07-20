@@ -42,8 +42,13 @@ describe('tiers: historical id coverage', () => {
 })
 
 describe('tiers: active picker lineup', () => {
+  // 2026-07-20 lineup rework: hardAi2 ('hard2') replaces fairBot ('fair') as
+  // the active "Hard" — it already beat fairBot 82% head-to-head and, with
+  // the endgame-tactics + ~1500ms-budget fixes from this rework, plays the
+  // closing moves correctly too. fairBot is retired (still resolvable, still
+  // fully functional under its old id — just off the picker).
   it('is exactly the 4 active tiers, in picker order', () => {
-    expect(ACTIVE_TIERS.map((t) => t.id)).toEqual(['easy', 'medium', 'fair', 'hard3'])
+    expect(ACTIVE_TIERS.map((t) => t.id)).toEqual(['easy', 'medium', 'hard2', 'hard3'])
   })
 
   it('none of the active tiers are marked retired', () => {
@@ -54,11 +59,11 @@ describe('tiers: active picker lineup', () => {
     expect(ACTIVE_TIERS.map((t) => t.pickerOrder)).toEqual([1, 2, 3, 4])
   })
 
-  it('labels: Easy, Medium, Hard (fairBot), Omniscient Bot (hardAi3)', () => {
+  it('labels: Easy, Medium, Hard (hardAi2), Omniscient Bot (hardAi3)', () => {
     const byId = Object.fromEntries(ACTIVE_TIERS.map((t) => [t.id, t.label]))
     expect(byId.easy).toBe('Easy')
     expect(byId.medium).toBe('Medium')
-    expect(byId.fair).toBe('Hard')
+    expect(byId.hard2).toBe('Hard')
     expect(byId.hard3).toBe('Omniscient Bot')
   })
 
@@ -68,24 +73,24 @@ describe('tiers: active picker lineup', () => {
 })
 
 describe('tiers: retired tiers stay resolvable but out of the picker', () => {
-  it('hard and hard2 are marked retired with null pickerOrder', () => {
+  it('hard and fair are marked retired with null pickerOrder', () => {
     const hard = getTier('hard')!
-    const hard2 = getTier('hard2')!
+    const fair = getTier('fair')!
     expect(hard.retired).toBe(true)
     expect(hard.pickerOrder).toBeNull()
-    expect(hard2.retired).toBe(true)
-    expect(hard2.pickerOrder).toBeNull()
+    expect(fair.retired).toBe(true)
+    expect(fair.pickerOrder).toBeNull()
   })
 
   it('retired tiers are excluded from ACTIVE_TIERS', () => {
     const activeIds = ACTIVE_TIERS.map((t) => t.id)
     expect(activeIds).not.toContain('hard')
-    expect(activeIds).not.toContain('hard2')
+    expect(activeIds).not.toContain('fair')
   })
 
   it('retired ids still resolve to a "Classic" label', () => {
     expect(getTierLabel('hard')).toBe('Hard (Classic)')
-    expect(getTierLabel('hard2')).toBe('Hard II (Classic)')
+    expect(getTierLabel('fair')).toBe('Hard (FairBot, Classic)')
   })
 })
 

@@ -7,11 +7,12 @@
 // renamed or retired from the picker, or historical stats rows silently
 // stop resolving to a name. Only `label`/`tagline` may change over time.
 //
-// "Retired" tiers (old MCTS hardAi / hardAi2) are removed from the active
+// "Retired" tiers (old MCTS hardAi, fairBot) are removed from the active
 // picker but keep a full entry here so any UI (StatsDashboard, GameOverScreen,
 // etc.) can still render a name for historical matches played against them.
-// Their engine/worker files (hardAi.ts, hardAi2.ts, aiWorker.ts, aiWorker2.ts)
-// are untouched — only their presence in the picker changed.
+// Their engine/worker files (hardAi.ts, fairBot.ts, aiWorker.ts,
+// fairBotWorker.ts) are untouched — only their presence in the picker
+// changed.
 
 export type TierId = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3' | 'fair'
 
@@ -44,12 +45,18 @@ export const TIERS: Tier[] = [
     retired: false,
   },
   {
-    // Engine: fairBot (src/ai/fairBot.ts, via fairBotWorker). No hidden
-    // information — it tracks the opponent's hand the honest way, the same
-    // information a sharp human opponent would have. This is the new "Hard".
-    id: 'fair',
+    // Engine: hardAi2 (src/ai/hardAi2.ts, via aiWorker2). FAIR determinization
+    // + alpha-beta search — reconstructs a plausible opponent hand from only
+    // public info (revealedHands), never reads the true hidden hand or deck
+    // order. This is the active "Hard" as of the 2026-07-20 lineup rework:
+    // hardAi2 already beat the previous "Hard" (fairBot) 82% head-to-head and
+    // runs in a tightened ~1500ms budget (vs fairBot's old 7-12s); it also
+    // picked up fairBot's/hardAi3's endgame tactics it was missing (locking a
+    // round-ending sell while ahead, avoiding one while behind, camel-majority
+    // swings, selling before a known opponent threat drains a pile).
+    id: 'hard2',
     label: 'Hard',
-    tagline: 'No peeking. Pure skill.',
+    tagline: 'No peeking. Reads the odds. Genuinely tough.',
     pickerOrder: 3,
     retired: false,
   },
@@ -74,9 +81,13 @@ export const TIERS: Tier[] = [
     retired: true,
   },
   {
-    // Retired 2026-07-18 lineup rework: "Hard II" (hardAi2.ts / aiWorker2.ts).
-    id: 'hard2',
-    label: 'Hard II (Classic)',
+    // Retired 2026-07-20 lineup rework: fairBot (src/ai/fairBot.ts, via
+    // fairBotWorker) — the "Hard" from the 2026-07-18 rework — was replaced
+    // as the active "Hard" by hardAi2 (see above): fairBot was fair but slow
+    // (7-12s think time) and measurably weaker head-to-head (~18% win rate
+    // vs hardAi2 pre-fix). Code and worker untouched, just off the picker.
+    id: 'fair',
+    label: 'Hard (FairBot, Classic)',
     tagline: '',
     pickerOrder: null,
     retired: true,

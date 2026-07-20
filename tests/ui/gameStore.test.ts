@@ -183,11 +183,13 @@ describe('aiThinking', () => {
   })
 })
 
-// Tier-lineup rework (2026-07-18): 'Hard' in the picker is now the fairBot
-// engine and 'Omniscient Bot' is hardAi3 — both ids ('fair' and 'hard3')
-// already existed as engine ids and were routed in runAi; these tests pin
-// down that each difficulty id talks to its OWN worker bridge and no other,
-// so a mislabeled routing change can't silently swap engines.
+// Tier-lineup rework (2026-07-20): 'Hard' in the picker is now the hardAi2
+// engine (id 'hard2' — it already existed as a routed engine id, previously
+// labeled "Hard II (Classic)" and off the picker; the rework gave it endgame
+// tactics + a tightened budget and promoted it to the active "Hard", retiring
+// fairBot/'fair') and 'Omniscient Bot' is still hardAi3 ('hard3'). These
+// tests pin down that each difficulty id talks to its OWN worker bridge and
+// no other, so a mislabeled routing change can't silently swap engines.
 describe('AI tier routing: engine id -> worker bridge', () => {
   afterEach(() => {
     setWorkerBridge(null)
@@ -205,7 +207,25 @@ describe('AI tier routing: engine id -> worker bridge', () => {
     return bridge
   }
 
-  it("difficulty 'fair' (picker label \"Hard\") routes to the fairBot worker bridge only", async () => {
+  it("difficulty 'hard2' (picker label \"Hard\") routes to worker bridge 2 only", async () => {
+    const calls: string[] = []
+    setWorkerBridge(trackingBridge('hard', calls))
+    setWorkerBridge2(trackingBridge('hard2', calls))
+    setWorkerBridge3(trackingBridge('hard3', calls))
+    setFairBotWorkerBridge(trackingBridge('fair', calls))
+
+    useGameStore.setState({ difficulty: 'hard2', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toEqual(['hard2'])
+  })
+
+  it("retired difficulty 'fair' (formerly picker label \"Hard\") still routes to the fairBot worker bridge only", async () => {
     const calls: string[] = []
     setWorkerBridge(trackingBridge('hard', calls))
     setWorkerBridge2(trackingBridge('hard2', calls))
