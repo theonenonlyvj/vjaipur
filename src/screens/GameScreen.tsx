@@ -187,7 +187,6 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
           {' · '}
           P2 {'★'.repeat(state.seals[1])}{'☆'.repeat((Math.floor(matchLength / 2) + 1) - state.seals[1])}
         </span>
-        <span>Deck: {state.deck.length}</span>
         {!frozen && (
           <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             {mode === 'online' && (
@@ -223,8 +222,13 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       <TokenRail tokens={state.tokens} bonusTokens={state.bonusTokens} />
 
       <div>
-        <div style={{ fontSize: 11, color: '#888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Market
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
+            Market
+          </span>
+          <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
+            Deck: {state.deck.length}
+          </span>
         </div>
         <MarketRow
           market={state.market}
