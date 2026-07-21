@@ -173,7 +173,8 @@ export function emitPlayersSql(supabasePlayers, now = 0) {
     const accountId = p.vgames_account_id
     const name = p.display_name
     if (!accountId || seen.has(accountId)) continue
-    if (!name || String(name).startsWith('Guest_')) continue // skip anonymous ghosts
+    if (!name) continue // only skip rows with no name at all; keep Guest_* so the
+    // leaderboard shows "Guest_1234" instead of the generic "Player" fallback
     seen.add(accountId)
     lines.push(
       `INSERT INTO players (account_id, display_name, last_seen_at) VALUES (${sqlEscape(accountId)}, ${sqlEscape(name)}, ${sqlEscape(now)}) ` +
