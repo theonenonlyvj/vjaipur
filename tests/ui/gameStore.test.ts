@@ -7,6 +7,7 @@ import {
   setWorkerBridge2,
   setWorkerBridge3,
   setFairBotWorkerBridge,
+  setIsmctsWorkerBridge,
   WorkerBridge,
 } from '../../src/ai/workerBridge'
 
@@ -196,6 +197,7 @@ describe('AI tier routing: engine id -> worker bridge', () => {
     setWorkerBridge2(null)
     setWorkerBridge3(null)
     setFairBotWorkerBridge(null)
+    setIsmctsWorkerBridge(null)
   })
 
   function trackingBridge(name: string, calls: string[]): WorkerBridge {
@@ -213,6 +215,7 @@ describe('AI tier routing: engine id -> worker bridge', () => {
     setWorkerBridge2(trackingBridge('hard2', calls))
     setWorkerBridge3(trackingBridge('hard3', calls))
     setFairBotWorkerBridge(trackingBridge('fair', calls))
+    setIsmctsWorkerBridge(trackingBridge('ismcts', calls))
 
     useGameStore.setState({ difficulty: 'hard2', aiThinking: false })
     useGameStore.getState().startGame('vs-ai')
@@ -223,6 +226,25 @@ describe('AI tier routing: engine id -> worker bridge', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(calls).toEqual(['hard2'])
+  })
+
+  it("difficulty 'ismcts' (picker label \"Hard (ISMCTS)\") routes to the ismcts worker bridge only", async () => {
+    const calls: string[] = []
+    setWorkerBridge(trackingBridge('hard', calls))
+    setWorkerBridge2(trackingBridge('hard2', calls))
+    setWorkerBridge3(trackingBridge('hard3', calls))
+    setFairBotWorkerBridge(trackingBridge('fair', calls))
+    setIsmctsWorkerBridge(trackingBridge('ismcts', calls))
+
+    useGameStore.setState({ difficulty: 'ismcts', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const state = useGameStore.getState().state!
+    const actions = getLegalActions(state)
+    useGameStore.getState().dispatch(actions[0])
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toEqual(['ismcts'])
   })
 
   it("retired difficulty 'fair' (formerly picker label \"Hard\") still routes to the fairBot worker bridge only", async () => {

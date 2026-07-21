@@ -3,7 +3,7 @@ import type { GameState, Action, EngineError, Card, PlayerState, Phase } from '.
 import { applyAction, setupRound, scoreRound, Errors } from '../engine'
 import { pickEasyAction } from '../ai/easyAi'
 import { pickMediumAction } from '../ai/mediumAi'
-import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3, getFairBotWorkerBridge } from '../ai/workerBridge'
+import { getWorkerBridge, getWorkerBridge2, getWorkerBridge3, getFairBotWorkerBridge, getIsmctsWorkerBridge } from '../ai/workerBridge'
 import { soundService } from '../audio/soundService'
 import { useStatsStore } from './statsStore'
 import { type TierId, DEFAULT_TIER_ID } from '../ai/tiers'
@@ -289,10 +289,11 @@ function runAi(
   set: (partial: Partial<GameStore>) => void,
   get: () => GameStore,
 ) {
-  if (difficulty === 'hard' || difficulty === 'hard2' || difficulty === 'hard3' || difficulty === 'fair') {
+  if (difficulty === 'hard' || difficulty === 'hard2' || difficulty === 'ismcts' || difficulty === 'hard3' || difficulty === 'fair') {
     const bridge =
       difficulty === 'fair' ? getFairBotWorkerBridge() :
       difficulty === 'hard3' ? getWorkerBridge3() :
+      difficulty === 'ismcts' ? getIsmctsWorkerBridge() :
       difficulty === 'hard2' ? getWorkerBridge2() :
       getWorkerBridge()
 

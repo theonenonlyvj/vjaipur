@@ -90,6 +90,25 @@ export function setWorkerBridge3(bridge: WorkerBridge | null): void {
   _bridge3 = bridge
 }
 
+let _bridgeIsmcts: WorkerBridge | null = null
+
+export function getIsmctsWorkerBridge(): WorkerBridge {
+  if (!_bridgeIsmcts) {
+    _bridgeIsmcts = new WorkerBridge(
+      // @ts-ignore
+      () => new Worker(new URL('./ismctsWorker.ts', import.meta.url), { type: 'module' }),
+      5000,  // ismctsBot's own think budget is 3000ms (DEFAULT_BUDGET_MS in ismctsBot.ts) —
+             // 5000ms leaves comfortable headroom for worker spin-up/postMessage overhead so
+             // a legitimate in-budget move is never killed by this timeout.
+    )
+  }
+  return _bridgeIsmcts
+}
+
+export function setIsmctsWorkerBridge(bridge: WorkerBridge | null): void {
+  _bridgeIsmcts = bridge
+}
+
 let _bridgeFair: WorkerBridge | null = null
 
 export function getFairBotWorkerBridge(): WorkerBridge {

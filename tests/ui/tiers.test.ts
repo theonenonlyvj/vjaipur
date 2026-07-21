@@ -13,7 +13,7 @@ import {
 // (see gameStore.ts Difficulty union / runAi). These must ALWAYS resolve to
 // a label, even after being retired from the picker, so historical stats
 // rows never go nameless.
-const HISTORICAL_IDS = ['easy', 'medium', 'hard', 'hard2', 'hard3', 'fair']
+const HISTORICAL_IDS = ['easy', 'medium', 'hard', 'hard2', 'ismcts', 'hard3', 'fair']
 
 describe('tiers: historical id coverage', () => {
   it('every historical opponent_type id has a TIERS entry', () => {
@@ -47,8 +47,12 @@ describe('tiers: active picker lineup', () => {
   // the endgame-tactics + ~1500ms-budget fixes from this rework, plays the
   // closing moves correctly too. fairBot is retired (still resolvable, still
   // fully functional under its old id — just off the picker).
-  it('is exactly the 4 active tiers, in picker order', () => {
-    expect(ACTIVE_TIERS.map((t) => t.id)).toEqual(['easy', 'medium', 'hard2', 'hard3'])
+  //
+  // 2026-07-21 lineup addition: ismctsBot ('ismcts') ships ALONGSIDE hardAi2
+  // as its own "Hard (ISMCTS)" tier for an A/B, slotted between "Hard" and
+  // "Omniscient Bot". hardAi2 is untouched.
+  it('is exactly the 5 active tiers, in picker order', () => {
+    expect(ACTIVE_TIERS.map((t) => t.id)).toEqual(['easy', 'medium', 'hard2', 'ismcts', 'hard3'])
   })
 
   it('none of the active tiers are marked retired', () => {
@@ -56,14 +60,15 @@ describe('tiers: active picker lineup', () => {
   })
 
   it('active tiers have increasing pickerOrder starting at 1', () => {
-    expect(ACTIVE_TIERS.map((t) => t.pickerOrder)).toEqual([1, 2, 3, 4])
+    expect(ACTIVE_TIERS.map((t) => t.pickerOrder)).toEqual([1, 2, 3, 4, 5])
   })
 
-  it('labels: Easy, Medium, Hard (hardAi2), Omniscient Bot (hardAi3)', () => {
+  it('labels: Easy, Medium, Hard (hardAi2), Hard (ISMCTS), Omniscient Bot (hardAi3)', () => {
     const byId = Object.fromEntries(ACTIVE_TIERS.map((t) => [t.id, t.label]))
     expect(byId.easy).toBe('Easy')
     expect(byId.medium).toBe('Medium')
     expect(byId.hard2).toBe('Hard')
+    expect(byId.ismcts).toBe('Hard (ISMCTS)')
     expect(byId.hard3).toBe('Omniscient Bot')
   })
 
