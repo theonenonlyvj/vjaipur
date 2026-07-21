@@ -2,7 +2,7 @@ import { GameDO, type Env } from './game-do'
 import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
-import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, type ReportMatchBody } from './do/stats'
+import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, touchPlayerLastSeen, type ReportMatchBody } from './do/stats'
 
 // Cloudflare resolves the Durable Object class from the entry module's exports.
 export { GameDO }
@@ -186,10 +186,15 @@ async function handleResolve(request: Request, env: Env): Promise<Response> {
 type MyGamesRow = { code: string; status: string; match_length: number; last_activity_at: number | null; seat_index: number }
 
 /** `GET /my-games` (authed) — the caller's active+waiting games, newest
- *  first. */
-async function handleMyGames(request: Request, env: Env): Promise<Response> {
+ *  first. Also a good "this account is active right now" signal (a chunk of
+ *  a session is spent polling this) — stamps `players.last_seen_at` via
+ *  `ctx.waitUntil` so the D1 write can never block or fail this response
+ *  (`touchPlayerLastSeen` is itself best-effort/never-throws on top of that). */
+async function handleMyGames(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
+
+  ctx.waitUntil(touchPlayerLastSeen(env.DB, auth.accountId, Date.now()))
 
   const { results } = await env.DB.prepare(
     `SELECT g.code AS code, g.status AS status, g.match_length AS match_length,
@@ -244,8 +249,10 @@ function forwardToGame(request: Request, url: URL, env: Env): Response | Promise
  * applies CORS to it. A WebSocket-upgrade response (101) is detected via
  * `.webSocket` by the wrapper and passed through WITHOUT CORS (the WS
  * handshake is not a CORS-governed fetch, and a 101's headers are immutable).
+ * `ctx` is threaded through only for handlers that need `waitUntil` (today,
+ * just `/my-games`'s best-effort last_seen_at stamp).
  */
-async function route(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname
 
@@ -253,7 +260,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   if (request.method === 'POST' && path === '/games') return handleCreateGame(request, env)
   if (request.method === 'GET' && path === '/resolve') return handleResolve(request, env)
-  if (request.method === 'GET' && path === '/my-games') return handleMyGames(request, env)
+  if (request.method === 'GET' && path === '/my-games') return handleMyGames(request, env, ctx)
 
   const forwarded = forwardToGame(request, url, env)
   if (forwarded) return forwarded
@@ -299,7 +306,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // CORS preflight first — answer OPTIONS for EVERY route (incl. authed
     // ones) before anything else, so a browser can complete the real request
     // (which then carries CORS on its own success/error response).
@@ -316,7 +323,7 @@ export default {
       }
     }
 
-    const response = await route(request, env)
+    const response = await route(request, env, ctx)
     // The WebSocket-upgrade response (101) is exempt from CORS and its
     // headers are immutable — pass it straight through.
     if (response.webSocket) return response

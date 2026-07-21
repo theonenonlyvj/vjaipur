@@ -413,6 +413,64 @@ describe('reportMatch', () => {
 })
 
 // =============================================================================
+// reportMatch — players.last_seen_at stamp
+// =============================================================================
+//
+// `players.last_seen_at` used to be write-once (the migration seed value) —
+// nothing ever updated it after a vs-AI report, so it never reflected real
+// activity for a local-only player (their only server touch is match-end).
+// These tests pin down: (1) a report stamps it close to "now" even with no
+// prior `players` row, (2) a SUBSEQUENT report UPDATES an existing (possibly
+// stale) value rather than leaving it untouched, and (3) doing so NEVER
+// clobbers an already-set `display_name` to a placeholder — `reportMatch`
+// only ever has `accountId` in hand, never a display name, so the UPSERT must
+// leave `display_name` alone on conflict.
+
+async function seedStalePlayer(accountId: string, displayName: string, lastSeenAt: number): Promise<void> {
+  await DB().prepare(`INSERT INTO players (account_id, display_name, last_seen_at) VALUES (?, ?, ?)`).bind(accountId, displayName, lastSeenAt).run()
+}
+
+describe('reportMatch — players.last_seen_at stamp', () => {
+  it('stamps players.last_seen_at close to now after a report (fresh account, no prior players row)', async () => {
+    const a = acct('report-last-seen-fresh')
+    const before = Date.now()
+
+    const result = await reportMatch(DB(), a, { opponent_type: 'medium', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now() })
+    expect(result).toEqual({ ok: true })
+
+    const row = await DB().prepare(`SELECT last_seen_at FROM players WHERE account_id = ?`).bind(a).first<{ last_seen_at: number }>()
+    expect(row).toBeTruthy()
+    expect(Number(row!.last_seen_at)).toBeGreaterThanOrEqual(before)
+    expect(Number(row!.last_seen_at)).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('a report UPDATES an existing (stale) last_seen_at — not just an insert-once', async () => {
+    const a = acct('report-last-seen-update')
+    const stale = Date.now() - 10_000_000
+    await seedStalePlayer(a, 'Stale Name', stale)
+
+    const before = Date.now()
+    await reportMatch(DB(), a, { opponent_type: 'easy', player_score: 5, opponent_score: 1, won: true, timestamp: Date.now() })
+
+    const row = await DB().prepare(`SELECT last_seen_at FROM players WHERE account_id = ?`).bind(a).first<{ last_seen_at: number }>()
+    expect(Number(row!.last_seen_at)).toBeGreaterThan(stale)
+    expect(Number(row!.last_seen_at)).toBeGreaterThanOrEqual(before)
+  })
+
+  it('does NOT clobber display_name to a placeholder when last_seen_at updates for an already-named account', async () => {
+    const a = acct('report-preserve-name')
+    const stale = Date.now() - 10_000_000
+    await seedStalePlayer(a, 'Real Name', stale)
+
+    await reportMatch(DB(), a, { opponent_type: 'easy', player_score: 5, opponent_score: 1, won: true, timestamp: Date.now() })
+
+    const row = await DB().prepare(`SELECT display_name, last_seen_at FROM players WHERE account_id = ?`).bind(a).first<{ display_name: string; last_seen_at: number }>()
+    expect(row?.display_name).toBe('Real Name') // never clobbered to 'Player' or NULL
+    expect(Number(row!.last_seen_at)).toBeGreaterThan(stale) // but last_seen_at DID update
+  })
+})
+
+// =============================================================================
 // getRollup — STATS-FEDERATION v0 contract
 // =============================================================================
 

@@ -221,6 +221,32 @@ describe('GET /health', () => {
 })
 
 // =============================================================================
+// GET /my-games — best-effort players.last_seen_at "active now" stamp
+// =============================================================================
+//
+// The lobby "your games" poll is a good "this account is active right now"
+// signal — a good chunk of a session is spent polling it. It should stamp
+// `players.last_seen_at`, but ONLY best-effort: a D1 hiccup on the stamp must
+// never fail or delay the actual /my-games response.
+
+describe('GET /my-games — best-effort last_seen_at stamp', () => {
+  it("stamps the caller's players.last_seen_at without changing the response shape/status", async () => {
+    const acctId = uniqueName('acct-mygames-lastseen')
+    const token = `test:${acctId}:MyGamesUser`
+    const before = Date.now()
+
+    const res = await SELF.fetch(req('/my-games', { token, method: 'GET' }))
+    expect(res.status).toBe(200)
+    const body = await readJson(res)
+    expect(Array.isArray(body.games)).toBe(true)
+
+    const row = await DB().prepare(`SELECT last_seen_at FROM players WHERE account_id = ?`).bind(acctId).first<{ last_seen_at: number }>()
+    expect(row).toBeTruthy()
+    expect(Number(row!.last_seen_at)).toBeGreaterThanOrEqual(before)
+  })
+})
+
+// =============================================================================
 // WebSocket passthrough
 // =============================================================================
 

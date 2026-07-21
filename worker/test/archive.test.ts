@@ -562,6 +562,33 @@ describe('archiveMatchEnd', () => {
     expect(Number(bob.ai_covered)).toBe(0)
   })
 
+  it("stamps BOTH human seats' players.last_seen_at at match end (a real 'they just finished a game' signal, distinct from create/join-time touches)", async () => {
+    const stub = stubFor('archive-match-end-last-seen')
+    const code = `LS${crypto.randomUUID().slice(0, 4)}`
+    const t0 = Date.now()
+    let gameUuid = ''
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
+      repo.putMeta(baseMeta({ code, status: 'active' }))
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-ls-alice', display_name: 'Alice' }))
+      repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-ls-bob', display_name: 'Bob' }))
+      gameUuid = repo.getMeta()!.game_uuid
+      await archiveGameCreate(DB(), repo, t0, code) // already stamps last_seen_at = t0 at CREATE time
+
+      repo.putMeta({ ...repo.getMeta()!, status: 'completed', phase: 'match_over', winner_seat: 0 })
+
+      // Match-end happens well after create — assert archiveMatchEnd itself
+      // (not just the earlier create-time touch) advances last_seen_at.
+      await archiveMatchEnd(DB(), repo, t0 + 3_600_000)
+    })
+
+    const alice = await DB().prepare(`SELECT last_seen_at FROM players WHERE account_id = ?`).bind('acct-ls-alice').first<any>()
+    const bob = await DB().prepare(`SELECT last_seen_at FROM players WHERE account_id = ?`).bind('acct-ls-bob').first<any>()
+    expect(Number(alice.last_seen_at)).toBe(t0 + 3_600_000)
+    expect(Number(bob.last_seen_at)).toBe(t0 + 3_600_000)
+  })
+
   it('is a no-op when winner_seat is null (e.g. an abandoned game) — no matches row for either seat', async () => {
     const stub = stubFor('archive-match-end-abandoned')
     const code = `AB${crypto.randomUUID().slice(0, 4)}`

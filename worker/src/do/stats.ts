@@ -216,6 +216,37 @@ function isSaneScore(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 500
 }
 
+/**
+ * Best-effort `players.last_seen_at` stamp for an account we've just seen
+ * demonstrably active (a vs-AI report, an authed `/my-games` poll — see call
+ * sites). Only `last_seen_at` is ever written on conflict: this function
+ * never has a real display name in hand (only `accountId`), so it must NEVER
+ * clobber an existing `display_name` to a placeholder. On a genuinely new
+ * account (no prior `players` row) the insert seeds `display_name = NULL`,
+ * which every reader already treats as "no name yet" (`COALESCE(...,
+ * 'Player')` in `getLeaderboard`/`getRollup`) — a later `archiveGameCreate`/
+ * `archiveSeats`/`archiveMatchEnd` touch fills in the real name once the
+ * account plays online.
+ *
+ * NEVER THROWS (matches `do/archive.ts`'s convention for every D1 write that
+ * must not be allowed to fail its caller's real work): a D1 hiccup here must
+ * never break a match report or block/fail the `/my-games` response.
+ */
+export async function touchPlayerLastSeen(db: D1Database, accountId: string, now: number): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO players (account_id, display_name, last_seen_at)
+         VALUES (?, NULL, ?)
+         ON CONFLICT(account_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+      )
+      .bind(accountId, now)
+      .run()
+  } catch {
+    // best-effort — see docstring.
+  }
+}
+
 /** A sane epoch-ms: an integer between "vjaipur could plausibly have
  *  existed" (2020) and now + 1 day (tolerates modest client clock skew
  *  without accepting garbage far-future values). */
@@ -254,6 +285,13 @@ export async function reportMatch(db: D1Database, accountId: string, body: Repor
     )
     .bind(accountId, body.opponent_type, body.player_score, body.opponent_score, body.won ? 1 : 0, body.timestamp, now)
     .run()
+
+  // A local vs-AI player's ONLY server touch is match-end — stamp
+  // players.last_seen_at here so "who's recently active" means something for
+  // them too, not just online players (who get it from archiveGameCreate/
+  // archiveSeats/archiveMatchEnd). Whether this particular report was new or
+  // a dedup no-op, the account was still just demonstrably active.
+  await touchPlayerLastSeen(db, accountId, now)
 
   const changes = result.meta?.changes ?? 0
   return changes > 0 ? { ok: true } : { ok: true, duplicate: true }

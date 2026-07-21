@@ -382,6 +382,12 @@ export async function archiveMatchEnd(db: D1Database, repo: GameRepository, now:
 
     if (matchStmts.length) await db.batch(matchStmts)
     if (resultStmts.length) await db.batch(resultStmts)
+
+    // Stamp both human seats' players.last_seen_at at the moment their match
+    // actually ended — a real "just finished playing" signal, distinct from
+    // (and often much later than) the create/join-time touches archiveGameCreate/
+    // archiveSeats already do via this same upsertPlayers helper.
+    await upsertPlayers(db, humanSeats, now)
   } catch {
     // D1 hiccup: the DO's own match-end state already committed — never
     // stall/fail on the stats write. `archiveTick`'s terminal-status
