@@ -171,6 +171,80 @@ describe('statsStore', () => {
       expect(useStatsStore.getState().pendingReports).toHaveLength(1)
       expect(useStatsStore.getState().pendingReports[0]).toMatchObject(matchData)
     })
+
+    describe('with an aiGameLog (per-move logging — src/store/aiGameLog.ts)', () => {
+      const logEntry = {
+        ply: 1,
+        round: 1,
+        actor: 'human' as const,
+        tier: 'easy' as const,
+        action: { type: 'TAKE_CAMELS' as const },
+        preState: {
+          mkt: ['diamond'], h0: ['gold'], h1: ['silver'], herd: [0, 0] as [number, number], deck: 10,
+          tok: [[7, 7, 5, 5, 5]], bonus: [7, 6, 5] as [number, number, number], score: [0, 0] as [number, number], seals: [0, 0] as [number, number],
+        },
+      }
+
+      it('sends the log as a JSON string on the `log` field of the report body', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-log', accountId: 'vg-acc-log' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchData, [logEntry])
+
+        const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
+        expect(typeof payload.log).toBe('string')
+        expect(JSON.parse(payload.log)).toEqual([logEntry])
+      })
+
+      it('omits the `log` field entirely when no log is passed (e.g. a non-vs-ai report, or a pendingReports retry)', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-nolog', accountId: 'vg-acc-nolog' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchData)
+
+        const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
+        expect(payload.log).toBeUndefined()
+      })
+
+      it('omits the `log` field when passed an empty array', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-empty', accountId: 'vg-acc-empty' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchData, [])
+
+        const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
+        expect(payload.log).toBeUndefined()
+      })
+
+      it('size-caps the log before sending: an oversized log still reports, with preState stripped from the oldest entries', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-big', accountId: 'vg-acc-big' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        // Fabricate a log whose full JSON clears 250KB, forcing the client
+        // cap (capLogForReport's default budget) to strip the oldest entries.
+        const bigLog = Array.from({ length: 1500 }, (_, i) => ({ ...logEntry, ply: i + 1 }))
+        const fullSize = JSON.stringify(bigLog).length
+        expect(fullSize).toBeGreaterThan(250_000) // sanity: this really does exceed the client budget
+
+        await useStatsStore.getState().addMatch(matchData, bigLog)
+
+        const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
+        expect(payload.log.length).toBeLessThan(fullSize)
+        const parsed = JSON.parse(payload.log)
+        expect(parsed).toHaveLength(1500) // never DROPS entries, only lightens them
+        expect(parsed[0].preState).toBeUndefined() // oldest stripped first
+        expect(parsed[parsed.length - 1].preState).toBeDefined() // newest survives intact
+      })
+
+      it('does not persist the log into the local `matches`/`pendingReports` history (only sent on this one report)', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-persist', accountId: 'vg-acc-persist' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchData, [logEntry])
+
+        expect(useStatsStore.getState().matches[0]).not.toHaveProperty('log')
+      })
+    })
   })
 
   describe('retryPendingReports', () => {

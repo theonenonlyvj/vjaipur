@@ -198,6 +198,12 @@ export type ReportMatchBody = {
   opponent_score?: unknown
   won?: unknown
   timestamp?: unknown
+  /** Optional per-move play-by-play (src/store/aiGameLog.ts's
+   *  capLogForReport output) — an already-JSON-stringified, client-capped
+   *  array. Independently validated by `isValidLogString` below; anything
+   *  malformed/oversized is silently skipped (never fails the match
+   *  report — see this function's docstring). */
+  log?: unknown
 }
 
 export type ReportMatchResult = { ok: true; duplicate?: true } | { error: string }
@@ -257,6 +263,55 @@ function isSaneTimestamp(ts: unknown): ts is number {
   return ts >= MIN && ts <= MAX
 }
 
+/** Client-side (src/store/aiGameLog.ts#capLogForReport) targets ~250KB; this
+ *  is deliberately a bit more permissive so ordinary client-side rounding/
+ *  drift near the boundary never gets rejected here for no real reason. */
+const MAX_LOG_BYTES = 300_000
+
+/**
+ * `body.log`, if present, must be a JSON-STRING (the client sends it
+ * pre-stringified — see capLogForReport) that decodes to an array, within
+ * the byte budget. `.length` on the string doubles as the byte count for the
+ * same reason it does client-side: every field the client ever emits into
+ * this string is ASCII. Anything else (wrong type, too big, not valid JSON,
+ * or valid JSON that isn't an array) returns `null` — the caller's contract
+ * is to skip storing the log WITHOUT failing the match report over it.
+ */
+function isValidLogString(raw: unknown): raw is string {
+  if (typeof raw !== 'string') return false
+  if (raw.length === 0 || raw.length > MAX_LOG_BYTES) return false
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Best-effort `match_logs` insert alongside a freshly-recorded (non-
+ * duplicate) `matches` row — see `reportMatch`'s docstring for the dedup and
+ * skip-don't-fail contract. NEVER THROWS: a D1 hiccup here must never turn a
+ * successful match report into a failure.
+ */
+async function insertMatchLog(
+  db: D1Database,
+  accountId: string,
+  opponentType: string,
+  timestamp: number,
+  log: string,
+  now: number,
+): Promise<void> {
+  try {
+    await db
+      .prepare(`INSERT INTO match_logs (account_id, opponent_type, timestamp, log, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(accountId, opponentType, timestamp, log, now)
+      .run()
+  } catch {
+    // best-effort — see docstring.
+  }
+}
+
 /**
  * `POST /stats/report` — a client-reported LOCAL vs-AI match (tier ids only;
  * NOT for online games, which are archived server-side by
@@ -266,6 +321,14 @@ function isSaneTimestamp(ts: unknown): ts is number {
  * `verified` split). Dedup via the `matches` UNIQUE(account_id, timestamp,
  * opponent_type) index, so a retried POST (same client-minted `timestamp`)
  * is a safe no-op.
+ *
+ * `body.log`, if present and valid (`isValidLogString`), is stored alongside
+ * in `match_logs` — the per-move play-by-play AI tuning reads directly from
+ * D1 (no API endpoint). An invalid/oversized/garbage log is silently
+ * skipped: it NEVER fails the match report itself. A duplicate `matches`
+ * insert (retried POST) also skips the log insert — there's nothing new to
+ * log, and it would otherwise create a second orphaned log row for the same
+ * match.
  */
 export async function reportMatch(db: D1Database, accountId: string, body: ReportMatchBody): Promise<ReportMatchResult> {
   if (!isValidTierId(body.opponent_type)) return { error: 'invalid_opponent_type' }
@@ -286,6 +349,11 @@ export async function reportMatch(db: D1Database, accountId: string, body: Repor
     .bind(accountId, body.opponent_type, body.player_score, body.opponent_score, body.won ? 1 : 0, body.timestamp, now)
     .run()
 
+  const isDuplicateMatch = (result.meta?.changes ?? 0) === 0
+  if (!isDuplicateMatch && isValidLogString(body.log)) {
+    await insertMatchLog(db, accountId, body.opponent_type, body.timestamp, body.log, now)
+  }
+
   // A local vs-AI player's ONLY server touch is match-end — stamp
   // players.last_seen_at here so "who's recently active" means something for
   // them too, not just online players (who get it from archiveGameCreate/
@@ -293,8 +361,7 @@ export async function reportMatch(db: D1Database, accountId: string, body: Repor
   // a dedup no-op, the account was still just demonstrably active.
   await touchPlayerLastSeen(db, accountId, now)
 
-  const changes = result.meta?.changes ?? 0
-  return changes > 0 ? { ok: true } : { ok: true, duplicate: true }
+  return isDuplicateMatch ? { ok: true, duplicate: true } : { ok: true }
 }
 
 // ---- rollup (public, cross-game federation contract) ----------------------------

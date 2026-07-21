@@ -311,3 +311,138 @@ describe('AI tier routing: engine id -> worker bridge', () => {
     expect(useGameStore.getState().difficulty).not.toBe('Omniscient Bot')
   })
 })
+
+// Per-move GAME LOGGING for local vs-AI matches (src/store/aiGameLog.ts) —
+// captures the play-by-play so AI-tuning can analyze real human-vs-bot games.
+describe('aiGameLog', () => {
+  afterEach(() => {
+    setIsmctsWorkerBridge(null)
+  })
+
+  it('is empty before any match starts', () => {
+    useGameStore.setState({ state: null, mode: null, aiGameLog: [] })
+    expect(useGameStore.getState().aiGameLog).toEqual([])
+  })
+
+  it('resets to empty on every startGame call, including a fresh vs-ai match after a prior one logged moves', () => {
+    useGameStore.setState({ difficulty: 'easy' })
+    useGameStore.getState().startGame('vs-ai')
+    const state = useGameStore.getState().state!
+    useGameStore.getState().dispatch(getLegalActions(state)[0])
+    expect(useGameStore.getState().aiGameLog.length).toBeGreaterThan(0)
+
+    useGameStore.getState().startGame('vs-ai')
+    expect(useGameStore.getState().aiGameLog).toEqual([])
+  })
+
+  it('does NOT log moves in local mode (no AI opponent)', () => {
+    useGameStore.setState({ difficulty: 'easy' })
+    useGameStore.getState().startGame('local')
+    const state = useGameStore.getState().state!
+    useGameStore.getState().dispatch(getLegalActions(state)[0])
+    expect(useGameStore.getState().aiGameLog).toEqual([])
+  })
+
+  it('logs the human dispatch AND the AI applied action, in order, with ply/round/tier/action captured (sync tier — no worker)', () => {
+    useGameStore.setState({ difficulty: 'easy' })
+    useGameStore.getState().startGame('vs-ai')
+    const before = useGameStore.getState().state!
+    const humanAction = getLegalActions(before)[0]
+
+    useGameStore.getState().dispatch(humanAction)
+
+    const log = useGameStore.getState().aiGameLog
+    expect(log).toHaveLength(2) // human's move, then the AI's reply
+
+    expect(log[0]).toMatchObject({ ply: 1, round: before.round, actor: 'human', tier: 'easy', action: humanAction })
+    expect(log[1]).toMatchObject({ ply: 2, round: before.round, actor: 'ai', tier: 'easy' })
+
+    // preState is the COMPACT (types-only, id-free) snapshot, matching the
+    // state the mover actually saw — not the post-move state.
+    expect(log[0].preState.h0).toHaveLength(before.players[0].hand.length)
+    expect(log[0].preState.h1).toHaveLength(before.players[1].hand.length)
+    expect(log[0].preState.mkt).toEqual(before.market.map((c) => c.type))
+    expect(JSON.stringify(log[0].preState)).not.toMatch(/"id"/)
+  })
+
+  it('routes tier + candidates diagnostics through for the ismcts worker bridge, without altering which action is applied', async () => {
+    useGameStore.setState({ difficulty: 'ismcts', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const chosenAction: Action = { type: 'TAKE_CAMELS' }
+    const candidates = [
+      { action: 'TC', visits: 42, q: 0.31 },
+      { action: 'TS:0', visits: 10, q: 0.1 },
+    ]
+    const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+    mockBridge.getAction = (_data) => {
+      mockBridge.lastDebug = { candidates }
+      return Promise.resolve(chosenAction)
+    }
+    setIsmctsWorkerBridge(mockBridge)
+
+    const before = useGameStore.getState().state!
+    useGameStore.getState().dispatch(getLegalActions(before)[0])
+    // Poll rather than trust a single setTimeout(0) tick — the runAi promise
+    // chain is several .then/.catch links deep, and a single fixed-delay
+    // macrotask can occasionally get squeezed out under heavy parallel test
+    // load. vi.waitFor retries the assertion until it holds (or times out).
+    await vi.waitFor(() => {
+      expect(useGameStore.getState().aiGameLog.length).toBe(2)
+    })
+
+    const log = useGameStore.getState().aiGameLog
+    const aiEntry = log[log.length - 1]
+    expect(aiEntry.actor).toBe('ai')
+    expect(aiEntry.tier).toBe('ismcts')
+    expect(aiEntry.action).toEqual(chosenAction)
+    expect(aiEntry.candidates).toEqual(candidates)
+  })
+
+  it('omits `candidates` entirely for a non-ismcts worker tier (e.g. hard2)', async () => {
+    useGameStore.setState({ difficulty: 'hard2', aiThinking: false })
+    useGameStore.getState().startGame('vs-ai')
+
+    const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+    mockBridge.getAction = () => Promise.resolve({ type: 'TAKE_CAMELS' } as Action)
+    setWorkerBridge2(mockBridge)
+
+    const before = useGameStore.getState().state!
+    useGameStore.getState().dispatch(getLegalActions(before)[0])
+    await vi.waitFor(() => {
+      expect(useGameStore.getState().aiGameLog.length).toBe(2)
+    })
+
+    const log = useGameStore.getState().aiGameLog
+    const aiEntry = log[log.length - 1]
+    expect(aiEntry.actor).toBe('ai')
+    expect(aiEntry.candidates).toBeUndefined()
+    setWorkerBridge2(null)
+  })
+
+  it('caps the log at AI_LOG_MAX_ENTRIES total entries (trims oldest first) over a long synthetic run', () => {
+    useGameStore.setState({ difficulty: 'easy' })
+    useGameStore.getState().startGame('vs-ai')
+    // Directly seed a log at the cap via setState (cheaper/deterministic than
+    // playing 600 real plies) and confirm one more real append still trims —
+    // proving the store's appendAiLogEntry path honors appendCapped rather
+    // than growing the array unbounded.
+    const bulky = Array.from({ length: 600 }, (_, i) => ({
+      ply: i + 1,
+      round: 1,
+      actor: 'human' as const,
+      tier: 'easy' as const,
+      action: { type: 'TAKE_CAMELS' as const },
+      preState: { mkt: [], h0: [], h1: [], herd: [0, 0] as [number, number], deck: 0, tok: [], bonus: [0, 0, 0] as [number, number, number], score: [0, 0] as [number, number], seals: [0, 0] as [number, number] },
+    }))
+    useGameStore.setState({ aiGameLog: bulky })
+
+    const before = useGameStore.getState().state!
+    useGameStore.getState().dispatch(getLegalActions(before)[0])
+
+    const log = useGameStore.getState().aiGameLog
+    expect(log.length).toBe(600)
+    expect(log[0].ply).toBe(3) // oldest 2 dropped (human's + AI's new entries pushed the window forward)
+    expect(log[log.length - 1].ply).toBe(602)
+  })
+})

@@ -187,6 +187,12 @@ export interface ReportMatchBody {
   opponent_score: number
   won: boolean
   timestamp: number
+  /** Optional per-move play-by-play for a local vs-ai match (see
+   *  src/store/aiGameLog.ts's capLogForReport) — an already-JSON-stringified,
+   *  size-capped array. worker/src/do/stats.ts#reportMatch validates it
+   *  independently and simply skips storing it (never fails the report) on
+   *  anything malformed or oversized. */
+  log?: string
 }
 
 export type ReportMatchResult = { ok: true; duplicate?: true }
