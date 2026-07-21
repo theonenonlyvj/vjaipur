@@ -102,7 +102,10 @@ export async function workerFetch<T = unknown>(path: string, opts: WorkerFetchOp
 
     if (res.status === 401 && !reauthed) {
       reauthed = true
-      const account = await useStatsStore.getState().ensureVGamesAccount()
+      // forceRefresh=true: a 401 means our token is invalid/expired, so mint a
+      // FRESH one — never re-hand the cached (expired) token, which would just
+      // 401 again ("Failed to create room").
+      const account = await useStatsStore.getState().ensureVGamesAccount(true)
       if (account) {
         token = account.token
         continue // one retry, immediately, with the fresh token

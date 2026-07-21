@@ -41,7 +41,7 @@ interface StatsState {
 
 interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
-  ensureVGamesAccount: () => Promise<{ token: string; accountId: string } | null>
+  ensureVGamesAccount: (forceRefresh?: boolean) => Promise<{ token: string; accountId: string } | null>
   addMatch: (match: Omit<MatchRecord, 'timestamp'>) => Promise<void>
   /** POST /stats/report for one match now (minting/reusing a VGames token
    *  first). Returns whether it actually landed — never throws. Split out of
@@ -133,9 +133,16 @@ export const useStatsStore = create<StatsStore>()(
       // install resolves to the same VGames account it would have under the
       // old friendCode/secretKey scheme. Never round-trips a plaintext secret
       // to the vjaipur game server itself.
-      ensureVGamesAccount: async () => {
+      ensureVGamesAccount: async (forceRefresh = false) => {
         const { vgamesToken, vgamesAccountId } = get()
-        if (vgamesToken && vgamesAccountId) {
+        // Reuse the cached token UNLESS a caller forces a refresh. workerFetch
+        // passes forceRefresh=true on a 401 — without it, an EXPIRED cached
+        // token would be handed back unchanged, the retry would 401 again, and
+        // the call would fail ("Failed to create room" etc.). Forcing a fresh
+        // vgamesQuick mint self-heals an aged-out token (claimed accounts get
+        // short-lived tokens). The device credential re-auths to the same
+        // account, so identity is preserved.
+        if (!forceRefresh && vgamesToken && vgamesAccountId) {
           return { token: vgamesToken, accountId: vgamesAccountId }
         }
         const { secretKey, displayName } = get().ensureAccount()
