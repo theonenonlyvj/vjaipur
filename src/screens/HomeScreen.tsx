@@ -113,6 +113,14 @@ export function HomeScreen() {
       {showStats && <StatsDashboard onClose={() => setShowStats(false)} />}
       {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
       <StatsStrip onClick={() => setShowStats(true)} />
+
+      <footer style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#777', lineHeight: 1.6 }}>
+        Made by Vijay. Have{' '}
+        <a href="https://theonenonlyvj.github.io/personal-site/contact" target="_blank" rel="noopener noreferrer"
+           style={{ color: '#d0a860', textDecoration: 'underline' }}>feedback</a>? See{' '}
+        <a href="https://theonenonlyvj.github.io/personal-site" target="_blank" rel="noopener noreferrer"
+           style={{ color: '#d0a860', textDecoration: 'underline' }}>my other projects</a>.
+      </footer>
     </div>
   )
 }
