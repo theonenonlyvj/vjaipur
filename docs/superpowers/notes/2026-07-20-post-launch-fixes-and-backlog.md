@@ -67,3 +67,14 @@ Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
 
 ## Status: everything actionable + validated is shipped. The harder-fair-bot is
 ## backlogged pending direction; a few items await Vijay's dashboard actions.
+
+## UPDATE 2026-07-21 — Backlog item 1 RESOLVED: "Hard (ISMCTS)" shipped (c0c04f4)
+Fable-directed rebuild with a genuinely different architecture (single-observer
+ISMCTS: per-iteration determinization from public info, availability-aware UCB1,
+truncated ε-greedy rollouts, exchange pruning, 3s budget). GATE RESULTS:
+**90% (36-4) vs the current Hard · 10-0 vs Medium · 40% (4-6) vs the Omniscient
+cheater · worst move 3.0s · 0 illegal moves · provably fair** (identical-move-
+under-hidden-swap proof test, pinned iterations). Shipped as its own tier
+"Hard (ISMCTS)" ALONGSIDE the untouched Hard so Vijay can A/B and decide which
+survives. (The earlier eval-overhaul attempt that regressed stays reverted.)
+Remaining backlog: Omniscient readability; decommission (held); Blueprint sync.
