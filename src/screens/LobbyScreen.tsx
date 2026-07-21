@@ -3,6 +3,20 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { ProfileIcon } from '../components/ProfileIcon'
 import { ProfileOverlay } from '../components/ProfileOverlay'
+import { WorkerError } from '../net/http'
+
+/** Turn a thrown online error into something actionable instead of a generic
+ *  "Failed to create room" — so a stale-cache/auth issue is diagnosable. */
+function describeOnlineError(e: unknown, fallback: string): string {
+  if (e instanceof WorkerError) {
+    if (e.status === 401) return 'Sign-in expired — fully reload the page (close the tab & reopen) and try again.'
+    if (e.status >= 500) return 'Server hiccup — try again in a moment.'
+    return `${fallback} (${e.code})`
+  }
+  // A network/fetch failure (offline, blocked, or an old cached build hitting a
+  // wrong URL) throws a TypeError, not a WorkerError.
+  return `${fallback} — check your connection, or fully reload the page.`
+}
 
 /** Coarse "Xm/Xh/Xd ago" for the "Your games" resume list. Deliberately
  *  coarse (no seconds) — this is a lobby list, not a live countdown. */
@@ -59,8 +73,8 @@ export function LobbyScreen() {
     setError(null)
     try {
       await joinOnline('create')
-    } catch {
-      setError('Failed to create room')
+    } catch (e) {
+      setError(describeOnlineError(e, 'Failed to create room'))
       disconnectOnline()
     }
   }
@@ -71,8 +85,8 @@ export function LobbyScreen() {
     setError(null)
     try {
       await joinOnline('join', trimmed)
-    } catch {
-      setError('Room not found or full')
+    } catch (e) {
+      setError(describeOnlineError(e, 'Room not found or full'))
       disconnectOnline()
     }
   }
