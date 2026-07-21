@@ -6,6 +6,17 @@ export class WorkerBridge {
   private factory: WorkerFactory
   private timeoutMs: number
 
+  /**
+   * Diagnostics posted ALONGSIDE the most recently resolved action, if any —
+   * only ismctsWorker.ts populates this (its onmessage posts
+   * `{action, debug}` instead of a bare action; see that file's docstring).
+   * Every other worker (aiWorker/aiWorker2/aiWorker3/fairBotWorker) still
+   * posts a bare `Action | null`, so this stays `null` for them. Read
+   * immediately after the `getAction()` promise this call produced resolves
+   * — a later `getAction()` call on the same bridge instance overwrites it.
+   */
+  lastDebug: unknown = null
+
   constructor(factory: WorkerFactory, timeoutMs = 5000) {
     this.factory = factory
     this.timeoutMs = timeoutMs
@@ -20,10 +31,22 @@ export class WorkerBridge {
         reject(new Error('Worker timeout'))
       }, this.timeoutMs)
 
-      worker.onmessage = (e: MessageEvent<Action | null>) => {
+      worker.onmessage = (e: MessageEvent<unknown>) => {
         clearTimeout(timeout)
         worker.terminate()
-        resolve(e.data)
+        const payload = e.data
+        // Distinguish ismctsWorker's `{action, debug}` envelope from every
+        // other worker's bare `Action | null` — safe because a real Action
+        // is discriminated by a `type` field and never carries an `action`
+        // key of its own.
+        if (payload !== null && typeof payload === 'object' && 'action' in (payload as Record<string, unknown>)) {
+          const envelope = payload as { action: Action | null; debug?: unknown }
+          this.lastDebug = envelope.debug ?? null
+          resolve(envelope.action)
+        } else {
+          this.lastDebug = null
+          resolve(payload as Action | null)
+        }
       }
 
       worker.onerror = (e: unknown) => {

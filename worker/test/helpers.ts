@@ -82,6 +82,17 @@ const SCHEMA_STATEMENTS: readonly string[] = [
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_dedup ON matches(account_id, timestamp, opponent_type)`,
   `CREATE INDEX IF NOT EXISTS idx_matches_account ON matches(account_id)`,
+  // Migration 0002 — per-move game logging (worker/migrations/0002_match_logs.sql).
+  `CREATE TABLE IF NOT EXISTS match_logs (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     account_id    TEXT NOT NULL,
+     opponent_type TEXT NOT NULL,
+     timestamp     INTEGER NOT NULL,
+     log           TEXT NOT NULL,
+     created_at    INTEGER NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_mlogs_acct ON match_logs(account_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_mlogs_type ON match_logs(opponent_type)`,
 ]
 
 export async function applyD1Schema(db: D1Database): Promise<void> {

@@ -413,6 +413,119 @@ describe('reportMatch', () => {
 })
 
 // =============================================================================
+// reportMatch — match_logs (per-move game logging, migration 0002)
+// =============================================================================
+//
+// Per-move play-by-play for AI-tuning (src/store/aiGameLog.ts client-side).
+// No read endpoint exists (tuning reads D1 directly) — these tests query
+// `match_logs` straight off the D1 binding, mirroring how a tuning script
+// would.
+
+type MatchLogRow = { id: number; account_id: string; opponent_type: string; timestamp: number; log: string; created_at: number }
+
+async function getMatchLogs(accountId: string): Promise<MatchLogRow[]> {
+  const { results } = await DB()
+    .prepare(`SELECT id, account_id, opponent_type, timestamp, log, created_at FROM match_logs WHERE account_id = ?`)
+    .bind(accountId)
+    .all<MatchLogRow>()
+  return results
+}
+
+describe('reportMatch — match_logs', () => {
+  it('stores a valid log row keyed to account+opponent_type on a fresh (non-duplicate) report', async () => {
+    const a = acct('mlog-valid')
+    const ts = Date.now()
+    const log = JSON.stringify([{ ply: 1, round: 1, actor: 'human', tier: 'medium', action: { type: 'TAKE_CAMELS' } }])
+
+    const result = await reportMatch(DB(), a, { opponent_type: 'medium', player_score: 90, opponent_score: 40, won: true, timestamp: ts, log })
+    expect(result).toEqual({ ok: true })
+
+    const rows = await getMatchLogs(a)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].opponent_type).toBe('medium')
+    expect(rows[0].timestamp).toBe(ts)
+    expect(rows[0].log).toBe(log)
+    expect(JSON.parse(rows[0].log)).toEqual(JSON.parse(log))
+  })
+
+  it('omitting `log` entirely records the match with no log row, and does not error', async () => {
+    const a = acct('mlog-absent')
+    const result = await reportMatch(DB(), a, { opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now() })
+    expect(result).toEqual({ ok: true })
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+
+  it('an oversized log (>300KB) is skipped — the match still records, no log row is written', async () => {
+    const a = acct('mlog-oversized')
+    const hugeLog = JSON.stringify(Array.from({ length: 20_000 }, (_, i) => ({ ply: i, action: { type: 'TAKE_CAMELS' } })))
+    expect(hugeLog.length).toBeGreaterThan(300_000) // sanity: this really is over budget
+
+    const result = await reportMatch(DB(), a, { opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(), log: hugeLog })
+    expect(result).toEqual({ ok: true }) // the report itself never fails over a bad log
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+
+  it('a garbage (unparseable) log is skipped — the match still records, no log row', async () => {
+    const a = acct('mlog-garbage')
+    const result = await reportMatch(DB(), a, {
+      opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(),
+      log: '{not valid json',
+    })
+    expect(result).toEqual({ ok: true })
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+
+  it('a log that IS valid JSON but not an array is skipped — the match still records, no log row', async () => {
+    const a = acct('mlog-not-array')
+    const result = await reportMatch(DB(), a, {
+      opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(),
+      log: JSON.stringify({ not: 'an array' }),
+    })
+    expect(result).toEqual({ ok: true })
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+
+  it('a non-string `log` (wrong type) is skipped — the match still records, no log row', async () => {
+    const a = acct('mlog-wrong-type')
+    const result = await reportMatch(DB(), a, {
+      opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(),
+      log: [{ ply: 1 }] as unknown, // an actual array, not its JSON-string encoding
+    })
+    expect(result).toEqual({ ok: true })
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+
+  it('a duplicate match report never inserts a duplicate log row', async () => {
+    const a = acct('mlog-dedup')
+    const ts = Date.now()
+    const log = JSON.stringify([{ ply: 1, action: { type: 'TAKE_CAMELS' } }])
+
+    const first = await reportMatch(DB(), a, { opponent_type: 'hard3', player_score: 100, opponent_score: 80, won: true, timestamp: ts, log })
+    expect(first).toEqual({ ok: true })
+    expect(await getMatchLogs(a)).toHaveLength(1)
+
+    // Retried POST — same account/timestamp/opponent_type, so the `matches`
+    // insert is a dedup no-op; the log insert must be skipped right along
+    // with it (never a 2nd log row for the same match).
+    const retryLog = JSON.stringify([{ ply: 1 }, { ply: 2 }])
+    const retry = await reportMatch(DB(), a, { opponent_type: 'hard3', player_score: 100, opponent_score: 80, won: true, timestamp: ts, log: retryLog })
+    expect(retry).toEqual({ ok: true, duplicate: true })
+
+    const rows = await getMatchLogs(a)
+    expect(rows).toHaveLength(1) // still just the one, from the first (real) report
+    expect(JSON.parse(rows[0].log)).toEqual(JSON.parse(log)) // untouched by the retry's log
+  })
+
+  it('invalid report fields (rejected before any insert) never write a log row either', async () => {
+    const a = acct('mlog-invalid-report')
+    const log = JSON.stringify([{ ply: 1 }])
+    const result = await reportMatch(DB(), a, { opponent_type: 'not-a-tier', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(), log })
+    expect(result).toEqual({ error: 'invalid_opponent_type' })
+    expect(await getMatchLogs(a)).toHaveLength(0)
+  })
+})
+
+// =============================================================================
 // reportMatch — players.last_seen_at stamp
 // =============================================================================
 //

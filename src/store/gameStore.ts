@@ -13,6 +13,7 @@ import * as session from '../net/session'
 import { openNudgeSocket, type NudgeSocket } from '../net/nudge'
 import { WorkerError } from '../net/http'
 import type { ClientView, ClientMove, MoveType, MyGamesRow, WaitingRoomView } from '../net/types'
+import { appendCapped, buildCompactSnapshot, type AiLogEntry, type IsmctsCandidateLog } from './aiGameLog'
 
 export type Mode = 'vs-ai' | 'local' | 'online'
 // Trimmed to what the view-driven online architecture actually produces —
@@ -47,6 +48,12 @@ export interface GameStore {
   opponentName: string | null
   matchScores: [number, number]
   fairBotTracker: { knownInHand: Card[]; unknownInHand: number } | null
+  /** Per-move play-by-play for the CURRENT vs-ai match only — see
+   *  src/store/aiGameLog.ts. Empty/unused for 'local'/'online' modes. Reset
+   *  at startGame; sent alongside the match report on match end (see
+   *  nextRound's vs-ai addMatch call). Not persisted — purely in-memory for
+   *  this one match's lifetime. */
+  aiGameLog: AiLogEntry[]
 
   // ---- online (view-driven — see src/net/) ---------------------------------
   onlineView: ClientView | null
@@ -281,6 +288,38 @@ function computeMatchScoresFromMoves(moves: ClientMove[]): [number, number] {
   return totals
 }
 
+/** Append one move to the current match's aiGameLog (vs-ai only — a no-op in
+ *  every other mode). `preState` is the FULL GameState the mover was looking
+ *  at when this action was chosen/applied — compacted via
+ *  buildCompactSnapshot before storage. `ply` is derived from the last
+ *  logged entry's own ply (not the array length), so it stays correct even
+ *  once appendCapped starts trimming the front of the array. */
+function appendAiLogEntry(
+  set: (partial: Partial<GameStore>) => void,
+  get: () => GameStore,
+  entry: {
+    actor: 'human' | 'ai'
+    tier: Difficulty
+    action: Action
+    preState: GameState
+    candidates?: IsmctsCandidateLog[]
+  },
+): void {
+  const { mode, aiGameLog } = get()
+  if (mode !== 'vs-ai') return
+  const ply = (aiGameLog.length > 0 ? aiGameLog[aiGameLog.length - 1].ply : 0) + 1
+  const full: AiLogEntry = {
+    ply,
+    round: entry.preState.round,
+    actor: entry.actor,
+    tier: entry.tier,
+    action: entry.action,
+    preState: buildCompactSnapshot(entry.preState),
+    ...(entry.candidates && entry.candidates.length > 0 ? { candidates: entry.candidates } : {}),
+  }
+  set({ aiGameLog: appendCapped(aiGameLog, full) })
+}
+
 // Trigger the AI to move given a state where activePlayer === 1 in vs-ai mode.
 // Handles all difficulty levels and always calls set() to settle the store.
 function runAi(
@@ -301,10 +340,21 @@ function runAi(
       ? { state: next, tracker: get().fairBotTracker ?? { knownInHand: [], unknownInHand: 0 } }
       : next
 
+    // Captured right as getAction() resolves (see WorkerBridge.lastDebug's
+    // docstring) — only ismcts ever populates the bridge's lastDebug, so
+    // this stays undefined for every other tier.
+    let ismctsCandidates: IsmctsCandidateLog[] | undefined
+
     set({ state: next, error: null, aiThinking: true })
     bridge
       .getAction(workerData)
-      .then(aiAction => aiAction ?? pickMediumAction(next))
+      .then(aiAction => {
+        if (difficulty === 'ismcts') {
+          const debug = bridge.lastDebug as { candidates?: IsmctsCandidateLog[] } | null
+          ismctsCandidates = debug?.candidates
+        }
+        return aiAction ?? pickMediumAction(next)
+      })
       .catch(() => pickMediumAction(next))
       .then(aiAction => {
         if (!aiAction) { set({ aiThinking: false }); return }
@@ -313,7 +363,10 @@ function runAi(
           set({ aiThinking: false }); return
         }
         const aiResult = applyAction(cur, aiAction)
-        if (aiResult.ok) set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', aiAction, cur) })
+        if (aiResult.ok) {
+          appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: aiAction, preState: cur, candidates: ismctsCandidates })
+          set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', aiAction, cur) })
+        }
         else set({ aiThinking: false })
       })
       .catch((err) => {
@@ -332,6 +385,7 @@ function runAi(
             if (fallbackAction) {
               const aiResult = applyAction(cur, fallbackAction)
               if (aiResult.ok) {
+                appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: fallbackAction, preState: cur })
                 set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', fallbackAction, cur) })
               }
             }
@@ -349,7 +403,11 @@ function runAi(
     : pickEasyAction(next)
   if (aiAction) {
     const aiResult = applyAction(next, aiAction)
-    if (aiResult.ok) { set({ state: aiResult.value, error: null, lastMoveDescription: describeAction('AI', aiAction, next) }); return }
+    if (aiResult.ok) {
+      appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: aiAction, preState: next })
+      set({ state: aiResult.value, error: null, lastMoveDescription: describeAction('AI', aiAction, next) })
+      return
+    }
   }
   set({ state: next, error: null })
 }
@@ -421,6 +479,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     opponentName: null,
     matchScores: [0, 0],
     fairBotTracker: null,
+    aiGameLog: [],
 
     onlineView: null,
     pendingMove: false,
@@ -436,6 +495,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       set({
         state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0],
         onlineView: null, pendingMove: false, opponentPresent: true, claimWinAvailable: false,
+        aiGameLog: [],
       })
       if (mode === 'vs-ai' && get().difficulty === 'fair') {
         set({ fairBotTracker: { knownInHand: [], unknownInHand: newState.players[0].hand.length } })
@@ -459,6 +519,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       if (!result.ok) { set({ error: result.error }); return }
 
       const next = result.value
+
+      if (mode === 'vs-ai') {
+        appendAiLogEntry(set, get, { actor: 'human', tier: difficulty, action, preState: state })
+      }
 
       // Update fair bot tracker with player's action
       const { fairBotTracker } = get()
@@ -581,13 +645,13 @@ export const useGameStore = create<GameStore>((set, get) => {
         // recorded, and online matches are archived server-side, never via
         // addMatch — see applyServerView's match_over branch).
         if (mode === 'vs-ai') {
-          const { difficulty } = get()
+          const { difficulty, aiGameLog } = get()
           useStatsStore.getState().addMatch({
             opponent_type: difficulty,
             player_score: newMatchScores[0],
             opponent_score: newMatchScores[1],
             won: newSeals[0] > newSeals[1],
-          })
+          }, aiGameLog)
         }
       } else {
         const loser: 0 | 1 | undefined =

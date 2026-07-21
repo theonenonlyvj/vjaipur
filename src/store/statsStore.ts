@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
 import { history as fetchHistory, reportMatch as reportMatchToWorker } from '../net/online'
+import { capLogForReport, type AiLogEntry } from './aiGameLog'
 
 export interface MatchRecord {
   opponent_type: string
@@ -42,11 +43,17 @@ interface StatsState {
 interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
   ensureVGamesAccount: (forceRefresh?: boolean) => Promise<{ token: string; accountId: string } | null>
-  addMatch: (match: Omit<MatchRecord, 'timestamp'>) => Promise<void>
+  /** `log` (optional) is the vs-ai match's per-move play-by-play (see
+   *  src/store/aiGameLog.ts) — sent along with THIS report only, never
+   *  persisted into `matches`/`pendingReports` (those stay small/durable;
+   *  the log can be up to ~250KB and is best-effort — a failed report that
+   *  gets queued in pendingReports retries the match WITHOUT its log, see
+   *  retryPendingReports). */
+  addMatch: (match: Omit<MatchRecord, 'timestamp'>, log?: AiLogEntry[]) => Promise<void>
   /** POST /stats/report for one match now (minting/reusing a VGames token
    *  first). Returns whether it actually landed — never throws. Split out of
    *  addMatch so retryPendingReports can reuse the exact same path. */
-  reportMatchNow: (match: MatchRecord) => Promise<boolean>
+  reportMatchNow: (match: MatchRecord, log?: AiLogEntry[]) => Promise<boolean>
   /** Retry every match that failed to report earlier (see pendingReports) —
    *  called once at app boot (main.tsx). */
   retryPendingReports: () => Promise<void>
@@ -168,7 +175,7 @@ export const useStatsStore = create<StatsStore>()(
       // for instant UI, then reports to the worker (source='client_reported'
       // — worker/src/do/stats.ts#reportMatch); a failed report is queued in
       // pendingReports for a retry on next boot rather than silently lost.
-      addMatch: async (matchData) => {
+      addMatch: async (matchData, log) => {
         const newMatch: MatchRecord = {
           ...matchData,
           timestamp: Date.now(),
@@ -178,13 +185,13 @@ export const useStatsStore = create<StatsStore>()(
           matches: [newMatch, ...state.matches],
         }))
 
-        const ok = await get().reportMatchNow(newMatch)
+        const ok = await get().reportMatchNow(newMatch, log)
         if (!ok) {
           set((state) => ({ pendingReports: [...state.pendingReports, newMatch] }))
         }
       },
 
-      reportMatchNow: async (match) => {
+      reportMatchNow: async (match, log) => {
         const account = await get().ensureVGamesAccount()
         if (!account) return false // fail-closed: no verified identity, don't sync
         try {
@@ -194,6 +201,11 @@ export const useStatsStore = create<StatsStore>()(
             opponent_score: match.opponent_score,
             won: match.won,
             timestamp: match.timestamp,
+            // Best-effort AI-tuning data — omitted entirely (not even an
+            // empty string) when there's no log to send, so a non-vs-ai
+            // report (or a retryPendingReports resend, which never carries
+            // one) never grows a body for nothing.
+            ...(log && log.length > 0 ? { log: capLogForReport(log) } : {}),
           })
           return !!result.ok
         } catch (e) {
