@@ -151,8 +151,17 @@ export interface LeaderboardRow {
 }
 
 export interface LeaderboardResponse {
+  /** All matches, or (when a filter was requested) only that opponentType's
+   *  matches — see worker/src/do/stats.ts's LeaderboardResponse docstring. */
   overall: LeaderboardRow[]
+  /** The online_authoritative SUBSET of `overall` (see the worker docstring
+   *  for the exact per-filter semantics: empty for an AI-tier filter, equal
+   *  to `overall` for the 'online' filter). */
   verified: LeaderboardRow[]
+  /** DISTINCT opponent_type values with at least one match — present ONLY on
+   *  the unfiltered call (no opponentType passed), so the client knows which
+   *  filter toggles to even show. */
+  availableOpponents?: string[]
 }
 
 export interface MatchHistoryRow {

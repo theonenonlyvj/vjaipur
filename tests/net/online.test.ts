@@ -106,9 +106,21 @@ describe('net/online typed calls', () => {
   })
 
   it('leaderboard GETs /stats/leaderboard with no token (public route)', async () => {
-    workerFetch.mockResolvedValueOnce({ overall: [], verified: [] })
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [], availableOpponents: [] })
     await onlineApi.leaderboard()
     expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard', { method: 'GET' })
+  })
+
+  it('leaderboard(opponentType) GETs /stats/leaderboard?opponentType=<value>', async () => {
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [] })
+    await onlineApi.leaderboard('medium')
+    expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard?opponentType=medium', { method: 'GET' })
+  })
+
+  it('leaderboard(opponentType) URL-encodes the filter value', async () => {
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [] })
+    await onlineApi.leaderboard('online')
+    expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard?opponentType=online', { method: 'GET' })
   })
 
   it('history GETs /stats/history with the token', async () => {

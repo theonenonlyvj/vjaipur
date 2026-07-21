@@ -2,7 +2,7 @@ import { GameDO, type Env } from './game-do'
 import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
-import { getHistory, getLeaderboard, getRollup, reportMatch, type ReportMatchBody } from './do/stats'
+import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, type ReportMatchBody } from './do/stats'
 
 // Cloudflare resolves the Durable Object class from the entry module's exports.
 export { GameDO }
@@ -259,7 +259,17 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (forwarded) return forwarded
 
   if (request.method === 'GET' && path === '/stats/leaderboard') {
-    return json(await getLeaderboard(env.DB))
+    // Optional `?opponentType=` filter — 'online' or any known AI tier id
+    // (active or retired, see isValidOpponentTypeFilter). Absent = unfiltered
+    // (current "All" behavior, plus availableOpponents — see
+    // LeaderboardResponse's docstring). A garbage value 400s rather than
+    // silently falling back to unfiltered, so a client bug surfaces loudly
+    // instead of quietly showing the wrong board.
+    const opponentTypeParam = url.searchParams.get('opponentType')
+    if (opponentTypeParam && !isValidOpponentTypeFilter(opponentTypeParam)) {
+      return json({ error: 'invalid_opponent_type' }, 400)
+    }
+    return json(await getLeaderboard(env.DB, opponentTypeParam ?? undefined))
   }
   if (request.method === 'GET' && path === '/stats/history') {
     const auth = await requireAuth(request, env)

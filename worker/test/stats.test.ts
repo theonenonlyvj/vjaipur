@@ -1,6 +1,14 @@
-import { env } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { MIN_GAMES_FOR_RANK, getHistory, getLeaderboard, getRollup, reportMatch } from '../src/do/stats'
+import {
+  MIN_GAMES_FOR_RANK,
+  getAvailableOpponentTypes,
+  getHistory,
+  getLeaderboard,
+  getRollup,
+  isValidOpponentTypeFilter,
+  reportMatch,
+} from '../src/do/stats'
 import { applyD1Schema } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
@@ -149,6 +157,140 @@ describe('getLeaderboard', () => {
     expect(qIdx).toBeGreaterThanOrEqual(0)
     expect(uIdx).toBeGreaterThanOrEqual(0)
     expect(qIdx).toBeLessThan(uIdx) // qualified-before-unqualified beats raw win rate
+  })
+
+  it('filters by opponentType: only that tier\'s matches are aggregated/ranked, and two same-name accounts stay separate', async () => {
+    const a = acct('filter-alice-twin')
+    const b = acct('filter-bob-twin')
+    await seedPlayer(a, 'Filter Twin')
+    await seedPlayer(b, 'Filter Twin')
+    // a: 3 games vs 'medium', 2 vs 'online'.
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 100, opponentScore: 50, won: true, timestamp: Date.now() + i })
+    }
+    for (let i = 0; i < 2; i++) {
+      await seedMatch({ accountId: a, opponentType: 'online', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 100 + i })
+    }
+    // b: 3 games vs 'medium' only, same display name as a.
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: b, opponentType: 'medium', source: 'client_reported', playerScore: 20, opponentScore: 80, won: false, timestamp: Date.now() + 200 + i })
+    }
+
+    const { overall } = await getLeaderboard(DB(), 'medium')
+    const rowA = overall.find((r) => r.accountId === a)
+    const rowB = overall.find((r) => r.accountId === b)
+    expect(rowA).toBeTruthy()
+    expect(rowB).toBeTruthy()
+    expect(rowA).not.toBe(rowB) // still two distinct rows despite sharing a display name
+    expect(rowA!.games).toBe(3) // the 2 'online' matches are excluded by the filter
+    expect(rowB!.games).toBe(3)
+  })
+
+  it("a filter by an AI tier yields an empty 'verified' (online_authoritative rows are always opponent_type='online')", async () => {
+    const a = acct('filter-verified-ai')
+    await seedPlayer(a, 'AI Filter')
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 60, opponentScore: 40, won: true, timestamp: Date.now() + 300 + i })
+    }
+
+    const { overall, verified } = await getLeaderboard(DB(), 'easy')
+    expect(overall.find((r) => r.accountId === a)?.games).toBe(3)
+    expect(verified.find((r) => r.accountId === a)).toBeUndefined()
+  })
+
+  it("a filter by 'online' makes 'verified' equal 'overall' (every online match is online_authoritative)", async () => {
+    const a = acct('filter-verified-online')
+    await seedPlayer(a, 'Online Filter')
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'online', source: 'online_authoritative', playerScore: 70, opponentScore: 30, won: true, timestamp: Date.now() + 400 + i })
+    }
+
+    const { overall, verified } = await getLeaderboard(DB(), 'online')
+    const overallRow = overall.find((r) => r.accountId === a)
+    const verifiedRow = verified.find((r) => r.accountId === a)
+    expect(overallRow?.games).toBe(3)
+    expect(verifiedRow?.games).toBe(3)
+  })
+
+  it('a filtered response has no availableOpponents field (only the unfiltered call carries it)', async () => {
+    const filtered = await getLeaderboard(DB(), 'online')
+    expect(filtered.availableOpponents).toBeUndefined()
+
+    const unfiltered = await getLeaderboard(DB())
+    expect(Array.isArray(unfiltered.availableOpponents)).toBe(true)
+  })
+
+  it('an unrecognized opponentType (already-validated-away at the route layer) just yields empty rows, not an error', async () => {
+    const { overall, verified } = await getLeaderboard(DB(), 'totally-not-a-real-type')
+    expect(overall).toEqual([])
+    expect(verified).toEqual([])
+  })
+})
+
+// =============================================================================
+// getAvailableOpponentTypes / isValidOpponentTypeFilter
+// =============================================================================
+
+describe('getAvailableOpponentTypes', () => {
+  it('lists DISTINCT opponent_types with at least one match, and nothing else', async () => {
+    const a = acct('avail-types')
+    await seedMatch({ accountId: a, opponentType: 'hard3', source: 'client_reported', playerScore: 5, opponentScore: 1, won: true, timestamp: Date.now() + 500 })
+
+    const types = await getAvailableOpponentTypes(DB())
+    expect(types).toContain('hard3') // present: this test just seeded one
+    expect(new Set(types).size).toBe(types.length) // DISTINCT, no duplicates
+  })
+})
+
+describe('isValidOpponentTypeFilter', () => {
+  it("accepts 'online' and any known tier id (active or retired)", () => {
+    expect(isValidOpponentTypeFilter('online')).toBe(true)
+    expect(isValidOpponentTypeFilter('easy')).toBe(true)
+    expect(isValidOpponentTypeFilter('medium')).toBe(true)
+    expect(isValidOpponentTypeFilter('hard2')).toBe(true)
+    expect(isValidOpponentTypeFilter('hard3')).toBe(true)
+    expect(isValidOpponentTypeFilter('hard')).toBe(true) // retired, still valid
+    expect(isValidOpponentTypeFilter('fair')).toBe(true) // retired, still valid
+  })
+
+  it('rejects garbage', () => {
+    expect(isValidOpponentTypeFilter('nonsense')).toBe(false)
+    expect(isValidOpponentTypeFilter('')).toBe(false)
+    expect(isValidOpponentTypeFilter('Online')).toBe(false) // case-sensitive
+  })
+})
+
+// =============================================================================
+// GET /stats/leaderboard (router — query param validation + wiring)
+// =============================================================================
+
+describe('GET /stats/leaderboard router', () => {
+  it('with no ?opponentType= behaves as before and includes availableOpponents', async () => {
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard'))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { overall: unknown[]; verified: unknown[]; availableOpponents: string[] }
+    expect(Array.isArray(body.overall)).toBe(true)
+    expect(Array.isArray(body.verified)).toBe(true)
+    expect(Array.isArray(body.availableOpponents)).toBe(true)
+  })
+
+  it('with a valid ?opponentType= filters through to getLeaderboard', async () => {
+    const a = acct('router-filter')
+    await seedPlayer(a, 'Router Filter')
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 600 + i })
+    }
+
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=medium'))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { overall: { accountId: string; games: number }[] }
+    expect(body.overall.find((r) => r.accountId === a)?.games).toBe(3)
+  })
+
+  it('with a garbage ?opponentType= returns 400 invalid_opponent_type', async () => {
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=not-a-real-tier'))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_opponent_type' })
   })
 })
 
