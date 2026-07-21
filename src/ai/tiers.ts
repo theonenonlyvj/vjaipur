@@ -14,7 +14,7 @@
 // fairBotWorker.ts) are untouched — only their presence in the picker
 // changed.
 
-export type TierId = 'easy' | 'medium' | 'hard' | 'hard2' | 'hard3' | 'fair'
+export type TierId = 'easy' | 'medium' | 'hard' | 'hard2' | 'ismcts' | 'hard3' | 'fair'
 
 export interface Tier {
   /** Stable engine id, stored verbatim as opponent_type. Never rename. */
@@ -61,13 +61,27 @@ export const TIERS: Tier[] = [
     retired: false,
   },
   {
+    // Engine: ismctsBot (src/ai/ismctsBot.ts, via ismctsWorker). Information-
+    // Set Monte Carlo Tree Search — same FAIR determinization contract as
+    // hardAi2 (never reads the true hidden hand or deck order), but searches
+    // via repeated determinized playouts instead of depth-bounded alpha-beta.
+    // Shipped ALONGSIDE hardAi2 ("Hard") as its own A/B tier per the
+    // 2026-07-21 lineup addition, after passing its benchmark gate (90% vs
+    // hardAi2 head-to-head) and its fairness proof. hardAi2 is untouched.
+    id: 'ismcts',
+    label: 'Hard (ISMCTS)',
+    tagline: 'Imagines every hand you could hold. Fair — and furious.',
+    pickerOrder: 4,
+    retired: false,
+  },
+  {
     // Engine: hardAi3 (src/ai/hardAi3.ts, via aiWorker3). Reads the opponent's
     // hand and the deck order — omniscient search. Named honestly instead of
     // hidden behind a disclaimer.
     id: 'hard3',
     label: 'Omniscient Bot',
     tagline: 'It can see your hand. It can see the deck. Beat it anyway.',
-    pickerOrder: 4,
+    pickerOrder: 5,
     retired: false,
   },
   {
