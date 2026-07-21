@@ -94,6 +94,25 @@ describe('statsStore', () => {
     expect(state.vgamesAccountId).toBeNull()
   })
 
+  describe('ensureVGamesAccount forceRefresh (401 self-heal)', () => {
+    it('reuses the cached token by default, but forceRefresh mints a fresh one (fixes "Failed to create room" on an expired token)', async () => {
+      // Seed a cached (pretend-expired) token.
+      useStatsStore.setState({ vgamesToken: 'stale-tok', vgamesAccountId: 'acc-1' })
+
+      // Default: short-circuits on the cache, no network mint.
+      const cached = await useStatsStore.getState().ensureVGamesAccount()
+      expect(cached).toEqual({ token: 'stale-tok', accountId: 'acc-1' })
+      expect(vgamesQuick).not.toHaveBeenCalled()
+
+      // forceRefresh: bypasses the cache and mints a FRESH token via vgamesQuick.
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'fresh-tok', accountId: 'acc-1' })
+      const refreshed = await useStatsStore.getState().ensureVGamesAccount(true)
+      expect(vgamesQuick).toHaveBeenCalledTimes(1)
+      expect(refreshed).toEqual({ token: 'fresh-tok', accountId: 'acc-1' })
+      expect(useStatsStore.getState().vgamesToken).toBe('fresh-tok')
+    })
+  })
+
   describe('addMatch', () => {
     const matchData = {
       opponent_type: 'ai-easy',
