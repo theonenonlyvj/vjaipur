@@ -127,8 +127,12 @@ export async function myGames(): Promise<MyGamesResponse> {
   return workerFetch<MyGamesResponse>('/my-games', { method: 'GET', token: authToken() })
 }
 
-export async function leaderboard(): Promise<LeaderboardResponse> {
-  return workerFetch<LeaderboardResponse>('/stats/leaderboard', { method: 'GET' })
+/** GET /stats/leaderboard[?opponentType=] — omit `opponentType` for the
+ *  unfiltered "All" board (the only call that carries `availableOpponents` —
+ *  see worker/src/do/stats.ts's LeaderboardResponse docstring). */
+export async function leaderboard(opponentType?: string): Promise<LeaderboardResponse> {
+  const qs = opponentType ? `?opponentType=${encodeURIComponent(opponentType)}` : ''
+  return workerFetch<LeaderboardResponse>(`/stats/leaderboard${qs}`, { method: 'GET' })
 }
 
 export async function history(): Promise<HistoryResponse> {

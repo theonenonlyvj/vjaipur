@@ -19,27 +19,54 @@ export type LeaderboardRow = {
 }
 
 export type LeaderboardResponse = {
+  /** All matches (or, when a filter was requested, all matches matching that
+   *  `opponentType`). */
   overall: LeaderboardRow[]
-  /** `online_authoritative` only — rule-legal + server-authoritative, NOT
-   *  proof of two distinct humans (ADDENDUM T: a user can self-play two
-   *  ghost accounts; no collusion mitigation tonight). */
+  /** The `source = 'online_authoritative'` SUBSET of `overall` — rule-legal +
+   *  server-authoritative, NOT proof of two distinct humans (ADDENDUM T: a
+   *  user can self-play two ghost accounts; no collusion mitigation
+   *  tonight). Since `archiveMatchEnd` only ever writes
+   *  `online_authoritative` rows with `opponent_type='online'` (never an AI
+   *  tier — see `do/archive.ts`), filtering by any AI tier id always yields
+   *  an EMPTY `verified` (there is nothing to "verify" about a local vs-AI
+   *  report); filtering by `'online'` makes `verified` equal to `overall`
+   *  (every online match is server-authoritative); leaving the filter off
+   *  reproduces the original all-sources-vs-verified-only split. One
+   *  uniform rule for every case: `verified` is always "the
+   *  online_authoritative rows within whatever `overall` already covers." */
   verified: LeaderboardRow[]
+  /** DISTINCT `opponent_type` values with at least one match row — so a
+   *  client can show a toggle ONLY for buckets that actually have data.
+   *  Present ONLY on the unfiltered call (no `opponentType` passed in) to
+   *  save a query on every filtered re-fetch; the unfiltered "All" load is
+   *  always the first fetch a client makes, so this never costs an extra
+   *  round-trip in practice. */
+  availableOpponents?: string[]
 }
 
 type AggRow = { account_id: string; display_name: string | null; games: number; wins: number | null; avg_delta: number | null }
 
-async function loadLeaderboardRows(db: D1Database, verifiedOnly: boolean): Promise<LeaderboardRow[]> {
-  const where = verifiedOnly ? `WHERE m.source = 'online_authoritative'` : ''
-  const { results } = await db
-    .prepare(
-      `SELECT m.account_id AS account_id, COALESCE(p.display_name, 'Player') AS display_name,
-              COUNT(*) AS games, SUM(m.won) AS wins, AVG(m.player_score - m.opponent_score) AS avg_delta
-       FROM matches m
-       LEFT JOIN players p ON p.account_id = m.account_id
-       ${where}
-       GROUP BY m.account_id`,
-    )
-    .all<AggRow>()
+async function loadLeaderboardRows(
+  db: D1Database,
+  opts: { verifiedOnly?: boolean; opponentType?: string } = {},
+): Promise<LeaderboardRow[]> {
+  const conditions: string[] = []
+  const binds: unknown[] = []
+  if (opts.verifiedOnly) conditions.push(`m.source = 'online_authoritative'`)
+  if (opts.opponentType) {
+    conditions.push(`m.opponent_type = ?`)
+    binds.push(opts.opponentType)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const stmt = db.prepare(
+    `SELECT m.account_id AS account_id, COALESCE(p.display_name, 'Player') AS display_name,
+            COUNT(*) AS games, SUM(m.won) AS wins, AVG(m.player_score - m.opponent_score) AS avg_delta
+     FROM matches m
+     LEFT JOIN players p ON p.account_id = m.account_id
+     ${where}
+     GROUP BY m.account_id`,
+  )
+  const { results } = await (binds.length ? stmt.bind(...binds) : stmt).all<AggRow>()
 
   // Ranked BY account_id (never display_name — ADDENDUM: two players sharing
   // a display name must stay two distinct rows; GROUP BY account_id above
@@ -67,9 +94,42 @@ async function loadLeaderboardRows(db: D1Database, verifiedOnly: boolean): Promi
   }))
 }
 
-export async function getLeaderboard(db: D1Database): Promise<LeaderboardResponse> {
-  const [overall, verified] = await Promise.all([loadLeaderboardRows(db, false), loadLeaderboardRows(db, true)])
-  return { overall, verified }
+/** DISTINCT `opponent_type`s with at least one row — the cheap "which
+ *  toggles should the client even show" query backing `availableOpponents`.
+ *  A single indexed-scan-free `SELECT DISTINCT` over `matches`; exported
+ *  separately so a test (or a future dedicated endpoint) can call it without
+ *  paying for a full leaderboard load. */
+export async function getAvailableOpponentTypes(db: D1Database): Promise<string[]> {
+  const { results } = await db.prepare(`SELECT DISTINCT opponent_type FROM matches`).all<{ opponent_type: string }>()
+  return results.map((r) => r.opponent_type)
+}
+
+/**
+ * `GET /stats/leaderboard[?opponentType=]` — see `LeaderboardResponse`'s
+ * docstring for exactly what `overall`/`verified` mean in the filtered vs
+ * unfiltered case. `opponentType`, when passed, must already be a validated
+ * value (index.ts's route checks it via `isValidOpponentTypeFilter` BEFORE
+ * calling this — this function does not re-validate, so an unrecognized
+ * value here just silently yields empty rows rather than erroring, which is
+ * fine for a value that's already known-good by the time it arrives).
+ */
+export async function getLeaderboard(db: D1Database, opponentType?: string): Promise<LeaderboardResponse> {
+  const [overall, verified] = await Promise.all([
+    loadLeaderboardRows(db, { opponentType }),
+    loadLeaderboardRows(db, { verifiedOnly: true, opponentType }),
+  ])
+  if (opponentType) return { overall, verified }
+  const availableOpponents = await getAvailableOpponentTypes(db)
+  return { overall, verified, availableOpponents }
+}
+
+/** Valid values for the `?opponentType=` leaderboard filter: `'online'`
+ *  (human vs human) or any known AI tier id — including RETIRED tiers
+ *  (`isValidTierId`'s docstring), which still have real historical rows.
+ *  Exported so index.ts's route can 400 on garbage without duplicating the
+ *  tier-id check here. */
+export function isValidOpponentTypeFilter(id: string): boolean {
+  return id === 'online' || isValidTierId(id)
 }
 
 // re-exported so a caller (or a test) can cite the exact same qualification
