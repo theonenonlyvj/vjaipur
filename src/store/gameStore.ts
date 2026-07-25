@@ -365,7 +365,7 @@ function runAi(
         const aiResult = applyAction(cur, aiAction)
         if (aiResult.ok) {
           appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: aiAction, preState: cur, candidates: ismctsCandidates })
-          set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', aiAction, cur) })
+          set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('Bot', aiAction, cur) })
         }
         else set({ aiThinking: false })
       })
@@ -386,7 +386,7 @@ function runAi(
               const aiResult = applyAction(cur, fallbackAction)
               if (aiResult.ok) {
                 appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: fallbackAction, preState: cur })
-                set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('AI', fallbackAction, cur) })
+                set({ state: aiResult.value, aiThinking: false, error: null, lastMoveDescription: describeAction('Bot', fallbackAction, cur) })
               }
             }
           }
@@ -405,7 +405,7 @@ function runAi(
     const aiResult = applyAction(next, aiAction)
     if (aiResult.ok) {
       appendAiLogEntry(set, get, { actor: 'ai', tier: difficulty, action: aiAction, preState: next })
-      set({ state: aiResult.value, error: null, lastMoveDescription: describeAction('AI', aiAction, next) })
+      set({ state: aiResult.value, error: null, lastMoveDescription: describeAction('Bot', aiAction, next) })
       return
     }
   }

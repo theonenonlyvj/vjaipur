@@ -37,13 +37,13 @@ describe('GameScreen', () => {
 describe('AI thinking indicator', () => {
   it('is absent when aiThinking is false', () => {
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.queryByText(/ai is thinking/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/bot is thinking/i)).not.toBeInTheDocument()
   })
 
-  it('shows "AI is thinking…" when aiThinking is true', () => {
+  it('shows "Bot is thinking…" when aiThinking is true', () => {
     useGameStore.setState({ aiThinking: true })
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.getByText(/ai is thinking/i)).toBeInTheDocument()
+    expect(screen.getByText(/bot is thinking/i)).toBeInTheDocument()
   })
 })
 

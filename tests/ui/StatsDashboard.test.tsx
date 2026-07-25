@@ -306,9 +306,11 @@ describe('StatsDashboard global leaderboard — "Hard" family drill-down', () =>
     fireEvent.click(screen.getByRole('button', { name: 'Hard' }))
     await waitFor(() => expect(screen.getByText('Grace')).toBeInTheDocument())
 
-    // The 'Hard' member chip (hard2 itself) shares its text with the
-    // still-visible top-level family chip — TWO buttons named "Hard".
-    expect(screen.getAllByRole('button', { name: 'Hard' })).toHaveLength(2)
+    // Post-rename (Vijay 2026-07-21): hard2's member chip is "Hard (αβ)",
+    // distinct from the family umbrella chip "Hard" (FAMILY_LABELS) — so
+    // exactly ONE button each, no shared-name ambiguity anymore.
+    expect(screen.getAllByRole('button', { name: 'Hard' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Hard (αβ)' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Hard (ISMCTS)' })).toBeInTheDocument()
   })
 
@@ -355,10 +357,11 @@ describe('StatsDashboard global leaderboard — family collapse threshold (<2 da
     await waitFor(() => expect(screen.getByText('Frank')).toBeInTheDocument())
 
     // Hard: only hard2 has data (ismcts doesn't). A single-member "family"
-    // fetches that member's own id directly — never a 1-element list — and
-    // never shows a drill-down (nothing to pick).
-    expect(screen.getByRole('button', { name: 'Hard' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Hard' }))
+    // renders as a flat chip under the MEMBER'S own label — "Hard (αβ)" post-
+    // rename — fetches that member's own id directly (never a 1-element
+    // list), and never shows a drill-down (nothing to pick).
+    expect(screen.getByRole('button', { name: 'Hard (αβ)' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Hard (αβ)' }))
     await waitFor(() => expect(onlineApi.leaderboard).toHaveBeenLastCalledWith('hard2'))
     expect(screen.queryByRole('button', { name: 'All Hard' })).not.toBeInTheDocument()
   })

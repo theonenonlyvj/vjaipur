@@ -255,7 +255,7 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
       {(aiThinking || lastMoveDescription) && (
         <div style={{ textAlign: 'center', color: '#f0c030', fontSize: 14, fontStyle: 'italic', minHeight: '20px', opacity: 0.8 }}>
           {aiThinking
-            ? 'AI is thinking…'
+            ? 'Bot is thinking…'
             : lastMoveDescription}
         </div>
       )}
