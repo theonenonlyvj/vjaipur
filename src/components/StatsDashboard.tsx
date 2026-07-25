@@ -136,6 +136,21 @@ function fmtWinRate(rate: number) {
 
 export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const matches = useStatsStore((state) => state.matches)
+  const pendingReports = useStatsStore((state) => state.pendingReports)
+  const [syncing, setSyncing] = useState(false)
+
+  // Drain the on-device pending-report queue ON DEMAND. Before this existed,
+  // queued games only retried at app boot (retryPendingReports in main.tsx) —
+  // invisible and never firing for a long-lived mobile tab, which is exactly
+  // how 19 finished ISMCTS games sat unsynced on Vijay's phone (2026-07-21).
+  async function handleSyncNow() {
+    setSyncing(true)
+    try {
+      await useStatsStore.getState().retryPendingReports()
+    } finally {
+      setSyncing(false)
+    }
+  }
   const [view, setView] = useState<'mine' | 'global'>('mine')
   // 'verified' = online_authoritative only (server-enforced, but NOT proof of
   // two distinct humans — worker/src/do/stats.ts's ADDENDUM T comment). Only
@@ -252,6 +267,29 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
         {/* ── MY RECORDS ── */}
         {view === 'mine' && (
           <>
+            {pendingReports.length > 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                background: '#3a2a00', border: '1px solid #f0c030', borderRadius: 8,
+                padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#f0c030',
+              }}>
+                <span>
+                  ⚠ {pendingReports.length} finished game{pendingReports.length === 1 ? '' : 's'} not yet
+                  synced to the server — they count here but not on the Global board yet.
+                </span>
+                <button
+                  onClick={handleSyncNow}
+                  disabled={syncing}
+                  style={{
+                    background: '#f0c030', color: '#000', border: 'none', borderRadius: 6,
+                    padding: '6px 14px', fontWeight: 900, cursor: syncing ? 'wait' : 'pointer',
+                    whiteSpace: 'nowrap', opacity: syncing ? 0.6 : 1,
+                  }}
+                >
+                  {syncing ? 'Syncing…' : 'Sync now'}
+                </button>
+              </div>
+            )}
             <section style={{ marginBottom: 28 }}>
               <h3 style={sectionHeaderStyle}>VS ARTIFICIAL INTELLIGENCE</h3>
               <div style={{ overflowX: 'auto' }}>
