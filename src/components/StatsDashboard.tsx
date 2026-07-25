@@ -2,7 +2,7 @@ import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
 import { leaderboard as fetchLeaderboard } from '../net/online'
 import type { LeaderboardResponse } from '../net/online'
-import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, type TierFamily } from '../ai/tiers'
+import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, getFamilyLabel, type TierFamily } from '../ai/tiers'
 
 interface StatsDashboardProps {
   onClose: () => void
@@ -84,7 +84,7 @@ function buildOpponentGroups(availableOpponents: string[]): OpponentGroup[] {
       .map((t) => t.id)
       .filter((memberId) => tierIds.includes(memberId))
     if (dataMembers.length >= 2) {
-      groups.push({ key: family, label: getFamilyPrimary(family).label, isFamily: true, members: dataMembers })
+      groups.push({ key: family, label: getFamilyLabel(family), isFamily: true, members: dataMembers })
     } else {
       // Only one member of this family has data — behaves exactly like a
       // flat standalone chip for THAT member (nothing to drill into).

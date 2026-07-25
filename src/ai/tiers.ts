@@ -83,7 +83,9 @@ export const TIERS: Tier[] = [
     // round-ending sell while ahead, avoiding one while behind, camel-majority
     // swings, selling before a known opponent threat drains a pile).
     id: 'hard2',
-    label: 'Hard',
+    label: 'Hard (αβ)', // Vijay's naming call 2026-07-21 — the alpha-beta fair
+    // bot, disambiguated from Hard (ISMCTS); the family umbrella stays "Hard"
+    // via FAMILY_LABELS.
     tagline: 'No peeking. Reads the odds. Genuinely tough.',
     pickerOrder: 3,
     retired: false,
@@ -170,6 +172,19 @@ export function getTierFamily(id: string): TierFamily | undefined {
 export const FAMILIES: TierFamily[] = Array.from(
   new Set(TIERS.map((t) => t.family).filter((f): f is TierFamily => f !== undefined)),
 )
+
+/** Display label for a FAMILY (the leaderboard's top-row group chip). Kept
+ *  separate from any member tier's label deliberately: the canonical member
+ *  can carry a qualified label (e.g. hard2 = "Hard (αβ)") while the family
+ *  button stays the plain umbrella word. */
+export const FAMILY_LABELS: Record<TierFamily, string> = {
+  hard: 'Hard',
+  medium: 'Medium',
+}
+
+export function getFamilyLabel(family: TierFamily): string {
+  return FAMILY_LABELS[family]
+}
 
 /** Every tier (active or retired) tagged with the given family, in TIERS'
  *  own declared order (e.g. for 'hard': hard2, ismcts, hard, fair). */

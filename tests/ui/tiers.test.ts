@@ -71,7 +71,7 @@ describe('tiers: active picker lineup', () => {
     const byId = Object.fromEntries(ACTIVE_TIERS.map((t) => [t.id, t.label]))
     expect(byId.easy).toBe('Easy')
     expect(byId.medium).toBe('Medium')
-    expect(byId.hard2).toBe('Hard')
+    expect(byId.hard2).toBe('Hard (αβ)')
     expect(byId.ismcts).toBe('Hard (ISMCTS)')
     expect(byId.hard3).toBe('Omniscient Bot')
   })
@@ -147,7 +147,7 @@ describe('tier families (leaderboard "Hard"/"Medium" drill-down grouping)', () =
   it('getFamilyPrimary("hard") is hard2 — the active member with the lowest pickerOrder', () => {
     const primary = getFamilyPrimary('hard')
     expect(primary.id).toBe('hard2')
-    expect(primary.label).toBe('Hard')
+    expect(primary.label).toBe('Hard (αβ)')
     expect(primary.retired).toBe(false)
   })
 
