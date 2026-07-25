@@ -96,8 +96,8 @@ export function HomeScreen() {
         </>
       ) : (
         <>
-          <button onClick={() => setShowDifficulty(true)} style={btnStyle}>vs Bots</button>
-          <button onClick={handleLocal} style={btnStyle}>Local (Pass &amp; Play)</button>
+          <button onClick={() => setShowDifficulty(true)} style={btnStyle}>Single Player</button>
+          <button onClick={handleLocal} style={btnStyle}>Pass &amp; Play</button>
           <button onClick={() => navigate('/lobby')} style={{ ...btnStyle, borderColor: '#c060e0', background: '#2a0040' }}>
             Online
           </button>
