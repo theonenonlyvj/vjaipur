@@ -50,7 +50,7 @@ export function ScoringTab() {
         {"Sell 3 or more matching cards at once to earn a bonus token. Bonus tokens are shuffled face-down — you won't know the exact value until you earn one. Sell 3 → worth 1-3 pts. Sell 4 → worth 4-6 pts. Sell 5+ → worth 8-10 pts."}
       </Section>
       <Section title="Camel Bonus">
-        The player with the most camels at round end earns 5 bonus rupees.
+        The player with the most camels at round end earns 5 bonus rupees (11 in the deck).
       </Section>
       <Section title="Seals of Excellence">
         Win a round to earn a Seal of Excellence. The match is best-of-N based on the Match Length you choose (1, 3, or 5 games)—first to a majority of seals wins. Ties are broken by most bonus tokens, then most goods tokens.

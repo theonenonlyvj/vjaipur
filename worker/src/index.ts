@@ -266,17 +266,24 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (forwarded) return forwarded
 
   if (request.method === 'GET' && path === '/stats/leaderboard') {
-    // Optional `?opponentType=` filter — 'online' or any known AI tier id
-    // (active or retired, see isValidOpponentTypeFilter). Absent = unfiltered
-    // (current "All" behavior, plus availableOpponents — see
-    // LeaderboardResponse's docstring). A garbage value 400s rather than
-    // silently falling back to unfiltered, so a client bug surfaces loudly
-    // instead of quietly showing the wrong board.
+    // Optional `?opponentType=` filter — 'online', any known AI tier id
+    // (active or retired, see isValidOpponentTypeFilter), OR a comma-
+    // separated LIST of such ids (e.g. `?opponentType=hard2,ismcts,hard,fair`
+    // — StatsDashboard.tsx's "All Hard" family-drill-down aggregate). Absent
+    // = unfiltered (current "All" behavior, plus availableOpponents — see
+    // LeaderboardResponse's docstring). Every id in the list must be valid —
+    // one garbage id 400s the WHOLE request rather than silently dropping it,
+    // so a client bug surfaces loudly instead of quietly showing a partial
+    // board.
     const opponentTypeParam = url.searchParams.get('opponentType')
-    if (opponentTypeParam && !isValidOpponentTypeFilter(opponentTypeParam)) {
-      return json({ error: 'invalid_opponent_type' }, 400)
+    if (opponentTypeParam) {
+      const ids = opponentTypeParam.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+      if (ids.length === 0 || !ids.every(isValidOpponentTypeFilter)) {
+        return json({ error: 'invalid_opponent_type' }, 400)
+      }
+      return json(await getLeaderboard(env.DB, ids.length === 1 ? ids[0] : ids))
     }
-    return json(await getLeaderboard(env.DB, opponentTypeParam ?? undefined))
+    return json(await getLeaderboard(env.DB, undefined))
   }
   if (request.method === 'GET' && path === '/stats/history') {
     const auth = await requireAuth(request, env)

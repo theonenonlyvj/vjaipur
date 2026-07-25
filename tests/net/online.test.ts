@@ -123,6 +123,24 @@ describe('net/online typed calls', () => {
     expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard?opponentType=online', { method: 'GET' })
   })
 
+  it('leaderboard([...ids]) joins a list of opponentTypes with commas (family aggregate)', async () => {
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [] })
+    await onlineApi.leaderboard(['hard2', 'ismcts', 'hard', 'fair'])
+    expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard?opponentType=hard2,ismcts,hard,fair', { method: 'GET' })
+  })
+
+  it('leaderboard([singleId]) behaves the same as leaderboard(singleId)', async () => {
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [] })
+    await onlineApi.leaderboard(['medium'])
+    expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard?opponentType=medium', { method: 'GET' })
+  })
+
+  it('leaderboard([]) (empty list) behaves like the unfiltered call', async () => {
+    workerFetch.mockResolvedValueOnce({ overall: [], verified: [], availableOpponents: [] })
+    await onlineApi.leaderboard([])
+    expect(workerFetch).toHaveBeenCalledWith('/stats/leaderboard', { method: 'GET' })
+  })
+
   it('history GETs /stats/history with the token', async () => {
     workerFetch.mockResolvedValueOnce({ matches: [] })
     await onlineApi.history()

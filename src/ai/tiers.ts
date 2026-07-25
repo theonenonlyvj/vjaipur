@@ -16,6 +16,28 @@
 
 export type TierId = 'easy' | 'medium' | 'hard' | 'hard2' | 'ismcts' | 'hard3' | 'fair'
 
+/**
+ * Leaderboard grouping tag (StatsDashboard.tsx's "Hard" drill-down, 2026-07-25
+ * lineup-crowding fix). Tiers sharing the same `family` collapse into ONE
+ * top-level leaderboard chip once 2+ of them have data, with a secondary
+ * "All <Family> + one chip per data-bearing member" drill-down row — see
+ * `getFamilyMembers`/`getFamilyPrimary` below. A tier with no `family` is
+ * always its own flat top-level chip, same as before this feature existed.
+ *
+ * The tag is a GROUPING KEY, deliberately its own (small) type rather than
+ * reusing `TierId` — it happens to read the same as 'hard' (the retired
+ * Classic MCTS tier's own id) and 'medium' (the active Medium tier's own id)
+ * today, but that's naming convenience, not a structural link. Nothing here
+ * ever compares `family === id`; every family operation goes through the
+ * `family` field alone. This is what lets 'medium' become a family of its
+ * own later (e.g. if 'fair' is reassigned `family: 'medium'` because it
+ * benchmarks closer to Medium than to hardAi2) — 'medium' the tier just
+ * needs `family: 'medium'` added alongside it, and the SAME generic
+ * mechanism collapses/drills-down for it exactly like it does for 'hard'
+ * today. No component-side changes required for that move.
+ */
+export type TierFamily = 'hard' | 'medium'
+
 export interface Tier {
   /** Stable engine id, stored verbatim as opponent_type. Never rename. */
   id: TierId
@@ -27,6 +49,9 @@ export interface Tier {
   pickerOrder: number | null
   /** Retired tiers are hidden from the picker but still resolve in stats. */
   retired: boolean
+  /** Optional leaderboard grouping tag — see `TierFamily`'s docstring.
+   *  Undefined = never grouped, always a flat top-level leaderboard chip. */
+  family?: TierFamily
 }
 
 export const TIERS: Tier[] = [
@@ -43,6 +68,9 @@ export const TIERS: Tier[] = [
     tagline: 'A solid club player.',
     pickerOrder: 2,
     retired: false,
+    // Canonical member of the medium family (the two demoted Classics below
+    // file under it in the leaderboard drill-down).
+    family: 'medium',
   },
   {
     // Engine: hardAi2 (src/ai/hardAi2.ts, via aiWorker2). FAIR determinization
@@ -59,6 +87,7 @@ export const TIERS: Tier[] = [
     tagline: 'No peeking. Reads the odds. Genuinely tough.',
     pickerOrder: 3,
     retired: false,
+    family: 'hard',
   },
   {
     // Engine: ismctsBot (src/ai/ismctsBot.ts, via ismctsWorker). Information-
@@ -73,6 +102,7 @@ export const TIERS: Tier[] = [
     tagline: 'Imagines every hand you could hold. Fair — and furious.',
     pickerOrder: 4,
     retired: false,
+    family: 'hard',
   },
   {
     // Engine: hardAi3 (src/ai/hardAi3.ts, via aiWorker3). Reads the opponent's
@@ -93,6 +123,10 @@ export const TIERS: Tier[] = [
     tagline: '',
     pickerOrder: null,
     retired: true,
+    // DEMOTED to the medium family 2026-07-21 (Vijay's call, data-backed):
+    // benchmarked only 70% vs Medium — the real hard family (hard2/ismcts)
+    // runs ~100%. It keeps its historical label; it just files under Medium.
+    family: 'medium',
   },
   {
     // Retired 2026-07-20 lineup rework: fairBot (src/ai/fairBot.ts, via
@@ -105,6 +139,10 @@ export const TIERS: Tier[] = [
     tagline: '',
     pickerOrder: null,
     retired: true,
+    // DEMOTED to the medium family 2026-07-21 (Vijay's call, data-backed):
+    // benchmarked only 73% vs Medium. Label keeps its history; placement
+    // tells the truth.
+    family: 'medium',
   },
 ]
 
@@ -118,6 +156,44 @@ export const ACTIVE_TIERS: Tier[] = TIERS
 /** Look up a tier (active or retired) by id. */
 export function getTier(id: string): Tier | undefined {
   return TIERS_BY_ID[id]
+}
+
+/** Look up a tier's family tag (active or retired), if any. */
+export function getTierFamily(id: string): TierFamily | undefined {
+  return TIERS_BY_ID[id]?.family
+}
+
+/** Every distinct `family` tag declared in TIERS, in first-seen TIERS order.
+ *  Single source of truth for "which families exist" — a caller checking
+ *  whether some string is a family tag (as opposed to a tier id or 'online')
+ *  should check membership here rather than hardcoding 'hard'/'medium'. */
+export const FAMILIES: TierFamily[] = Array.from(
+  new Set(TIERS.map((t) => t.family).filter((f): f is TierFamily => f !== undefined)),
+)
+
+/** Every tier (active or retired) tagged with the given family, in TIERS'
+ *  own declared order (e.g. for 'hard': hard2, ismcts, hard, fair). */
+export function getFamilyMembers(family: TierFamily): Tier[] {
+  return TIERS.filter((t) => t.family === family)
+}
+
+/**
+ * A family's canonical/anchor member — the tier whose label and picker
+ * position the family's own TOP-LEVEL leaderboard chip borrows when it's
+ * collapsed (see StatsDashboard.tsx): the non-retired member with the
+ * lowest `pickerOrder` (ties broken by TIERS' own declaration order via
+ * Array.prototype.sort's stability). For 'hard' today that's hard2 (order 3,
+ * beating ismcts's order 4) — retired members (hard/fair) are never
+ * candidates. Falls back to the family's first declared member if every
+ * member is somehow retired (defensive; a real family should always have at
+ * least one active member).
+ */
+export function getFamilyPrimary(family: TierFamily): Tier {
+  const members = getFamilyMembers(family)
+  const active = members
+    .filter((t) => !t.retired)
+    .sort((a, b) => (a.pickerOrder ?? 0) - (b.pickerOrder ?? 0))
+  return active[0] ?? members[0]
 }
 
 /**

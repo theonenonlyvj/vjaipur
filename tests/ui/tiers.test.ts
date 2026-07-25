@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   TIERS,
   ACTIVE_TIERS,
+  FAMILIES,
   getTier,
   getTierLabel,
+  getTierFamily,
+  getFamilyMembers,
+  getFamilyPrimary,
   resolveDefaultTierId,
   DEFAULT_TIER_ID,
   type Tier,
@@ -94,6 +98,72 @@ describe('tiers: retired tiers stay resolvable but out of the picker', () => {
   })
 
   it('retired ids still resolve to a "Classic" label', () => {
+    expect(getTierLabel('hard')).toBe('Hard (Classic)')
+    expect(getTierLabel('fair')).toBe('Hard (FairBot, Classic)')
+  })
+})
+
+describe('tier families (leaderboard "Hard"/"Medium" drill-down grouping)', () => {
+  // 2026-07-21 REASSIGNMENT (Vijay's data-backed call, do not revert): the
+  // two retired Classic tiers ('hard', 'fair') moved from `family: 'hard'`
+  // to `family: 'medium'` — each benchmarked only ~70%/73% vs Medium, not
+  // the ~100% the real hard family (hard2/ismcts) runs. 'medium' itself now
+  // carries `family: 'medium'` as that family's own canonical member.
+
+  it("FAMILIES contains exactly 'medium' and 'hard', in first-seen TIERS order", () => {
+    expect(FAMILIES).toEqual(['medium', 'hard'])
+  })
+
+  it('hard2 and ismcts are tagged family: "hard" — hard/fair are NOT', () => {
+    expect(getTierFamily('hard2')).toBe('hard')
+    expect(getTierFamily('ismcts')).toBe('hard')
+    expect(getTierFamily('hard')).not.toBe('hard')
+    expect(getTierFamily('fair')).not.toBe('hard')
+  })
+
+  it('medium, hard, and fair are all tagged family: "medium"', () => {
+    expect(getTierFamily('medium')).toBe('medium')
+    expect(getTierFamily('hard')).toBe('medium')
+    expect(getTierFamily('fair')).toBe('medium')
+  })
+
+  it('easy and hard3 (Omniscient Bot) have no family — they stay flat, standalone chips', () => {
+    expect(getTierFamily('easy')).toBeUndefined()
+    expect(getTierFamily('hard3')).toBeUndefined()
+  })
+
+  it('an unknown id has no family (getTier returns undefined, so does getTierFamily)', () => {
+    expect(getTierFamily('totally-unknown')).toBeUndefined()
+  })
+
+  it('getFamilyMembers("hard") returns only hard2 and ismcts, in TIERS declaration order', () => {
+    expect(getFamilyMembers('hard').map((t) => t.id)).toEqual(['hard2', 'ismcts'])
+  })
+
+  it('getFamilyMembers("medium") returns medium, hard, and fair, in TIERS declaration order', () => {
+    expect(getFamilyMembers('medium').map((t) => t.id)).toEqual(['medium', 'hard', 'fair'])
+  })
+
+  it('getFamilyPrimary("hard") is hard2 — the active member with the lowest pickerOrder', () => {
+    const primary = getFamilyPrimary('hard')
+    expect(primary.id).toBe('hard2')
+    expect(primary.label).toBe('Hard')
+    expect(primary.retired).toBe(false)
+  })
+
+  it('getFamilyPrimary breaks ties by pickerOrder, not TIERS order: ismcts (order 4) never outranks hard2 (order 3)', () => {
+    expect(getFamilyPrimary('hard').pickerOrder).toBe(3)
+  })
+
+  it('getFamilyPrimary("medium") is medium itself — the only non-retired member (hard/fair are both retired)', () => {
+    const primary = getFamilyPrimary('medium')
+    expect(primary.id).toBe('medium')
+    expect(primary.label).toBe('Medium')
+    expect(primary.retired).toBe(false)
+    expect(primary.pickerOrder).toBe(2)
+  })
+
+  it('hard and fair keep their own "Classic" labels even though they now file under the medium family', () => {
     expect(getTierLabel('hard')).toBe('Hard (Classic)')
     expect(getTierLabel('fair')).toBe('Hard (FairBot, Classic)')
   })

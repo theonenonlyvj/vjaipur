@@ -2,7 +2,7 @@ import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
 import { leaderboard as fetchLeaderboard } from '../net/online'
 import type { LeaderboardResponse } from '../net/online'
-import { TIERS, getTierLabel } from '../ai/tiers'
+import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, type TierFamily } from '../ai/tiers'
 
 interface StatsDashboardProps {
   onClose: () => void
@@ -17,12 +17,14 @@ const AI_TIERS = TIERS.map((t) => ({ id: t.id, label: t.label }))
 
 const EMPTY_LEADERBOARD: LeaderboardResponse = { overall: [], verified: [] }
 
-// The global-leaderboard opponent filter: 'all' (everything, the original
-// Overall/Verified board) or a real `opponent_type` value ('online' or a
-// tier id — active or retired, per worker/src/do/stats.ts's
-// isValidOpponentTypeFilter). Kept as a plain string (not a union) since the
-// tier-id set legitimately grows/retires over time and this only ever
-// round-trips through the worker, never branches on a specific id here.
+// The global-leaderboard TOP-LEVEL filter: 'all' (everything, the original
+// Overall/Verified board), 'online', a standalone tier id, or a FAMILY tag
+// (src/ai/tiers.ts's TierFamily — e.g. 'hard' collapses hard2/ismcts/hard/
+// fair under one "Hard" chip once 2+ of them have data; see
+// buildOpponentGroups below). Kept as a plain string (not a union) for the
+// same reason as before: the tier-id set legitimately grows/retires over
+// time and this only ever round-trips through the worker (or, for a family,
+// resolves locally via tiers.ts), never branches on a specific id here.
 const ALL_OPPONENTS = 'all'
 
 /** Same order the tier picker/Hall-of-Records "vs AI" table already uses
@@ -31,20 +33,88 @@ const ALL_OPPONENTS = 'all'
  *  app instead of following the server's unordered `SELECT DISTINCT`. */
 const TIER_ORDER: string[] = TIERS.map((t) => t.id)
 
-/** `availableOpponents` (server `SELECT DISTINCT`, no defined order) sorted
- *  into a stable, human-sensible toggle order: 'online' first (if present),
- *  then AI tiers in TIER_ORDER. */
-function sortOpponentTypes(types: string[]): string[] {
-  const tiers = types.filter((t) => t !== 'online').sort((a, b) => TIER_ORDER.indexOf(a) - TIER_ORDER.indexOf(b))
-  return types.includes('online') ? ['online', ...tiers] : tiers
-}
-
 /** 'online' isn't a tier (getTierLabel would just echo it back unresolved),
  *  so it gets its own explicit label; everything else is a tier id resolved
  *  via tiers.ts (the single source of truth, including retired tiers — e.g.
  *  'fair' -> "Hard (FairBot, Classic)", 'hard' -> "Hard (Classic)"). */
 function opponentLabel(id: string): string {
   return id === 'online' ? 'Online' : getTierLabel(id)
+}
+
+// ── Family grouping (2026-07-25 "Hard" drill-down) ──────────────────────────
+//
+// A top-row entry is either a plain opponent_type (a standalone tier, or
+// 'online') or a COLLAPSED family: 2+ of that family's tiers.ts members have
+// recorded data, so they fold into one chip — labeled and positioned after
+// the family's canonical member (see getFamilyPrimary in ai/tiers.ts) —
+// instead of cluttering the top row with every member separately. A family
+// with 0 or 1 data-bearing members is indistinguishable from a plain
+// standalone tier (isFamily: false) — there's nothing to drill into.
+interface OpponentGroup {
+  /** 'online' | a standalone tier id | a family tag (ai/tiers.ts's
+   *  TierFamily) — whichever this entry represents; also the value passed
+   *  to selectOpponentFilter/stored in `opponentFilter` when clicked. */
+  key: string
+  label: string
+  isFamily: boolean
+  /** For an isFamily group: every family member that actually has data
+   *  (from tiers.ts, in TIERS order) — the drill-down row's member chips.
+   *  For a non-family group this is just `[key]` (unused by rendering). */
+  members: string[]
+}
+
+/** Build the leaderboard's top-row tier/family entries (everything except
+ *  'all' and 'online', which the caller renders separately) from the
+ *  worker's `availableOpponents` — purely a function of tiers.ts + which ids
+ *  have data, never a hardcoded id list. */
+function buildOpponentGroups(availableOpponents: string[]): OpponentGroup[] {
+  const tierIds = availableOpponents.filter((id) => id !== 'online')
+  const seenFamilies = new Set<TierFamily>()
+  const groups: OpponentGroup[] = []
+
+  for (const id of tierIds) {
+    const family = getTierFamily(id)
+    if (!family) {
+      groups.push({ key: id, label: opponentLabel(id), isFamily: false, members: [id] })
+      continue
+    }
+    if (seenFamilies.has(family)) continue // already handled via an earlier member
+    seenFamilies.add(family)
+    const dataMembers = getFamilyMembers(family)
+      .map((t) => t.id)
+      .filter((memberId) => tierIds.includes(memberId))
+    if (dataMembers.length >= 2) {
+      groups.push({ key: family, label: getFamilyPrimary(family).label, isFamily: true, members: dataMembers })
+    } else {
+      // Only one member of this family has data — behaves exactly like a
+      // flat standalone chip for THAT member (nothing to drill into).
+      const soleId = dataMembers[0]
+      groups.push({ key: soleId, label: opponentLabel(soleId), isFamily: false, members: [soleId] })
+    }
+  }
+
+  // Order by each entry's REPRESENTATIVE tier's TIER_ORDER position (a
+  // family's representative is its canonical/primary member) so a collapsed
+  // "Hard" lands exactly where hardAi2 always has.
+  return groups.sort((a, b) => {
+    const aRep = a.isFamily ? getFamilyPrimary(a.key as TierFamily).id : a.key
+    const bRep = b.isFamily ? getFamilyPrimary(b.key as TierFamily).id : b.key
+    return TIER_ORDER.indexOf(aRep) - TIER_ORDER.indexOf(bRep)
+  })
+}
+
+/** What to pass to `leaderboard()` for a given top-level filter plus (when
+ *  that filter is a family) drill-down selection. `drillMember: null` means
+ *  "All <Family>" — the family's FULL tiers.ts member roster, not just the
+ *  data-bearing ones (an extra id with zero matches costs nothing server-
+ *  side, and this way the aggregate list is a pure function of tiers.ts,
+ *  never of the fetched `availableOpponents`). */
+function fetchArgFor(filter: string, drillMember: string | null): string | string[] | undefined {
+  if (filter === ALL_OPPONENTS) return undefined
+  if ((FAMILIES as string[]).includes(filter)) {
+    return drillMember ?? getFamilyMembers(filter as TierFamily).map((t) => t.id)
+  }
+  return filter
 }
 
 function winPct(wins: number, games: number) {
@@ -72,14 +142,21 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   // meaningful for the ALL_OPPONENTS board — a specific opponent filter shows
   // its `overall` rows directly (see opponentFilter's docstring below).
   const [lbTab, setLbTab] = useState<'overall' | 'verified'>('overall')
-  // Which opponent bucket the global board is scoped to: ALL_OPPONENTS (the
-  // original Overall/Verified board) or a real opponent_type ('online' or a
-  // tier id). Selecting a specific filter re-fetches and re-ranks over just
-  // those matches (worker/src/do/stats.ts's `?opponentType=`); its rows are
+  // Which TOP-LEVEL bucket the global board is scoped to: ALL_OPPONENTS (the
+  // original Overall/Verified board), a real opponent_type ('online' or a
+  // standalone tier id), or a FAMILY tag (ai/tiers.ts's TierFamily — e.g.
+  // 'hard', see buildOpponentGroups). Selecting a specific filter re-fetches
+  // and re-ranks over just those matches (worker/src/do/stats.ts's
+  // `?opponentType=`, single id OR comma list for a family); its rows are
   // inherently server-authoritative-or-not on their own terms, so the
   // Overall/Verified sub-tabs fold away in favor of just showing `overall`
   // (see `activeRows` below) rather than a redundant/near-empty "Verified".
   const [opponentFilter, setOpponentFilter] = useState<string>(ALL_OPPONENTS)
+  // When `opponentFilter` is a family: which member to drill into, or `null`
+  // for the "All <Family>" aggregate (the default every time a family is
+  // freshly selected — see selectOpponentFilter). Meaningless (and ignored
+  // by fetchArgFor) when `opponentFilter` isn't a family.
+  const [drillMember, setDrillMember] = useState<string | null>(null)
   // The full set of opponent_types with data, as reported by the worker's
   // unfiltered call (`availableOpponents` — only that call carries it; a
   // filtered response leaves this untouched so the toggle row doesn't blink
@@ -89,21 +166,33 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const [lbLoading, setLbLoading] = useState(false)
   const [lbError, setLbError] = useState('')
 
+  /** Top-level toggle click handler: switching filters always resets the
+   *  family drill-down back to its "All <Family>" default (see
+   *  `drillMember`'s docstring) — selecting a DIFFERENT top-level filter
+   *  hides/discards whatever drill-down selection was active. */
+  function selectOpponentFilter(id: string) {
+    setOpponentFilter(id)
+    setDrillMember(null)
+  }
+
   // Fetch the (already server-ranked — worker/src/do/stats.ts#getLeaderboard
   // reuses the exact same rankBySkill comparator) leaderboard when switching
-  // to global view, or when the opponent filter changes.
+  // to global view, or when the opponent filter or drill-down selection
+  // changes. fetchArgFor resolves ALL_OPPONENTS/family/standalone-id purely
+  // from `opponentFilter`/`drillMember` (never from `availableOpponents`),
+  // so this effect doesn't need it as a dependency.
   useEffect(() => {
     if (view !== 'global') return
     setLbLoading(true)
     setLbError('')
-    fetchLeaderboard(opponentFilter === ALL_OPPONENTS ? undefined : opponentFilter)
+    fetchLeaderboard(fetchArgFor(opponentFilter, drillMember))
       .then((data) => {
         setLeaderboardData(data)
         if (data.availableOpponents) setAvailableOpponents(data.availableOpponents)
       })
       .catch(() => setLbError('Could not load leaderboard.'))
       .finally(() => setLbLoading(false))
-  }, [view, opponentFilter])
+  }, [view, opponentFilter, drillMember])
 
   // ── MY RECORDS ─────────────────────────────────────────────────────────
   const aiStats = AI_TIERS.map((tier) => {
@@ -135,10 +224,15 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   // opponent filter always shows `overall` (its own definition of "verified"
   // folds in per the opponentFilter state docstring above).
   const activeRows = opponentFilter === ALL_OPPONENTS ? leaderboardData[lbTab] : leaderboardData.overall
-  // Toggle options: a leading "All", then every present opponent_type
-  // (already server-filtered to only non-empty buckets — see
-  // getAvailableOpponentTypes) in stable tier order.
-  const opponentToggleOptions = [ALL_OPPONENTS, ...sortOpponentTypes(availableOpponents)]
+  // Top-row entries: standalone tiers/families with data, already server-
+  // filtered to only non-empty buckets (see getAvailableOpponentTypes) and
+  // ordered per TIER_ORDER — see buildOpponentGroups's docstring.
+  const opponentGroups = buildOpponentGroups(availableOpponents)
+  // The currently-selected group, if `opponentFilter` names one — drives
+  // whether the secondary drill-down row renders at all (only for a
+  // collapsed family; a standalone tier/'online'/'all' never has one).
+  const selectedGroup = opponentGroups.find((g) => g.key === opponentFilter)
+  const showDrillDown = selectedGroup?.isFamily ?? false
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -229,21 +323,66 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
         {/* ── GLOBAL ── */}
         {view === 'global' && (
           <>
-            {/* Opponent filter: All + one toggle per opponent_type that
-                actually has data (empty buckets never appear here — see
-                getAvailableOpponentTypes). Stays put across a filter change
-                (not gated on lbLoading) so re-fetches don't make it flicker. */}
+            {/* Top-level opponent filter: All, then every standalone tier or
+                collapsed family that actually has data (empty buckets never
+                appear here — see getAvailableOpponentTypes/
+                buildOpponentGroups), then Online last if present. Stays put
+                across a filter change (not gated on lbLoading) so re-fetches
+                don't make it flicker. */}
             <div style={opponentToggleRowStyle}>
-              {opponentToggleOptions.map((id) => (
+              <button
+                onClick={() => selectOpponentFilter(ALL_OPPONENTS)}
+                style={opponentFilter === ALL_OPPONENTS ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+              >
+                All
+              </button>
+              {opponentGroups.map((g) => (
                 <button
-                  key={id}
-                  onClick={() => setOpponentFilter(id)}
-                  style={opponentFilter === id ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+                  key={g.key}
+                  onClick={() => selectOpponentFilter(g.key)}
+                  style={opponentFilter === g.key ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
                 >
-                  {id === ALL_OPPONENTS ? 'All' : opponentLabel(id)}
+                  {g.label}
                 </button>
               ))}
+              {availableOpponents.includes('online') && (
+                <button
+                  onClick={() => selectOpponentFilter('online')}
+                  style={opponentFilter === 'online' ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+                >
+                  Online
+                </button>
+              )}
             </div>
+
+            {/* Secondary drill-down row — only when the top-level selection
+                is a collapsed FAMILY (see OpponentGroup.isFamily). "All
+                <Family>" (the aggregate across every declared member, incl.
+                ones with no data — see fetchArgFor) is the default; each
+                remaining chip is one data-bearing member, labeled via
+                getTierLabel (ai/tiers.ts's single source of truth, e.g.
+                "Hard (Classic)"/"Hard (FairBot, Classic)" for retired
+                members). Switching the TOP-level filter away hides this row
+                entirely (selectedGroup no longer matches). */}
+            {showDrillDown && selectedGroup && (
+              <div style={opponentToggleRowStyle}>
+                <button
+                  onClick={() => setDrillMember(null)}
+                  style={drillMember === null ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+                >
+                  All {selectedGroup.label}
+                </button>
+                {selectedGroup.members.map((id) => (
+                  <button
+                    key={id}
+                    onClick={() => setDrillMember(id)}
+                    style={drillMember === id ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+                  >
+                    {getTierLabel(id)}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {lbLoading && (
               <div style={{ color: '#888', textAlign: 'center', padding: '40px 0', fontStyle: 'italic' }}>

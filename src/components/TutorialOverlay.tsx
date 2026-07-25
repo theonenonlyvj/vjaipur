@@ -70,7 +70,7 @@ const STEPS: Step[] = [
   },
   {
     title: 'Camels Are Powerful',
-    body: "Don't overlook camels! They don't count against your 7-card hand limit, so they're free resources. Use them in exchanges to grab goods without giving any up. A large herd also earns 5 bonus rupees at round end. Taking all camels from the market also refreshes it with new cards — sometimes that's the real play.",
+    body: "Don't overlook camels! There are 11 in the deck, and they don't count against your 7-card hand limit, so they're free resources. Use them in exchanges to grab goods without giving any up. A large herd also earns 5 bonus rupees at round end. Taking all camels from the market also refreshes it with new cards — sometimes that's the real play.",
     trigger: 'button',
     chapter: 2,
   },

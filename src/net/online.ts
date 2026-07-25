@@ -129,9 +129,15 @@ export async function myGames(): Promise<MyGamesResponse> {
 
 /** GET /stats/leaderboard[?opponentType=] — omit `opponentType` for the
  *  unfiltered "All" board (the only call that carries `availableOpponents` —
- *  see worker/src/do/stats.ts's LeaderboardResponse docstring). */
-export async function leaderboard(opponentType?: string): Promise<LeaderboardResponse> {
-  const qs = opponentType ? `?opponentType=${encodeURIComponent(opponentType)}` : ''
+ *  see worker/src/do/stats.ts's LeaderboardResponse docstring). Also accepts
+ *  a LIST of ids (joined with commas, e.g. `hard2,ismcts,hard,fair`) — the
+ *  worker aggregates matches across all of them into one board (see
+ *  StatsDashboard.tsx's "All Hard" family drill-down default). Each id is
+ *  individually `encodeURIComponent`-ed but the commas themselves are left
+ *  literal, matching exactly what worker/src/index.ts's route splits on. */
+export async function leaderboard(opponentType?: string | string[]): Promise<LeaderboardResponse> {
+  const ids = Array.isArray(opponentType) ? opponentType : opponentType ? [opponentType] : []
+  const qs = ids.length ? `?opponentType=${ids.map(encodeURIComponent).join(',')}` : ''
   return workerFetch<LeaderboardResponse>(`/stats/leaderboard${qs}`, { method: 'GET' })
 }
 
