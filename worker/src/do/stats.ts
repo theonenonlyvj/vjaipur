@@ -20,7 +20,8 @@ export type LeaderboardRow = {
 
 export type LeaderboardResponse = {
   /** All matches (or, when a filter was requested, all matches matching that
-   *  `opponentType`). */
+   *  `opponentType` — a single id, or the union of matches across a
+   *  comma-separated LIST of ids, e.g. a "Hard family" aggregate). */
   overall: LeaderboardRow[]
   /** The `source = 'online_authoritative'` SUBSET of `overall` — rule-legal +
    *  server-authoritative, NOT proof of two distinct humans (ADDENDUM T: a
@@ -48,14 +49,19 @@ type AggRow = { account_id: string; display_name: string | null; games: number; 
 
 async function loadLeaderboardRows(
   db: D1Database,
-  opts: { verifiedOnly?: boolean; opponentType?: string } = {},
+  opts: { verifiedOnly?: boolean; opponentType?: string | string[] } = {},
 ): Promise<LeaderboardRow[]> {
   const conditions: string[] = []
   const binds: unknown[] = []
   if (opts.verifiedOnly) conditions.push(`m.source = 'online_authoritative'`)
-  if (opts.opponentType) {
-    conditions.push(`m.opponent_type = ?`)
-    binds.push(opts.opponentType)
+  const types = Array.isArray(opts.opponentType) ? opts.opponentType : opts.opponentType ? [opts.opponentType] : []
+  if (types.length > 0) {
+    // A single id or a list (the "Hard family" aggregate — StatsDashboard.tsx's
+    // drill-down default) both go through the same `IN (...)` clause; for a
+    // single-element list this is SQL-equivalent to `= ?`, so single-id
+    // callers see no behavior change.
+    conditions.push(`m.opponent_type IN (${types.map(() => '?').join(', ')})`)
+    binds.push(...types)
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   const stmt = db.prepare(
@@ -108,17 +114,23 @@ export async function getAvailableOpponentTypes(db: D1Database): Promise<string[
  * `GET /stats/leaderboard[?opponentType=]` — see `LeaderboardResponse`'s
  * docstring for exactly what `overall`/`verified` mean in the filtered vs
  * unfiltered case. `opponentType`, when passed, must already be a validated
- * value (index.ts's route checks it via `isValidOpponentTypeFilter` BEFORE
- * calling this — this function does not re-validate, so an unrecognized
- * value here just silently yields empty rows rather than erroring, which is
- * fine for a value that's already known-good by the time it arrives).
+ * value OR list of values (index.ts's route splits `?opponentType=` on `,`
+ * and checks every id via `isValidOpponentTypeFilter` BEFORE calling this —
+ * this function does not re-validate, so an unrecognized value here just
+ * silently yields empty rows rather than erroring, which is fine for a value
+ * that's already known-good by the time it arrives). A list aggregates
+ * matches across ALL listed types into one leaderboard — e.g.
+ * `['hard2','ismcts','hard','fair']` for StatsDashboard.tsx's "All Hard"
+ * family drill-down — via the same GROUP BY account_id + rankBySkill +
+ * MIN_GAMES_FOR_RANK-floor pipeline a single id already used.
  */
-export async function getLeaderboard(db: D1Database, opponentType?: string): Promise<LeaderboardResponse> {
+export async function getLeaderboard(db: D1Database, opponentType?: string | string[]): Promise<LeaderboardResponse> {
+  const isFiltered = Array.isArray(opponentType) ? opponentType.length > 0 : !!opponentType
   const [overall, verified] = await Promise.all([
     loadLeaderboardRows(db, { opponentType }),
     loadLeaderboardRows(db, { verifiedOnly: true, opponentType }),
   ])
-  if (opponentType) return { overall, verified }
+  if (isFiltered) return { overall, verified }
   const availableOpponents = await getAvailableOpponentTypes(db)
   return { overall, verified, availableOpponents }
 }

@@ -225,6 +225,61 @@ describe('getLeaderboard', () => {
     expect(overall).toEqual([])
     expect(verified).toEqual([])
   })
+
+  // ---------------------------------------------------------------------
+  // Comma-list / family aggregation (StatsDashboard.tsx's "All Hard" drill-
+  // down default: opponentType passed as a string[] instead of a string).
+  // ---------------------------------------------------------------------
+
+  it('aggregates matches across a LIST of opponentTypes: rows are the union of matches for every listed type, GROUP BY account_id', async () => {
+    const a = acct('family-agg')
+    await seedPlayer(a, 'Family Aggregator')
+    for (let i = 0; i < 2; i++) {
+      await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 90, opponentScore: 40, won: true, timestamp: Date.now() + 700 + i })
+    }
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 80, opponentScore: 50, won: true, timestamp: Date.now() + 800 + i })
+    }
+    // A 'medium' match for the same account must NOT be swept into the
+    // ['hard2','ismcts'] aggregate.
+    await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 900 })
+
+    const { overall } = await getLeaderboard(DB(), ['hard2', 'ismcts'])
+    const row = overall.find((r) => r.accountId === a)
+    expect(row?.games).toBe(5) // 2 hard2 + 3 ismcts, the 1 medium match excluded
+    expect(row?.wins).toBe(5)
+  })
+
+  it('aggregates across the full retired-inclusive "Hard family" list (hard2, ismcts, hard, fair)', async () => {
+    const a = acct('family-agg-full')
+    await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1000 })
+    await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1001 })
+    await seedMatch({ accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1002 })
+    await seedMatch({ accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1003 })
+
+    const { overall } = await getLeaderboard(DB(), ['hard2', 'ismcts', 'hard', 'fair'])
+    const row = overall.find((r) => r.accountId === a)
+    expect(row?.games).toBe(4)
+    expect(row?.wins).toBe(2)
+  })
+
+  it('a single-element list behaves identically to passing that id as a plain string', async () => {
+    const a = acct('family-agg-single')
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 60, opponentScore: 20, won: true, timestamp: Date.now() + 1100 + i })
+    }
+
+    const asString = await getLeaderboard(DB(), 'medium')
+    const asList = await getLeaderboard(DB(), ['medium'])
+    expect(asList.overall.find((r) => r.accountId === a)?.games).toBe(3)
+    expect(asList.overall.find((r) => r.accountId === a)?.games).toBe(asString.overall.find((r) => r.accountId === a)?.games)
+    expect(asList.availableOpponents).toBeUndefined() // still "filtered" shape, same as the string form
+  })
+
+  it('a LIST filter also has no availableOpponents field (same filtered-shape rule as a single id)', async () => {
+    const filtered = await getLeaderboard(DB(), ['hard2', 'ismcts'])
+    expect(filtered.availableOpponents).toBeUndefined()
+  })
 })
 
 // =============================================================================
@@ -289,6 +344,44 @@ describe('GET /stats/leaderboard router', () => {
 
   it('with a garbage ?opponentType= returns 400 invalid_opponent_type', async () => {
     const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=not-a-real-tier'))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_opponent_type' })
+  })
+
+  it('with a comma-separated ?opponentType= list, aggregates matches across every listed type', async () => {
+    const a = acct('router-family')
+    await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1200 })
+    await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1201 })
+    await seedMatch({ accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1202 })
+    await seedMatch({ accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1203 })
+
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=hard2,ismcts,hard,fair'))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { overall: { accountId: string; games: number }[]; availableOpponents?: string[] }
+    expect(body.overall.find((r) => r.accountId === a)?.games).toBe(4)
+    expect(body.availableOpponents).toBeUndefined() // still filtered shape, same as a single id
+  })
+
+  it('a single id passed with no comma behaves exactly as before (single-id path unchanged)', async () => {
+    const a = acct('router-single-unchanged')
+    for (let i = 0; i < 2; i++) {
+      await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1300 + i })
+    }
+
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=easy'))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { overall: { accountId: string; games: number }[] }
+    expect(body.overall.find((r) => r.accountId === a)?.games).toBe(2)
+  })
+
+  it('an invalid id ANYWHERE in a comma list 400s the whole request (no partial/silent-drop)', async () => {
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=medium,not-a-real-tier'))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_opponent_type' })
+  })
+
+  it('an invalid id at the START of an otherwise-valid comma list still 400s', async () => {
+    const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=not-a-real-tier,hard2,ismcts'))
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'invalid_opponent_type' })
   })
