@@ -395,3 +395,33 @@ describe('StatsDashboard global leaderboard — family collapse threshold (<2 da
     expect(screen.queryByRole('button', { name: 'All Medium' })).not.toBeInTheDocument()
   })
 })
+
+describe('StatsDashboard MY RECORDS — pending-sync banner + Sync now', () => {
+  it('shows the pending banner with the count and drains the queue via Sync now', async () => {
+    useStatsStore.setState({
+      pendingReports: [
+        { opponent_type: 'ismcts', player_score: 80, opponent_score: 70, won: true, timestamp: 111 },
+        { opponent_type: 'ismcts', player_score: 60, opponent_score: 75, won: false, timestamp: 222 },
+      ],
+    })
+    const retrySpy = vi
+      .spyOn(useStatsStore.getState(), 'retryPendingReports')
+      .mockImplementation(async () => {
+        useStatsStore.setState({ pendingReports: [] })
+      })
+    useStatsStore.setState({ retryPendingReports: retrySpy as any })
+
+    render(<StatsDashboard onClose={() => {}} />)
+    expect(screen.getByText(/2 finished games not yet/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /sync now/i }))
+    await waitFor(() => expect(retrySpy).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/not yet\s*synced/i)).not.toBeInTheDocument())
+  })
+
+  it('renders no banner when nothing is pending', () => {
+    useStatsStore.setState({ pendingReports: [] })
+    render(<StatsDashboard onClose={() => {}} />)
+    expect(screen.queryByText(/not yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /sync now/i })).not.toBeInTheDocument()
+  })
+})
