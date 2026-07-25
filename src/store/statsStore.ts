@@ -38,6 +38,10 @@ interface StatsState {
   // heuristic until the next auth (or an explicit claim) sets it authoritatively.
   //   undefined = unknown (legacy) · false = ghost/guest · true = claimed
   claimed?: boolean
+  /** Human-readable reason the most recent match-report upload failed (null
+   *  after any success) — shown in My Records' pending-sync banner so a
+   *  failing sync is never silent. NOT persisted meaningfully; transient. */
+  lastSyncError?: string | null
 }
 
 interface StatsActions {
@@ -193,7 +197,10 @@ export const useStatsStore = create<StatsStore>()(
 
       reportMatchNow: async (match, log) => {
         const account = await get().ensureVGamesAccount()
-        if (!account) return false // fail-closed: no verified identity, don't sync
+        if (!account) {
+          set({ lastSyncError: 'Could not sign in to the stats service (offline?)' })
+          return false // fail-closed: no verified identity, don't sync
+        }
         try {
           const result = await reportMatchToWorker({
             opponent_type: match.opponent_type,
@@ -207,9 +214,14 @@ export const useStatsStore = create<StatsStore>()(
             // one) never grows a body for nothing.
             ...(log && log.length > 0 ? { log: capLogForReport(log) } : {}),
           })
+          if (result.ok) set({ lastSyncError: null })
           return !!result.ok
         } catch (e) {
           console.warn('reportMatchNow failed (offline or worker unreachable):', e)
+          // Surface WHY for the My Records pending-sync banner — silent
+          // failures left 19 finished games invisibly unsynced (2026-07-21).
+          const msg = e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 140) : String(e).slice(0, 140)
+          set({ lastSyncError: msg })
           return false
         }
       },

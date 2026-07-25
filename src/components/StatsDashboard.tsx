@@ -137,6 +137,7 @@ function fmtWinRate(rate: number) {
 export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const matches = useStatsStore((state) => state.matches)
   const pendingReports = useStatsStore((state) => state.pendingReports)
+  const lastSyncError = useStatsStore((state) => state.lastSyncError)
   const [syncing, setSyncing] = useState(false)
 
   // Drain the on-device pending-report queue ON DEMAND. Before this existed,
@@ -276,6 +277,11 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                 <span>
                   ⚠ {pendingReports.length} finished game{pendingReports.length === 1 ? '' : 's'} not yet
                   synced to the server — they count here but not on the Global board yet.
+                  {lastSyncError && (
+                    <span style={{ display: 'block', color: '#ff8080', marginTop: 4 }}>
+                      Last sync failed: {lastSyncError}
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={handleSyncNow}
