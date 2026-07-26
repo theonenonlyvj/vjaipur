@@ -95,3 +95,14 @@ Root-cause note: WHY his device's quick-reauth was rejected remains unpinned
 (repro attempts with claimed accts + legacy credentials all passed; CORS fine)
 — but the UX now surfaces and recovers it in one tap, and login rebinds the
 device. Watch for recurrence via the new signals.
+
+## BACKLOG ADD 2026-07-26 — "Bonus Race" variant (parked, Vijay's idea)
+Ordered 3/4/5 bonus piles (highest first — reward whoever sells big FIRST),
+consistent with the goods tokens' descending order. Decision: keep official
+random draw as DEFAULT (preserves round-end reveal suspense, protects casual
+players, avoids compounding first-mover advantage); build as an OPT-IN variant
+toggle (like Match Length; online = a room setting) if/when picked up.
+Implementation notes: one-line engine setup change (sorted vs shuffle) but
+ripples: certified-engine care + tests, bot evals assume random draws
+(re-benchmark under variant — deterministic bonuses make ISMCTS stronger vs
+humans), and redaction (opp bonus values become inferable when ordered).
