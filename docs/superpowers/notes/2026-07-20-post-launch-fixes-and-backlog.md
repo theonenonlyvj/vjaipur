@@ -78,3 +78,20 @@ under-hidden-swap proof test, pinned iterations). Shipped as its own tier
 "Hard (ISMCTS)" ALONGSIDE the untouched Hard so Vijay can A/B and decide which
 survives. (The earlier eval-overhaul attempt that regressed stays reverted.)
 Remaining backlog: Omniscient readability; decommission (held); Blueprint sync.
+
+## UPDATE 2026-07-23 — the sync saga, resolved + session-UX council shipped (a8277e5)
+Vijay's 25 vs-AI games (20 ISMCTS) weren't reaching the server: his claimed
+account's token expired, silent quick-reauth failed on his device, failures
+queued invisibly, and every surface said something cryptic ('unauthorized',
+'Failed to create room' for Sureka) instead of "log back in" — which was the
+whole fix. Shipped along the way: pending-sync banner + Sync now + error
+surfacing + enriched 401 diagnostics. Then a 4-lens council review produced 5
+fixes, all shipped: sessionExpired store signal + refuse silent claimed→ghost
+identity swaps; global SessionBanner ("You're signed out — log in…" + Log In);
+Lobby 401 copy fixed (was 'reload the page' — a dead end) + auto-open login;
+sync banner CTA becomes Log In on auth failure with friendly copy; Profile red
+expired strip + auto-expanded login + avatar red dot. 585 tests.
+Root-cause note: WHY his device's quick-reauth was rejected remains unpinned
+(repro attempts with claimed accts + legacy credentials all passed; CORS fine)
+— but the UX now surfaces and recovers it in one tap, and login rebinds the
+device. Watch for recurrence via the new signals.
