@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
 import { history as fetchHistory, reportMatch as reportMatchToWorker } from '../net/online'
+import { WorkerError } from '../net/http'
 import { capLogForReport, type AiLogEntry } from './aiGameLog'
 
 export interface MatchRecord {
@@ -42,6 +43,15 @@ interface StatsState {
    *  after any success) — shown in My Records' pending-sync banner so a
    *  failing sync is never silent. NOT persisted meaningfully; transient. */
   lastSyncError?: string | null
+  /** True when a PREVIOUSLY-CLAIMED device's silent re-auth (ensureVGamesAccount)
+   *  either throws or comes back as a different identity (status:'ghost' or
+   *  an accountId mismatch) — i.e. the user was signed in and is no longer.
+   *  Drives the global SessionBanner, the ProfileOverlay/ProfileIcon expired
+   *  indicators, and the StatsDashboard Log In CTA. Deliberately NOT set for
+   *  a guest/ghost's failed first-ever mint (never signed in — see
+   *  ensureVGamesAccount). Transient/derived — cleared on any successful
+   *  login (ensureVGamesAccount success, restoreAccount, secureAccount). */
+  sessionExpired?: boolean
 }
 
 interface StatsActions {
@@ -114,6 +124,7 @@ export const useStatsStore = create<StatsStore>()(
       pendingReports: [],
       vgamesToken: null,
       vgamesAccountId: null,
+      sessionExpired: false,
 
       ensureAccount: () => {
         const { friendCode, secretKey, displayName } = get()
@@ -157,12 +168,34 @@ export const useStatsStore = create<StatsStore>()(
           return { token: vgamesToken, accountId: vgamesAccountId }
         }
         const { secretKey, displayName } = get().ensureAccount()
+        // Captured BEFORE the mint call: a PREVIOUSLY-claimed device whose
+        // reauth resolves to a different identity (see guard below) is a
+        // signed-out session, not a legitimate re-derivation — never a
+        // fresh/never-claimed guest's first mint (see the catch below too).
+        const wasClaimed = get().claimed === true
+        const prevAccountId = get().vgamesAccountId
         try {
           const { token, accountId, status } = await vgamesQuick(secretKey, displayName ?? undefined)
+          // Refuse a silent claimed->ghost/identity-switch downgrade. This
+          // used to just adopt whatever the worker returned, which is the
+          // "different ghost identity" data-integrity bug: a claimed
+          // account's reauth coming back as a fresh ghost (or a flat-out
+          // different accountId) is far more likely a dead/rejected session
+          // than an intentional identity change. Fires on EITHER a
+          // status:'ghost' flip OR a bare accountId mismatch — belt-and-
+          // suspenders in case the worker doesn't actually send `status` in
+          // production (see council synthesis Conflict 1).
+          if (wasClaimed && (status === 'ghost' || (prevAccountId != null && accountId !== prevAccountId))) {
+            console.warn('ensureVGamesAccount: refusing claimed->ghost/identity-switch downgrade', {
+              prevAccountId, accountId, status,
+            })
+            set({ sessionExpired: true })
+            return null
+          }
           // Adopt the authoritative claim state when the worker reports one.
           // This self-heals legacy installs on their next silent re-auth. An
           // absent status leaves `claimed` untouched (never assume ghost).
-          const patch: Partial<StatsState> = { vgamesToken: token, vgamesAccountId: accountId }
+          const patch: Partial<StatsState> = { vgamesToken: token, vgamesAccountId: accountId, sessionExpired: false }
           if (status === 'claimed') patch.claimed = true
           else if (status === 'ghost') patch.claimed = false
           set(patch)
@@ -170,6 +203,10 @@ export const useStatsStore = create<StatsStore>()(
           return { token, accountId }
         } catch (e) {
           console.warn('ensureVGamesAccount failed:', e)
+          // Only a PREVIOUSLY-claimed device counts as "signed out" — a
+          // guest/ghost's failed first-ever mint was never signed in, and is
+          // already covered by pendingReports/lastSyncError.
+          if (wasClaimed) set({ sessionExpired: true })
           return null
         }
       },
@@ -220,7 +257,14 @@ export const useStatsStore = create<StatsStore>()(
           console.warn('reportMatchNow failed (offline or worker unreachable):', e)
           // Surface WHY for the My Records pending-sync banner — silent
           // failures left 19 finished games invisibly unsynced (2026-07-21).
-          const msg = e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 140) : String(e).slice(0, 140)
+          // A 401 here gets a friendly, actionable message instead of the
+          // raw WorkerError string (e.g. "WorkerError: unauthorized/
+          // invalid_token [reauth FAILED ...]") — sessionExpired (set inside
+          // ensureVGamesAccount, above) already drives the Log In CTA that
+          // replaces "Sync now" for this exact case.
+          const msg = (e instanceof WorkerError && e.status === 401)
+            ? 'Signed out — log in again to sync this game'
+            : (e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 140) : String(e).slice(0, 140))
           set({ lastSyncError: msg })
           return false
         }
@@ -251,6 +295,7 @@ export const useStatsStore = create<StatsStore>()(
               vgamesAccountId: result.accountId,
               displayName: username,
               claimed: true, // logged into an existing username+password account
+              sessionExpired: false, // a real login always clears a stale signed-out flag
             })
             socketService.setAuthToken(result.token)
             // Pull this account's match history so the career-stats panel
@@ -274,7 +319,9 @@ export const useStatsStore = create<StatsStore>()(
           if (!account) return { ok: false, error: 'Connecting to server... try again in 10 seconds' }
           const ack = await vgamesSetCredentials(account.token, username, password)
           if (ack.ok) {
-            set({ displayName: username, claimed: true }) // just claimed a username+password
+            // just claimed a username+password; a real login always clears a
+            // stale signed-out flag.
+            set({ displayName: username, claimed: true, sessionExpired: false })
           }
           return ack
         } catch (e) {
@@ -360,6 +407,7 @@ export const useStatsStore = create<StatsStore>()(
           vgamesToken: null,
           vgamesAccountId: null,
           claimed: false, // reset to a fresh, unclaimed guest
+          sessionExpired: false, // a fresh guest was never "signed out"
         })
       },
     }),

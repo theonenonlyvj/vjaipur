@@ -12,10 +12,13 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
     socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
   }, [])
 
-  const { displayName, friendCode, claimed, secureAccount, restoreAccount, clearStats } = useStatsStore()
+  const { displayName, friendCode, claimed, sessionExpired, secureAccount, restoreAccount, clearStats } = useStatsStore()
   const { totalMatches, wins, losses, winRate } = useStatsAggregates()
 
-  const [isRestoring, setIsRestoring] = useState(false)
+  // Auto-expand the login form when arriving with a dead session — no
+  // separate tap needed to find the way back in (see SessionBanner/
+  // StatsDashboard, which route here for exactly this reason).
+  const [isRestoring, setIsRestoring] = useState(() => useStatsStore.getState().sessionExpired === true)
   const [isSecuring, setIsSecuring] = useState(false)
 
   const [username, setUsername] = useState('')
@@ -91,6 +94,14 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
           <div style={{ marginTop: 8, padding: '4px 8px', background: isGuest ? '#3a1a00' : '#003a1a', border: `1px solid ${isGuest ? '#a06000' : '#00a060'}`, borderRadius: 4, display: 'inline-block', fontSize: 11, color: isGuest ? '#f0c030' : '#80ff80' }}>
             {isGuest ? 'GUEST ACCOUNT' : 'SECURED ACCOUNT'}
           </div>
+          {sessionExpired && (
+            <div style={{
+              marginTop: 8, padding: '6px 10px', background: '#3a0000', border: '1px solid #ff4060',
+              borderRadius: 4, fontSize: 12, color: '#ffb0b0', fontWeight: 700,
+            }}>
+              ⚠ Session expired — log in again
+            </div>
+          )}
         </div>
 
         <div style={sectionStyle}>

@@ -92,4 +92,48 @@ describe('ProfileOverlay', () => {
     expect(screen.getByText('SECURED ACCOUNT')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Create Account' })).toBeNull()
   })
+
+  // ── sessionExpired (the "you were signed out" signal) ──────────────────────
+  describe('sessionExpired', () => {
+    it('shows the expired strip when sessionExpired is true', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: true })
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.getByText(/session expired — log in again/i)).toBeInTheDocument()
+    })
+
+    it('does not show the expired strip when sessionExpired is false', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: false })
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.queryByText(/session expired — log in again/i)).not.toBeInTheDocument()
+    })
+
+    it('auto-expands the login form on mount when sessionExpired is true — no separate tap needed', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: true })
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.getByPlaceholderText('Username')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('Password')).toBeInTheDocument()
+    })
+
+    it('does NOT auto-expand the login form when sessionExpired is false (today\'s behavior preserved)', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: false })
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.queryByPlaceholderText('Username')).not.toBeInTheDocument()
+    })
+  })
 })
