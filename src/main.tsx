@@ -5,6 +5,7 @@ import App from './App'
 import './index.css'
 import { useStatsStore } from './store/statsStore'
 import { useGameStore } from './store/gameStore'
+import { startTokenRefreshWatchers } from './net/tokenRefresh'
 
 // Boot side effects — all fire-and-forget (the UI renders immediately and
 // updates reactively as each lands). The old eager `socketService.connect()`
@@ -27,6 +28,13 @@ void useStatsStore.getState().retryPendingReports()
 // (match_over/not-found sessions are cleared instead — see
 // gameStore.resumeSession).
 void useGameStore.getState().resumeSession()
+
+// Session persistence (owner was getting logged out roughly hourly): arm
+// the proactive identity-refresh triggers for the whole app session — see
+// src/net/tokenRefresh.ts for the immediate/visibility/focus/interval
+// triggers and statsStore's ensureVGamesAccount for the expiry check
+// itself.
+startTokenRefreshWatchers()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
