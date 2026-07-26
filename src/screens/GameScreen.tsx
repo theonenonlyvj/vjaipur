@@ -23,8 +23,16 @@ export interface GameScreenProps {
 export function GameScreen({ frozen = false }: GameScreenProps) {
   const { state, mode, error, dispatch, clearError, onlinePlayerIndex, aiThinking, lastMoveDescription, tutorial, endTutorial, playerName, opponentName, matchLength } = useGameStore()
 
-  const [selMarket, setSelMarket] = useState<number[]>([])
-  const [selHand, setSelHand] = useState<number[]>([])
+  // Selection is keyed by stable Card.id, NOT array index — indices shift or
+  // re-point whenever the market/hand array changes shape underneath them
+  // (see engine.ts's takeCamels compaction, takeSingle's in-place patch).
+  // Card.id is stable across state copies in both vs-ai/local (setup.ts's
+  // per-round counter; applyAction moves object references, never rewrites
+  // .id) and online (worker/src/do/view.ts sends state.market/me.hand
+  // verbatim — the same shared engine, not resynthesized).
+  const [selMarketIds, setSelMarketIds] = useState<number[]>([])
+  const [selHandCardIds, setSelHandCardIds] = useState<number[]>([])
+  const [camelsFromHerd, setCamelsFromHerd] = useState(0) // herd camels have no Card/id — a plain offered-count
   const [showRules, setShowRules] = useState(false)
   const [showBonusReveal, setShowBonusReveal] = useState(false)
   const prevBonusCountRef = useRef(0)
@@ -51,13 +59,32 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
   const myPlayer = state.players[myIndex]
   const opponentPlayer = state.players[opponentIndex]
   const isMyTurn = !frozen && state.activePlayer === myIndex
+
+  // Resolve stored ids against the CURRENT market/hand. A vanished id simply
+  // drops out — except: if this was a genuine multi-card Exchange in progress
+  // (selMarketIds.length >= 2) and ANY of those ids no longer resolves, drop
+  // the WHOLE selection (market + hand + herd offer) rather than silently
+  // narrowing into a smaller/different action the user never chose (e.g. a
+  // 2-good Exchange collapsing into a 1-good Take). This is the invariant
+  // that guarantees the app never dispatches a different move than intended.
+  const resolvedMarketIdx = selMarketIds.map(id => state.market.findIndex(c => c.id === id))
+  const marketSelectionBroken = selMarketIds.length >= 2 && resolvedMarketIdx.includes(-1)
+  const selMarket = marketSelectionBroken ? [] : resolvedMarketIdx.filter(idx => idx !== -1)
+
+  const selHandReal = marketSelectionBroken
+    ? []
+    : selHandCardIds.map(id => myPlayer.hand.findIndex(c => c.id === id)).filter(idx => idx !== -1)
+  const camelsOffered = marketSelectionBroken ? 0 : Math.min(camelsFromHerd, myPlayer.herd)
+  const selHand = [...selHandReal, ...Array(camelsOffered).fill(-1)]
+
   const camelsUsed = selHand.filter(i => i === -1).length
   const inExchange = selMarket.filter(i => state.market[i]?.type !== 'camel').length >= 2
 
   function clearSelection() {
     if (frozen) return
-    setSelMarket([])
-    setSelHand([])
+    setSelMarketIds([])
+    setSelHandCardIds([])
+    setCamelsFromHerd(0)
   }
 
   function handleTakeCamels() {
@@ -77,79 +104,84 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
     const card = state.market[i]
     if (!card) return
 
-    setSelMarket(prev => {
-      if (card.type === 'camel') {
-        const isAlreadySelected = prev.includes(i)
-        if (isAlreadySelected) {
-          return prev.filter(idx => state.market[idx].type !== 'camel')
-        } else {
-          setSelHand([])
-          return state.market
-            .map((c, idx) => (c.type === 'camel' ? idx : -1))
-            .filter(idx => idx !== -1)
-        }
+    if (card.type === 'camel') {
+      const isAlreadySelected = selMarket.includes(i)
+      if (isAlreadySelected) {
+        // selMarket only ever holds all-camel indices while in this branch,
+        // so deselecting one clears the whole camel group (unchanged from today).
+        setSelMarketIds([])
       } else {
-        const isAlreadySelected = prev.includes(i)
-        let next: number[]
-        if (isAlreadySelected) {
-          next = prev.filter(x => x !== i)
-        } else {
-          const filtered = prev.filter(idx => state.market[idx].type !== 'camel')
-          next = [...filtered, i]
-        }
-        // If not enough cards for exchange, or selecting first card, clear hand
-        if (next.length < 2) setSelHand([])
-        return next
+        const allCamelIds = state.market.filter(c => c.type === 'camel').map(c => c.id)
+        setSelHandCardIds([])
+        setCamelsFromHerd(0)
+        setSelMarketIds(allCamelIds)
       }
-    })
+    } else {
+      const isAlreadySelected = selMarket.includes(i)
+      let nextIndices: number[]
+      if (isAlreadySelected) {
+        nextIndices = selMarket.filter(idx => idx !== i)
+      } else {
+        const filtered = selMarket.filter(idx => state.market[idx].type !== 'camel')
+        nextIndices = [...filtered, i]
+      }
+      setSelMarketIds(nextIndices.map(idx => state.market[idx].id))
+      // If not enough cards for exchange, or selecting first card, clear hand
+      if (nextIndices.length < 2) {
+        setSelHandCardIds([])
+        setCamelsFromHerd(0)
+      }
+    }
   }
 
   function handleToggleHand(i: number) {
     if (frozen || !state) return
-    const myPlayer = state.players[myIndex]
     const card = myPlayer.hand[i]
     if (!card) return
 
-    setSelHand(prev => {
-      const isAlreadySelected = prev.includes(i)
+    const isAlreadySelected = selHandReal.includes(i)
 
-      if (isAlreadySelected) {
-        return prev.filter(x => x !== i)
+    if (isAlreadySelected) {
+      const next = selHandReal.filter(x => x !== i)
+      setSelHandCardIds(next.map(idx => myPlayer.hand[idx].id))
+    } else {
+      // Fix for bug #2: gate on `inExchange` (already correctly excludes an
+      // all-camels market selection), not raw selMarket.length — a camel
+      // group-select is always length>=2 but is NEVER a real exchange.
+      if (!inExchange) {
+        setSelMarketIds([])
+        setCamelsFromHerd(0)
+        const sameTypeIndices = myPlayer.hand
+          .map((c, idx) => (c.type === card.type ? idx : -1))
+          .filter(idx => idx !== -1)
+        setSelHandCardIds(sameTypeIndices.map(idx => myPlayer.hand[idx].id))
       } else {
-        // If we're not currently in an exchange (market selection < 2),
-        // then clicking hand cards should clear any market selection and select all of this type
-        if (selMarket.length < 2) {
-          setSelMarket([])
-          const sameTypeIndices = myPlayer.hand
-            .map((c, idx) => (c.type === card.type ? idx : -1))
-            .filter(idx => idx !== -1)
-          return sameTypeIndices
-        } else {
-          // Exchange mode: just toggle this one
-          return [...prev, i]
-        }
+        // Exchange mode: just add this one
+        setSelHandCardIds([...selHandReal, i].map(idx => myPlayer.hand[idx].id))
       }
-    })
+    }
   }
 
   function handleUseHerdCamel() {
     if (frozen) return
-    setSelHand(prev => [...prev, -1])
+    setCamelsFromHerd(p => Math.min(p + 1, myPlayer.herd))
   }
 
   function handleRemoveCamel() {
     if (frozen) return
-    setSelHand(prev => {
-      const idx = prev.lastIndexOf(-1)
-      if (idx === -1) return prev
-      return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
-    })
+    setCamelsFromHerd(p => Math.max(p - 1, 0))
   }
 
   function handleConfirmExchange() {
     if (frozen) return
     dispatch({ type: 'TAKE_EXCHANGE', marketIndices: selMarket, handIndices: selHand })
     clearSelection()
+  }
+
+  function handleUpdateHandSelection(indices: number[]) {
+    // ActionBar's sell +/- stepper computes fresh indices off player.hand in
+    // the SAME render (ActionBar.tsx:56-73) — convert straight back to ids.
+    setSelHandCardIds(indices.map(idx => myPlayer.hand[idx].id))
   }
 
   function handleSell(good: Good, quantity: number) {
@@ -248,7 +280,7 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
           onConfirmExchange={handleConfirmExchange}
           onClearSelection={clearSelection}
           onSell={handleSell}
-          onUpdateHandSelection={setSelHand}
+          onUpdateHandSelection={handleUpdateHandSelection}
         />
       )}
 
