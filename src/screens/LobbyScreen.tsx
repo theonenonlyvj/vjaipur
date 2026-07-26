@@ -9,7 +9,11 @@ import { WorkerError } from '../net/http'
  *  "Failed to create room" — so a stale-cache/auth issue is diagnosable. */
 function describeOnlineError(e: unknown, fallback: string): string {
   if (e instanceof WorkerError) {
-    if (e.status === 401) return 'Sign-in expired — fully reload the page (close the tab & reopen) and try again.'
+    // A "reload the page" instruction here rehydrates the SAME dead token
+    // and re-runs the same silent-reauth path — it can 401 identically
+    // again. The fix is to log back in, not reload (see LobbyScreen's
+    // handleCreate/handleJoin, which auto-open ProfileOverlay on this path).
+    if (e.status === 401) return "You've been signed out — log in again to create or join a room."
     if (e.status >= 500) return 'Server hiccup — try again in a moment.'
     return `${fallback} (${e.code})`
   }
@@ -76,6 +80,9 @@ export function LobbyScreen() {
     } catch (e) {
       setError(describeOnlineError(e, 'Failed to create room'))
       disconnectOnline()
+      // A dead session needs a login, not a retry — open the form right
+      // away instead of making the user notice the copy and find the icon.
+      if (e instanceof WorkerError && e.status === 401) setShowProfile(true)
     }
   }
 
@@ -88,6 +95,7 @@ export function LobbyScreen() {
     } catch (e) {
       setError(describeOnlineError(e, 'Room not found or full'))
       disconnectOnline()
+      if (e instanceof WorkerError && e.status === 401) setShowProfile(true)
     }
   }
 

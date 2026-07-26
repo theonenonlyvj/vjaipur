@@ -50,6 +50,7 @@ import { useStatsStore } from '../../src/store/statsStore'
 import { socketService } from '../../src/socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../../src/auth/vgamesClient'
 import { reportMatch, history } from '../../src/net/online'
+import { WorkerError } from '../../src/net/http'
 
 describe('statsStore', () => {
   beforeEach(() => {
@@ -282,6 +283,30 @@ describe('statsStore', () => {
     })
   })
 
+  describe('reportMatchNow lastSyncError copy', () => {
+    const matchData = { opponent_type: 'ai-easy', player_score: 70, opponent_score: 60, won: true }
+
+    it('translates a 401 WorkerError into a friendly "signed out" message instead of the raw error string', async () => {
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' })
+      vi.mocked(reportMatch).mockRejectedValueOnce(new WorkerError(401, 'unauthorized/invalid_token', {}))
+
+      const ok = await useStatsStore.getState().reportMatchNow({ ...matchData, timestamp: Date.now() })
+
+      expect(ok).toBe(false)
+      expect(useStatsStore.getState().lastSyncError).toBe('Signed out — log in again to sync this game')
+    })
+
+    it('keeps the raw diagnostic message for a non-auth failure (offline/5xx)', async () => {
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' })
+      vi.mocked(reportMatch).mockRejectedValueOnce(new WorkerError(500, 'http_500', {}))
+
+      const ok = await useStatsStore.getState().reportMatchNow({ ...matchData, timestamp: Date.now() })
+
+      expect(ok).toBe(false)
+      expect(useStatsStore.getState().lastSyncError).toContain('WorkerError')
+    })
+  })
+
   describe('secureAccount', () => {
     it('claims a username+password on the VGames account, without storing the password as the local secret', async () => {
       useStatsStore.getState().ensureAccount()
@@ -481,14 +506,41 @@ describe('statsStore', () => {
       expect(useStatsStore.getState().claimed).toBe(true)
     })
 
-    it('self-heals from the auth status on silent re-auth: status "ghost" downgrades claimed to false', async () => {
+    it('status "ghost" on a claimed device REFUSES the downgrade instead of silently adopting it: claimed stays true, sessionExpired flips true, returns null', async () => {
+      // This used to silently downgrade claimed->false, which is the exact
+      // "different ghost identity" data-integrity bug the sessionExpired
+      // fix exists to close — see statsStore.ts#ensureVGamesAccount.
       useStatsStore.getState().ensureAccount()
       useStatsStore.setState({ claimed: true, vgamesToken: null, vgamesAccountId: null }) // pretend a stale true
       vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc', status: 'ghost' })
 
-      await useStatsStore.getState().ensureVGamesAccount()
+      const result = await useStatsStore.getState().ensureVGamesAccount()
 
-      expect(useStatsStore.getState().claimed).toBe(false)
+      expect(result).toBeNull()
+      expect(useStatsStore.getState().claimed).toBe(true) // NOT downgraded
+      expect(useStatsStore.getState().sessionExpired).toBe(true)
+      expect(useStatsStore.getState().vgamesToken).toBeNull() // not adopted
+      expect(useStatsStore.getState().vgamesAccountId).toBeNull() // not adopted
+    })
+
+    it('refuses a claimed->different-identity downgrade on a bare accountId mismatch, even with no status field at all', async () => {
+      // Belt-and-suspenders: the guard must not depend on the worker
+      // actually sending `status` — a claimed device's reauth resolving to a
+      // DIFFERENT accountId is refused on its own.
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ claimed: true, vgamesToken: 'old-tok', vgamesAccountId: 'acc-old' })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'new-tok', accountId: 'acc-new' }) // no status field
+
+      // forceRefresh=true mirrors workerFetch's 401 retry path — the real
+      // trigger for this branch (a cached token+accountId short-circuits
+      // otherwise).
+      const result = await useStatsStore.getState().ensureVGamesAccount(true)
+
+      expect(result).toBeNull()
+      expect(useStatsStore.getState().claimed).toBe(true)
+      expect(useStatsStore.getState().sessionExpired).toBe(true)
+      expect(useStatsStore.getState().vgamesToken).toBe('old-tok') // not adopted
+      expect(useStatsStore.getState().vgamesAccountId).toBe('acc-old') // not adopted
     })
 
     it('leaves claimed untouched when the auth response omits a status (legacy worker)', async () => {
@@ -499,6 +551,63 @@ describe('statsStore', () => {
       await useStatsStore.getState().ensureVGamesAccount()
 
       expect(useStatsStore.getState().claimed).toBeUndefined()
+    })
+  })
+
+  describe('sessionExpired (session-expiry signal)', () => {
+    it('sets sessionExpired (leaves claimed untouched) when a claimed device\'s reauth throws', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ claimed: true, vgamesToken: null, vgamesAccountId: null })
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(result).toBeNull()
+      expect(useStatsStore.getState().claimed).toBe(true)
+      expect(useStatsStore.getState().sessionExpired).toBe(true)
+    })
+
+    it('does NOT set sessionExpired when a never-claimed guest/ghost fails to mint (not a "signed out" event — never signed in)', async () => {
+      useStatsStore.getState().ensureAccount() // claimed=false, fresh ghost
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(result).toBeNull()
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
+    })
+
+    it('a successful reauth clears a previously-set sessionExpired flag', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ claimed: true, vgamesToken: null, vgamesAccountId: null, sessionExpired: true })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc', status: 'claimed' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
+    })
+
+    it('clears sessionExpired on a successful restoreAccount (login)', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: true })
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({
+        ok: true, token: 'vg-tok-5', accountId: 'vg-acc-5', mustChangePassword: false,
+      })
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
+    })
+
+    it('clears sessionExpired on a successful secureAccount (claim)', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ sessionExpired: true })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok', accountId: 'vg-acc' })
+      vi.mocked(vgamesSetCredentials).mockResolvedValueOnce({ ok: true })
+
+      await useStatsStore.getState().secureAccount('vee', 'hunter2')
+
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
     })
   })
 })

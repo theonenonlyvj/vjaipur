@@ -10,11 +10,26 @@ vi.mock('../../src/net/session', () => ({
   save: vi.fn(), load: vi.fn(() => null), clear: vi.fn(),
   startHeartbeat: vi.fn(), stopHeartbeat: vi.fn(),
 }))
+// ProfileOverlay (opened via ProfileIcon, and auto-opened on a 401 — see
+// below) transitively pulls in socketService — same mock as ProfileOverlay.
+// test.tsx/StatsDashboard.test.tsx, so it never attempts a real connection.
+vi.mock('../../src/socket/socketService', () => ({
+  socketService: {
+    connect: vi.fn(),
+    connected: false,
+    setAuthToken: vi.fn(),
+    updateProfile: vi.fn(),
+    secureAccount: vi.fn(),
+    restoreAccount: vi.fn(),
+    pullHistory: vi.fn(),
+  },
+}))
 
 import { LobbyScreen } from '../../src/screens/LobbyScreen'
 import { useGameStore } from '../../src/store/gameStore'
 import { useStatsStore } from '../../src/store/statsStore'
 import * as onlineApi from '../../src/net/online'
+import { WorkerError } from '../../src/net/http'
 
 beforeEach(() => {
   useGameStore.setState({ onlineStatus: 'idle', roomCode: null, error: null, mode: null, myGamesList: [] })
@@ -102,6 +117,41 @@ describe('LobbyScreen -> gameStore -> net wiring', () => {
     await waitFor(() => expect(screen.getByText('CAML99')).toBeInTheDocument())
     expect(createGame).toHaveBeenCalled()
     createGame.mockRestore()
+  })
+
+  it('a 401 on Create Room shows the signed-out copy (not "reload the page") and auto-opens ProfileOverlay', async () => {
+    const createGame = vi.spyOn(onlineApi, 'createGame')
+      .mockRejectedValueOnce(new WorkerError(401, 'unauthorized/invalid_token', {}))
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByText(/create room/i))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("You've been signed out — log in again to create or join a room.")
+      ).toBeInTheDocument()
+    )
+    expect(screen.queryByText(/reload the page/i)).not.toBeInTheDocument()
+    // ProfileOverlay auto-opened, not just the icon sitting there unclicked.
+    expect(screen.getByText('PROFILE')).toBeInTheDocument()
+    createGame.mockRestore()
+  })
+
+  it('a 401 on Join Room shows the signed-out copy and auto-opens ProfileOverlay', async () => {
+    const resolveCode = vi.spyOn(onlineApi, 'resolveCode')
+      .mockRejectedValueOnce(new WorkerError(401, 'unauthorized/invalid_token', {}))
+
+    render(<MemoryRouter><LobbyScreen /></MemoryRouter>)
+    fireEvent.change(screen.getByPlaceholderText(/room code/i), { target: { value: 'ABCDEF' } })
+    fireEvent.click(screen.getByRole('button', { name: /^join$/i }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("You've been signed out — log in again to create or join a room.")
+      ).toBeInTheDocument()
+    )
+    expect(screen.getByText('PROFILE')).toBeInTheDocument()
+    resolveCode.mockRestore()
   })
 })
 

@@ -3,6 +3,7 @@ import { useStatsStore } from '../store/statsStore'
 import { leaderboard as fetchLeaderboard } from '../net/online'
 import type { LeaderboardResponse } from '../net/online'
 import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, getFamilyLabel, type TierFamily } from '../ai/tiers'
+import { ProfileOverlay } from './ProfileOverlay'
 
 interface StatsDashboardProps {
   onClose: () => void
@@ -138,7 +139,9 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const matches = useStatsStore((state) => state.matches)
   const pendingReports = useStatsStore((state) => state.pendingReports)
   const lastSyncError = useStatsStore((state) => state.lastSyncError)
+  const sessionExpired = useStatsStore((state) => state.sessionExpired)
   const [syncing, setSyncing] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
 
   // Drain the on-device pending-report queue ON DEMAND. Before this existed,
   // queued games only retried at app boot (retryPendingReports in main.tsx) —
@@ -283,17 +286,32 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                     </span>
                   )}
                 </span>
-                <button
-                  onClick={handleSyncNow}
-                  disabled={syncing}
-                  style={{
-                    background: '#f0c030', color: '#000', border: 'none', borderRadius: 6,
-                    padding: '6px 14px', fontWeight: 900, cursor: syncing ? 'wait' : 'pointer',
-                    whiteSpace: 'nowrap', opacity: syncing ? 0.6 : 1,
-                  }}
-                >
-                  {syncing ? 'Syncing…' : 'Sync now'}
-                </button>
+                {sessionExpired ? (
+                  // Sync Now cannot succeed until login happens first —
+                  // offering it here is a dead-end retry loop, so the CTA
+                  // becomes Log In instead (same visual weight as Sync now).
+                  <button
+                    onClick={() => setShowProfile(true)}
+                    style={{
+                      background: '#f0c030', color: '#000', border: 'none', borderRadius: 6,
+                      padding: '6px 14px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Log In
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSyncNow}
+                    disabled={syncing}
+                    style={{
+                      background: '#f0c030', color: '#000', border: 'none', borderRadius: 6,
+                      padding: '6px 14px', fontWeight: 900, cursor: syncing ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap', opacity: syncing ? 0.6 : 1,
+                    }}
+                  >
+                    {syncing ? 'Syncing…' : 'Sync now'}
+                  </button>
+                )}
               </div>
             )}
             <section style={{ marginBottom: 28 }}>
@@ -499,6 +517,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
           <button onClick={onClose} style={closePrimaryBtnStyle}>CLOSE</button>
         </div>
       </div>
+      {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
     </div>
   )
 }

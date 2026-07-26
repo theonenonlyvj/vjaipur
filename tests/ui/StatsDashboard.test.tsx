@@ -424,4 +424,46 @@ describe('StatsDashboard MY RECORDS — pending-sync banner + Sync now', () => {
     expect(screen.queryByText(/not yet/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /sync now/i })).not.toBeInTheDocument()
   })
+
+  it('shows a Log In CTA (not Sync now) when sessionExpired is true — Sync Now cannot succeed until login happens first', () => {
+    useStatsStore.setState({
+      pendingReports: [
+        { opponent_type: 'ismcts', player_score: 80, opponent_score: 70, won: true, timestamp: 111 },
+      ],
+      sessionExpired: true,
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    expect(screen.getByRole('button', { name: /^log in$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /sync now/i })).not.toBeInTheDocument()
+  })
+
+  it('Log In CTA opens ProfileOverlay', () => {
+    useStatsStore.setState({
+      pendingReports: [
+        { opponent_type: 'ismcts', player_score: 80, opponent_score: 70, won: true, timestamp: 111 },
+      ],
+      sessionExpired: true,
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /^log in$/i }))
+
+    expect(screen.getByText('PROFILE')).toBeInTheDocument()
+  })
+
+  it('keeps the Sync now CTA for a non-auth pending failure (sessionExpired false)', () => {
+    useStatsStore.setState({
+      pendingReports: [
+        { opponent_type: 'ismcts', player_score: 80, opponent_score: 70, won: true, timestamp: 111 },
+      ],
+      sessionExpired: false,
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^log in$/i })).not.toBeInTheDocument()
+  })
 })
