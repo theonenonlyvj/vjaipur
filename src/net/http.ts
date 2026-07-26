@@ -86,6 +86,10 @@ export async function workerFetch<T = unknown>(path: string, opts: WorkerFetchOp
   let token = opts.token ?? null
   let reauthed = false
   let attempt = 0
+  // Diagnostic breadcrumb for 401 handling — folded into the thrown
+  // WorkerError so a failing sync shows WHERE auth broke (2026-07-21:
+  // 'unauthorized' alone was undiagnosable from a screenshot).
+  let reauthNote: string | null = null
 
   for (;;) {
     let res: Response
@@ -108,9 +112,11 @@ export async function workerFetch<T = unknown>(path: string, opts: WorkerFetchOp
       const account = await useStatsStore.getState().ensureVGamesAccount(true)
       if (account) {
         token = account.token
+        reauthNote = 'reauth ok, retried'
         continue // one retry, immediately, with the fresh token
       }
       // Could not re-auth — fall through and surface the 401 as a WorkerError.
+      reauthNote = 'reauth FAILED (identity unreachable or rejected)'
     }
 
     if (res.status >= 500 && retryOn5xx && attempt < MAX_5XX_RETRIES) {
@@ -121,7 +127,10 @@ export async function workerFetch<T = unknown>(path: string, opts: WorkerFetchOp
 
     const data = await safeJson(res)
     if (!res.ok) {
-      const code = (data as { error?: string } | null)?.error ?? `http_${res.status}`
+      const body = data as { error?: string; reason?: string } | null
+      let code = body?.error ?? `http_${res.status}`
+      if (body?.reason) code += `/${body.reason}` // e.g. unauthorized/invalid_token
+      if (reauthNote) code += ` [${reauthNote}]`
       throw new WorkerError(res.status, code, data)
     }
     return data as T

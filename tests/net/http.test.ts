@@ -65,7 +65,7 @@ describe('net/http workerFetch', () => {
 
     await expect(workerFetch('/games/ABC/sync', { token: 'stale-tok' })).rejects.toMatchObject({
       status: 401,
-      code: 'unauthorized',
+      code: expect.stringContaining('unauthorized'),
     })
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
