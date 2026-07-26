@@ -52,6 +52,17 @@ import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../../src/auth/v
 import { reportMatch, history } from '../../src/net/online'
 import { WorkerError } from '../../src/net/http'
 
+// Builds a syntactically-real (unsigned) JWT whose payload carries only
+// `exp` (epoch seconds) — enough for src/auth/tokenExpiry.ts#decodeJwtExp to
+// read a real expiry, which the ensureVGamesAccount cache-freshness check
+// needs. `offsetSeconds` is relative to "now" (negative = already expired).
+function makeJwt(offsetSeconds: number): string {
+  const exp = Math.floor(Date.now() / 1000) + offsetSeconds
+  const b64url = (obj: unknown) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return `${b64url({ alg: 'none', typ: 'JWT' })}.${b64url({ exp })}.sig`
+}
+
 describe('statsStore', () => {
   beforeEach(() => {
     useStatsStore.getState().clearStats()
@@ -97,8 +108,10 @@ describe('statsStore', () => {
 
   describe('ensureVGamesAccount forceRefresh (401 self-heal)', () => {
     it('reuses the cached token by default, but forceRefresh mints a fresh one (fixes "Failed to create room" on an expired token)', async () => {
-      // Seed a cached (pretend-expired) token.
-      useStatsStore.setState({ vgamesToken: 'stale-tok', vgamesAccountId: 'acc-1' })
+      // Seed a cached token that is NOT near expiry (far-future exp) — the
+      // proactive-expiry check (see the dedicated describe block below) must
+      // not itself trigger a mint here; this test is only about forceRefresh.
+      useStatsStore.setState({ vgamesToken: 'stale-tok', vgamesAccountId: 'acc-1', vgamesTokenExp: Math.floor(Date.now() / 1000) + 3600 })
 
       // Default: short-circuits on the cache, no network mint.
       const cached = await useStatsStore.getState().ensureVGamesAccount()
@@ -111,6 +124,92 @@ describe('statsStore', () => {
       expect(vgamesQuick).toHaveBeenCalledTimes(1)
       expect(refreshed).toEqual({ token: 'fresh-tok', accountId: 'acc-1' })
       expect(useStatsStore.getState().vgamesToken).toBe('fresh-tok')
+    })
+  })
+
+  describe('ensureVGamesAccount proactive expiry refresh (session persistence — owner logged out hourly)', () => {
+    it('stores vgamesTokenExp (decoded from the minted token) whenever ensureVGamesAccount mints a token', async () => {
+      const token = makeJwt(3600)
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token, accountId: 'acc-1' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      const expected = Math.floor(Date.now() / 1000) + 3600
+      expect(useStatsStore.getState().vgamesTokenExp).toBe(expected)
+    })
+
+    it('reuses a cached token that is NOT near expiry, with no network call', async () => {
+      useStatsStore.setState({
+        vgamesToken: 'cached-tok', vgamesAccountId: 'acc-1',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) + 3600, // 1h out — well outside the 10-minute skew
+      })
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(result).toEqual({ token: 'cached-tok', accountId: 'acc-1' })
+      expect(vgamesQuick).not.toHaveBeenCalled()
+    })
+
+    it('mints a fresh token when the cached one is WITHIN the skew window (about to expire)', async () => {
+      useStatsStore.setState({
+        vgamesToken: 'about-to-expire', vgamesAccountId: 'acc-1',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) + 5 * 60, // 5 min out — inside the 10-minute skew
+      })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'acc-1' })
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(vgamesQuick).toHaveBeenCalledTimes(1)
+      expect(result?.token).not.toBe('about-to-expire')
+    })
+
+    it('mints a fresh token when the cached one is already expired', async () => {
+      useStatsStore.setState({
+        vgamesToken: 'dead-tok', vgamesAccountId: 'acc-1',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) - 100,
+      })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'acc-1' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(vgamesQuick).toHaveBeenCalledTimes(1)
+    })
+
+    it('mints a fresh token when vgamesTokenExp is missing even though a token+accountId are cached (self-heals a pre-upgrade persisted session)', async () => {
+      useStatsStore.setState({ vgamesToken: 'legacy-tok', vgamesAccountId: 'acc-1', vgamesTokenExp: null })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'acc-1' })
+
+      await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(vgamesQuick).toHaveBeenCalledTimes(1)
+    })
+
+    it('forceRefresh still bypasses the cache even when the cached token is fresh (not near expiry)', async () => {
+      useStatsStore.setState({
+        vgamesToken: 'fresh-tok', vgamesAccountId: 'acc-1',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) + 3600,
+      })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'acc-1' })
+
+      await useStatsStore.getState().ensureVGamesAccount(true)
+
+      expect(vgamesQuick).toHaveBeenCalledTimes(1)
+    })
+
+    it('the claimed->ghost refusal guard still fires (and sets sessionExpired) when a near-expiry proactive refresh resolves to a different identity', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({
+        claimed: true, vgamesToken: 'old-tok', vgamesAccountId: 'acc-old',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) + 5 * 60, // inside the skew window
+      })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'acc-new', status: 'ghost' })
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(result).toBeNull()
+      expect(useStatsStore.getState().claimed).toBe(true) // not downgraded
+      expect(useStatsStore.getState().sessionExpired).toBe(true)
+      expect(useStatsStore.getState().vgamesToken).toBe('old-tok') // not adopted
     })
   })
 
@@ -155,7 +254,10 @@ describe('statsStore', () => {
     })
 
     it('reuses a cached VGames token across matches instead of re-minting', async () => {
-      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-2', accountId: 'vg-acc-2' })
+      // A real (far-future-exp) JWT — a fake opaque string would decode to
+      // no expiry and, per the new proactive-refresh check, get treated as
+      // "unknown freshness" and re-minted on the very next call.
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(3600), accountId: 'vg-acc-2' })
       vi.mocked(reportMatch).mockResolvedValue({ ok: true })
       await useStatsStore.getState().addMatch(matchData)
       await useStatsStore.getState().addMatch(matchData)
@@ -395,6 +497,78 @@ describe('statsStore', () => {
 
       expect(result).toEqual({ ok: false, error: 'invalid_credentials' })
       expect(useStatsStore.getState().vgamesToken).toBeNull()
+    })
+
+    it('stores vgamesTokenExp decoded from the freshly-issued login token', async () => {
+      useStatsStore.getState().ensureAccount()
+      const loginToken = makeJwt(3600) // login mints a 1h token
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: loginToken, accountId: 'vg-acc-5', mustChangePassword: false })
+      // The background upgrade-refresh (item 4) also fires on login — keep it
+      // a harmless no-op here so it can't race this assertion.
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      const expected = Math.floor(Date.now() / 1000) + 3600
+      expect(useStatsStore.getState().vgamesTokenExp).toBe(expected)
+    })
+
+    it('after a successful login, kicks a fire-and-forget upgrade refresh that swaps in the longer-lived device-bound token for the SAME account', async () => {
+      useStatsStore.getState().ensureAccount()
+      const { secretKey } = useStatsStore.getState()
+      const loginToken = makeJwt(3600) // 1h
+      const upgradedToken = makeJwt(86_400) // 24h device-bound token
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: loginToken, accountId: 'vg-acc-5', mustChangePassword: false })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: upgradedToken, accountId: 'vg-acc-5', status: 'claimed' })
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      await vi.waitFor(() => {
+        expect(useStatsStore.getState().vgamesToken).toBe(upgradedToken)
+      })
+      expect(vgamesQuick).toHaveBeenCalledWith(secretKey, 'vee')
+      expect(useStatsStore.getState().vgamesAccountId).toBe('vg-acc-5') // same account, per the measured quick-after-claim behavior
+      expect(useStatsStore.getState().vgamesTokenExp).toBe(Math.floor(Date.now() / 1000) + 86_400)
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
+    })
+
+    it('a failed upgrade refresh leaves the successful login token intact — the user stays signed in, never regressed to signed-out', async () => {
+      useStatsStore.getState().ensureAccount()
+      const loginToken = makeJwt(3600)
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: loginToken, accountId: 'vg-acc-5', mustChangePassword: false })
+      vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      // Give the fire-and-forget upgrade attempt a chance to fail and settle.
+      await vi.waitFor(() => {
+        expect(vgamesQuick).toHaveBeenCalledTimes(1)
+      })
+      expect(useStatsStore.getState().vgamesToken).toBe(loginToken) // still the working login token
+      expect(useStatsStore.getState().vgamesAccountId).toBe('vg-acc-5')
+      expect(useStatsStore.getState().sessionExpired).toBe(false) // NOT signed out
+    })
+
+    it('an upgrade refresh that resolves to a different/ghost identity is refused but still leaves the login token intact and does not sign the user out', async () => {
+      useStatsStore.getState().ensureAccount()
+      const loginToken = makeJwt(3600)
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: loginToken, accountId: 'vg-acc-5', mustChangePassword: false })
+      // Pathological: quick resolves to a DIFFERENT/ghost identity — the
+      // ensureVGamesAccount guard refuses this internally (and would
+      // normally flag sessionExpired for a plain reauth caller), but the
+      // login itself must not be undone by it.
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: makeJwt(86_400), accountId: 'vg-acc-DIFFERENT', status: 'ghost' })
+
+      await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+
+      await vi.waitFor(() => {
+        expect(vgamesQuick).toHaveBeenCalledTimes(1)
+      })
+      expect(useStatsStore.getState().vgamesToken).toBe(loginToken) // not swapped to the refused identity
+      expect(useStatsStore.getState().vgamesAccountId).toBe('vg-acc-5')
+      await vi.waitFor(() => {
+        expect(useStatsStore.getState().sessionExpired).toBe(false) // not left signed-out
+      })
     })
   })
 

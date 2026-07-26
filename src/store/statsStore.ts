@@ -2,9 +2,17 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
+import { decodeJwtExp } from '../auth/tokenExpiry'
 import { history as fetchHistory, reportMatch as reportMatchToWorker } from '../net/online'
 import { WorkerError } from '../net/http'
 import { capLogForReport, type AiLogEntry } from './aiGameLog'
+
+// How far ahead of a token's actual expiry ensureVGamesAccount proactively
+// refreshes it (see below) — matches the app-boot/visibility/focus/interval
+// triggers in src/net/tokenRefresh.ts, which poll roughly every 15 minutes,
+// so a 10-minute skew comfortably catches the token before it dies rather
+// than racing it.
+const TOKEN_REFRESH_SKEW_SECONDS = 10 * 60
 
 export interface MatchRecord {
   opponent_type: string
@@ -31,6 +39,15 @@ interface StatsState {
   // existing local installs resolve to their VGames account automatically.
   vgamesToken: string | null
   vgamesAccountId: string | null
+  /** Decoded (never-verified) `exp` claim of `vgamesToken`, epoch seconds —
+   *  see src/auth/tokenExpiry.ts#decodeJwtExp. Set alongside vgamesToken
+   *  everywhere it's set (ensureVGamesAccount's mint, restoreAccount's
+   *  login). Drives ensureVGamesAccount's proactive-refresh check below:
+   *  null (never decoded, e.g. a pre-upgrade persisted session, or a
+   *  malformed token) is treated as "unknown freshness" and refreshed just
+   *  like a soon-to-expire one — the whole point is the owner never sits on
+   *  a token that's about to silently die. */
+  vgamesTokenExp: number | null
   // Explicit account claim state, authoritative over the old
   // `displayName.startsWith('Guest_')` heuristic (which broke when a guest
   // renamed themselves — see ProfileOverlay). Intentionally OPTIONAL with NO
@@ -56,7 +73,17 @@ interface StatsState {
 
 interface StatsActions {
   ensureAccount: () => { friendCode: string; secretKey: string; displayName: string | null }
-  ensureVGamesAccount: (forceRefresh?: boolean) => Promise<{ token: string; accountId: string } | null>
+  /** `suppressSessionExpiredOnFailure` (default false): when this refresh
+   *  attempt fails or the claimed->ghost/identity-swap guard refuses it,
+   *  skip the `sessionExpired: true` side effect (the guard itself still
+   *  refuses to adopt the bad result — this only silences the "you're
+   *  signed out" signal). Used by restoreAccount's post-login upgrade,
+   *  where the caller already holds an independently-verified, still-valid
+   *  token and a failed opportunistic upgrade says nothing about that. */
+  ensureVGamesAccount: (
+    forceRefresh?: boolean,
+    suppressSessionExpiredOnFailure?: boolean
+  ) => Promise<{ token: string; accountId: string } | null>
   /** `log` (optional) is the vs-ai match's per-move play-by-play (see
    *  src/store/aiGameLog.ts) — sent along with THIS report only, never
    *  persisted into `matches`/`pendingReports` (those stay small/durable;
@@ -124,6 +151,7 @@ export const useStatsStore = create<StatsStore>()(
       pendingReports: [],
       vgamesToken: null,
       vgamesAccountId: null,
+      vgamesTokenExp: null,
       sessionExpired: false,
 
       ensureAccount: () => {
@@ -155,16 +183,23 @@ export const useStatsStore = create<StatsStore>()(
       // install resolves to the same VGames account it would have under the
       // old friendCode/secretKey scheme. Never round-trips a plaintext secret
       // to the vjaipur game server itself.
-      ensureVGamesAccount: async (forceRefresh = false) => {
-        const { vgamesToken, vgamesAccountId } = get()
-        // Reuse the cached token UNLESS a caller forces a refresh. workerFetch
-        // passes forceRefresh=true on a 401 — without it, an EXPIRED cached
-        // token would be handed back unchanged, the retry would 401 again, and
-        // the call would fail ("Failed to create room" etc.). Forcing a fresh
-        // vgamesQuick mint self-heals an aged-out token (claimed accounts get
-        // short-lived tokens). The device credential re-auths to the same
-        // account, so identity is preserved.
-        if (!forceRefresh && vgamesToken && vgamesAccountId) {
+      ensureVGamesAccount: async (forceRefresh = false, suppressSessionExpiredOnFailure = false) => {
+        const { vgamesToken, vgamesAccountId, vgamesTokenExp } = get()
+        // Reuse the cached token UNLESS a caller forces a refresh, OR the
+        // cached token is missing a known expiry, OR it's within
+        // TOKEN_REFRESH_SKEW_SECONDS of dying. This is what makes the
+        // proactive refresh triggers (src/net/tokenRefresh.ts — boot,
+        // visibilitychange, focus, the 15-min interval) actually renew the
+        // session ahead of expiry instead of just re-confirming a token
+        // that's about to go stale: without this, EVERY one of those
+        // triggers would hit this same short-circuit and never mint a fresh
+        // token until something actually 401s (workerFetch's own
+        // forceRefresh=true self-heal) — which for the login path's 1h
+        // token is exactly the hourly logout this whole feature exists to
+        // kill.
+        const nowSeconds = Date.now() / 1000
+        const nearExpiry = vgamesTokenExp == null || vgamesTokenExp - nowSeconds <= TOKEN_REFRESH_SKEW_SECONDS
+        if (!forceRefresh && vgamesToken && vgamesAccountId && !nearExpiry) {
           return { token: vgamesToken, accountId: vgamesAccountId }
         }
         const { secretKey, displayName } = get().ensureAccount()
@@ -189,13 +224,18 @@ export const useStatsStore = create<StatsStore>()(
             console.warn('ensureVGamesAccount: refusing claimed->ghost/identity-switch downgrade', {
               prevAccountId, accountId, status,
             })
-            set({ sessionExpired: true })
+            if (!suppressSessionExpiredOnFailure) set({ sessionExpired: true })
             return null
           }
           // Adopt the authoritative claim state when the worker reports one.
           // This self-heals legacy installs on their next silent re-auth. An
           // absent status leaves `claimed` untouched (never assume ghost).
-          const patch: Partial<StatsState> = { vgamesToken: token, vgamesAccountId: accountId, sessionExpired: false }
+          const patch: Partial<StatsState> = {
+            vgamesToken: token,
+            vgamesAccountId: accountId,
+            vgamesTokenExp: decodeJwtExp(token),
+            sessionExpired: false,
+          }
           if (status === 'claimed') patch.claimed = true
           else if (status === 'ghost') patch.claimed = false
           set(patch)
@@ -206,7 +246,7 @@ export const useStatsStore = create<StatsStore>()(
           // Only a PREVIOUSLY-claimed device counts as "signed out" — a
           // guest/ghost's failed first-ever mint was never signed in, and is
           // already covered by pendingReports/lastSyncError.
-          if (wasClaimed) set({ sessionExpired: true })
+          if (wasClaimed && !suppressSessionExpiredOnFailure) set({ sessionExpired: true })
           return null
         }
       },
@@ -293,6 +333,7 @@ export const useStatsStore = create<StatsStore>()(
             set({
               vgamesToken: result.token,
               vgamesAccountId: result.accountId,
+              vgamesTokenExp: decodeJwtExp(result.token),
               displayName: username,
               claimed: true, // logged into an existing username+password account
               sessionExpired: false, // a real login always clears a stale signed-out flag
@@ -302,6 +343,21 @@ export const useStatsStore = create<StatsStore>()(
             // populates on a new device right after login. Fire-and-forget:
             // the store updates reactively; login itself returns immediately.
             void get().pullVGamesHistory()
+            // POST /auth/login mints a short (1h) token — fine for the login
+            // itself, but left alone the owner is back at the "signed out"
+            // banner an hour later. Immediately upgrade to the device-bound
+            // 24h token from /auth/quick: for an already-claimed account
+            // whose device credential is bound, quick returns that SAME
+            // account (measured), so this is a same-identity renewal, not a
+            // silent account switch. Fire-and-forget — never block the login
+            // return on it, and NEVER regress a login that just succeeded:
+            // pass suppressSessionExpiredOnFailure so a failed/refused
+            // upgrade (offline, or a device credential that happens to
+            // resolve elsewhere) leaves the still-valid 1h login token and
+            // sessionExpired:false exactly as the login above just set them
+            // — the guard still refuses to ADOPT a bad result, it just
+            // doesn't flip the "you're signed out" signal for this call.
+            void get().ensureVGamesAccount(true, true)
             return { ok: true }
           }
           return { ok: false, error: result.error }
@@ -406,6 +462,7 @@ export const useStatsStore = create<StatsStore>()(
           pendingReports: [],
           vgamesToken: null,
           vgamesAccountId: null,
+          vgamesTokenExp: null,
           claimed: false, // reset to a fresh, unclaimed guest
           sessionExpired: false, // a fresh guest was never "signed out"
         })

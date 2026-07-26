@@ -24,6 +24,11 @@ vi.mock('../../src/store/gameStore', () => ({
   useGameStore: { getState: () => ({ resumeSession }) },
 }))
 
+const startTokenRefreshWatchers = vi.fn()
+vi.mock('../../src/net/tokenRefresh', () => ({
+  startTokenRefreshWatchers: () => startTokenRefreshWatchers(),
+}))
+
 describe('main.tsx boot path', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -33,6 +38,15 @@ describe('main.tsx boot path', () => {
     resumeSession.mockResolvedValue(undefined)
     statsGetState.mockReturnValue({ vgamesToken: null, pullVGamesHistory, retryPendingReports })
     document.body.innerHTML = '<div id="root"></div>'
+  })
+
+  // Session-persistence (owner was getting logged out roughly hourly, see
+  // src/net/tokenRefresh.ts): boot arms the proactive refresh
+  // watchers (immediate check + visibilitychange/focus/15-min-interval)
+  // exactly once, alongside the other fire-and-forget boot side effects.
+  it('arms the proactive token-refresh watchers on boot', async () => {
+    await import('../../src/main')
+    expect(startTokenRefreshWatchers).toHaveBeenCalledTimes(1)
   })
 
   // Phase 2C cut the eager socketService.connect() boot call entirely — the
