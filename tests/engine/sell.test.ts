@@ -99,12 +99,15 @@ describe('SELL', () => {
     // still pay out. Selling 4 when only 3 tokens remain yields 3 tokens (the
     // 4th card earns nothing) and a FOUR-tier bonus — not a three-tier one.
     const hand: Card[] = [1, 2, 3, 4].map(id => ({ id, type: 'cloth' as const }))
-    const result = applyAction(makeState(hand, { cloth: [5, 3, 3] }), { type: 'SELL', good: 'cloth', quantity: 4 })
+    // REACHABLE pile state: cloth starts [5,3,3,2,2,1,1] and is always taken
+    // highest-first, so "3 tokens left" is necessarily the LOWEST three,
+    // [2,1,1] — never [5,3,3] (that would mean the cheap tokens went first).
+    const result = applyAction(makeState(hand, { cloth: [2, 1, 1] }), { type: 'SELL', good: 'cloth', quantity: 4 })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const me = result.value.players[0]
     // exactly the 3 remaining token values — the excess card pays nothing
-    expect(me.tokens.map(t => t.value)).toEqual([5, 3, 3])
+    expect(me.tokens.map(t => t.value)).toEqual([2, 1, 1])
     expect(result.value.tokens.cloth).toEqual([])
     // and the bonus is the 4-card tier, drawn from the four-pile
     expect(me.bonusTokens).toHaveLength(1)
