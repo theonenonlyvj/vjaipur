@@ -93,6 +93,25 @@ describe('SELL', () => {
     expect(result.value.players[0].bonusTokens).toHaveLength(1)
   })
 
+  it('sells 4 into a 3-token pile: takes only the 3 available BUT still earns the FOUR-tier bonus', () => {
+    // Official rule + Vijay's 2026-07-26 question: the bonus tier is decided by
+    // how many CARDS you sold, never by how many goods tokens the pile could
+    // still pay out. Selling 4 when only 3 tokens remain yields 3 tokens (the
+    // 4th card earns nothing) and a FOUR-tier bonus — not a three-tier one.
+    const hand: Card[] = [1, 2, 3, 4].map(id => ({ id, type: 'cloth' as const }))
+    const result = applyAction(makeState(hand, { cloth: [5, 3, 3] }), { type: 'SELL', good: 'cloth', quantity: 4 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const me = result.value.players[0]
+    // exactly the 3 remaining token values — the excess card pays nothing
+    expect(me.tokens.map(t => t.value)).toEqual([5, 3, 3])
+    expect(result.value.tokens.cloth).toEqual([])
+    // and the bonus is the 4-card tier, drawn from the four-pile
+    expect(me.bonusTokens).toHaveLength(1)
+    expect(me.bonusTokens[0].tier).toBe(4)
+    expect(result.value.bonusTokens.four).toHaveLength(makeState(hand).bonusTokens.four.length - 1)
+  })
+
   it('advances turn after sale', () => {
     const hand: Card[] = [{ id: 1, type: 'cloth' }, { id: 2, type: 'cloth' }]
     const result = applyAction(makeState(hand), { type: 'SELL', good: 'cloth', quantity: 2 })
