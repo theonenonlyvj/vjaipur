@@ -69,10 +69,40 @@ describe('StatsStrip', () => {
   it('calls onClick when clicked', () => {
     const onClick = vi.fn()
     render(<StatsStrip onClick={onClick} />)
-    
+
     // Click on the RECORD text, it should bubble up to the container
     fireEvent.click(screen.getByText('RECORD'))
-    
+
     expect(onClick).toHaveBeenCalled()
+  })
+
+  // Owner's 2026-07-28 GAMES-first ruling — RECORD is GAMES-primary, not
+  // match count. A mix of an explicit split (a matchLength-5 win, 3 games to
+  // 1) and a legacy no-split record proves the badge sums GAMES, not matches.
+  it('sums the games record (not the match count) from a mix of an explicit split and a legacy no-split record', () => {
+    useStatsStore.getState().clearStats()
+    useStatsStore.getState().addMatch({
+      opponent_type: 'medium',
+      player_score: 210,
+      opponent_score: 140,
+      won: true,
+      games_won: 3,
+      games_lost: 1,
+    })
+    useStatsStore.getState().addMatch({
+      opponent_type: 'medium',
+      player_score: 20,
+      opponent_score: 45,
+      won: false,
+      // no games_won/games_lost — legacy record, falls back to 1 game by won.
+    })
+
+    render(<StatsStrip onClick={() => {}} />)
+
+    // 2 matches would read 1W-1L; GAMES sums 3+0=3 won, 1+1=2 lost.
+    expect(screen.getByText('3W - 2L')).toBeDefined()
+    expect(screen.queryByText('1W - 1L')).toBeNull()
+    // TOTAL Δ is unchanged (a raw sum, already game-derived): 70 + -25 = 45.
+    expect(screen.getByText('+45')).toBeDefined()
   })
 })

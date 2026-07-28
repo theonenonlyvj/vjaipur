@@ -37,6 +37,11 @@ type SeedMatch = {
   aiCovered?: boolean
   gameUuid?: string | null
   timestamp: number
+  /** Migration 0004's per-match GAME split — omitted (both stay NULL) mirrors
+   *  every legacy row that predates the migration; a test seeding a fresh
+   *  vs-AI report with an explicit split passes both. */
+  gamesWon?: number | null
+  gamesLost?: number | null
 }
 
 async function seedMatch(m: SeedMatch): Promise<void> {
@@ -44,8 +49,8 @@ async function seedMatch(m: SeedMatch): Promise<void> {
     .prepare(
       `INSERT INTO matches
          (account_id, opponent_type, opponent_account_id, player_score, opponent_score,
-          won, source, ai_covered, game_uuid, timestamp, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          won, source, ai_covered, game_uuid, timestamp, created_at, games_won, games_lost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       m.accountId,
@@ -59,7 +64,32 @@ async function seedMatch(m: SeedMatch): Promise<void> {
       m.gameUuid ?? null,
       m.timestamp,
       m.timestamp,
+      m.gamesWon ?? null,
+      m.gamesLost ?? null,
     )
+    .run()
+}
+
+/** Seeds an ONLINE match's `games` archive row (game_uuid + the archive's own
+ *  seals0/seals1 — the EXACT per-game split source, per GAMES_WON_EXPR/
+ *  GAMES_LOST_EXPR in worker/src/do/stats.ts) plus its two `game_players`
+ *  seat rows. Mirrors rivalry.test.ts's seedMatchRow/seedSeat pattern, but
+ *  trimmed to just the columns stats.ts's games-split resolution actually
+ *  reads (no `moves` rows needed here — stats.ts never replays moves). */
+async function seedGame(opts: { gameUuid: string; seals0: number; seals1: number }): Promise<void> {
+  await DB()
+    .prepare(
+      `INSERT INTO games (game_uuid, code, status, match_length, seals0, seals1, winner_seat, source, engine_version, created_at, last_activity_at, ended_at)
+       VALUES (?, NULL, 'completed', 3, ?, ?, 0, 'online_authoritative', 'v1', ?, ?, ?)`,
+    )
+    .bind(opts.gameUuid, opts.seals0, opts.seals1, Date.now(), Date.now(), Date.now())
+    .run()
+}
+
+async function seedSeat(gameUuid: string, seatIndex: number, accountId: string): Promise<void> {
+  await DB()
+    .prepare(`INSERT INTO game_players (game_uuid, seat_index, account_id, display_name) VALUES (?, ?, ?, ?)`)
+    .bind(gameUuid, seatIndex, accountId, 'Seated Player')
     .run()
 }
 
@@ -283,6 +313,110 @@ describe('getLeaderboard', () => {
 })
 
 // =============================================================================
+// getLeaderboard — GAMES-first (owner's 2026-07-28 ruling): a mixed fixture
+// spanning all three resolution branches (online-exact-via-seals, vs-AI
+// legacy-null-fallback, vs-AI explicit-split) in ONE account, plus a
+// dedicated proof that RANKING itself now runs on games, not matches.
+// =============================================================================
+
+describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)', () => {
+  it('resolves games_won/games_lost per-branch and sums them correctly across a mixed fixture, while the compat games/wins fields stay MATCH totals', async () => {
+    const a = acct('games-mixed')
+    const opponent = acct('games-mixed-opp')
+    await seedPlayer(a, 'Mixed Fixture')
+
+    // Branch 1: an ONLINE 3-game match, EXACT split via games.seals0/seals1 —
+    // this account sits in seat 0 (2 seals) vs the opponent's seat 1 (1 seal).
+    const gameUuid = `guuid-mixed-${a}`
+    await seedGame({ gameUuid, seals0: 2, seals1: 1 })
+    await seedSeat(gameUuid, 0, a)
+    await seedSeat(gameUuid, 1, opponent)
+    await seedMatch({
+      accountId: a, opponentType: 'online', opponentAccountId: opponent, source: 'online_authoritative',
+      gameUuid, playerScore: 150, opponentScore: 90, won: true, timestamp: Date.now(),
+    })
+
+    // Branch 2: a LEGACY vs-AI row — no game_uuid, no stored split (both
+    // NULL, exactly like every row that predates migration 0004) — falls
+    // back to 1-0 by `won`.
+    await seedMatch({
+      accountId: a, opponentType: 'medium', source: 'client_reported',
+      playerScore: 80, opponentScore: 40, won: true, timestamp: Date.now() + 1,
+    })
+
+    // Branch 3: a NEW vs-AI row with an EXPLICIT 2-1 split (migration 0004).
+    await seedMatch({
+      accountId: a, opponentType: 'hard2', source: 'client_reported',
+      playerScore: 200, opponentScore: 140, won: true, timestamp: Date.now() + 2,
+      gamesWon: 2, gamesLost: 1,
+    })
+
+    const { overall } = await getLeaderboard(DB())
+    const row = overall.find((r) => r.accountId === a)
+    expect(row).toBeTruthy()
+
+    // Compat fields — MATCH totals, unchanged: 3 matches, all 3 won.
+    expect(row!.games).toBe(3)
+    expect(row!.wins).toBe(3)
+    expect(row!.winRate).toBe(1)
+
+    // GAMES totals — 2+1 (online, exact) + 1+0 (legacy, 1-0 fallback) + 2+1
+    // (explicit) = 5 won, 2 lost.
+    expect(row!.gamesWon).toBe(5)
+    expect(row!.gamesLost).toBe(2)
+  })
+
+  it('ranking runs on GAMES, not matches: a single swept 3-game online match outranks three separate 1-game losses', async () => {
+    // Sweeper: ONE match, but it's a 3-game online sweep (3 games won, 0
+    // lost) — under the OLD matches-based ranking this account would have
+    // only 1 "game" and sit UNQUALIFIED below the MIN_GAMES_FOR_RANK floor;
+    // under the new games-based ranking it has 3 GAMES at a perfect win rate.
+    const sweeper = acct('games-rank-sweeper')
+    const sweeperOpp = acct('games-rank-sweeper-opp')
+    const sweepUuid = `guuid-sweep-${sweeper}`
+    await seedGame({ gameUuid: sweepUuid, seals0: 3, seals1: 0 })
+    await seedSeat(sweepUuid, 0, sweeper)
+    await seedSeat(sweepUuid, 1, sweeperOpp)
+    await seedMatch({
+      accountId: sweeper, opponentType: 'online', opponentAccountId: sweeperOpp, source: 'online_authoritative',
+      gameUuid: sweepUuid, playerScore: 210, opponentScore: 100, won: true, timestamp: Date.now() + 10,
+    })
+
+    // Grinder: 3 SEPARATE 1-game matches (matchLength 1, game==match), 1 win
+    // / 2 losses — 3 games at a losing win rate, definitely qualified either
+    // way (matches count == games count here).
+    const grinder = acct('games-rank-grinder')
+    for (let i = 0; i < 3; i++) {
+      await seedMatch({
+        accountId: grinder, opponentType: 'medium', source: 'client_reported',
+        playerScore: i === 0 ? 60 : 20, opponentScore: i === 0 ? 40 : 80, won: i === 0, timestamp: Date.now() + 20 + i,
+      })
+    }
+
+    const { overall } = await getLeaderboard(DB())
+    const sweeperIdx = overall.findIndex((r) => r.accountId === sweeper)
+    const grinderIdx = overall.findIndex((r) => r.accountId === grinder)
+    expect(sweeperIdx).toBeGreaterThanOrEqual(0)
+    expect(grinderIdx).toBeGreaterThanOrEqual(0)
+
+    const sweeperRow = overall[sweeperIdx]!
+    const grinderRow = overall[grinderIdx]!
+    // The compat `games` field (MATCH count) would have put the sweeper
+    // (1 match) below the MIN_GAMES_FOR_RANK floor and the grinder (3
+    // matches) above it — proof this isn't just "both happen to qualify
+    // either way".
+    expect(sweeperRow.games).toBe(1)
+    expect(sweeperRow.games).toBeLessThan(MIN_GAMES_FOR_RANK)
+    expect(grinderRow.games).toBeGreaterThanOrEqual(MIN_GAMES_FOR_RANK)
+    // But by GAMES, the sweeper qualifies (3 games) at a perfect win rate —
+    // and ranks ABOVE the grinder.
+    expect(sweeperRow.gamesWon).toBe(3)
+    expect(sweeperRow.gamesLost).toBe(0)
+    expect(sweeperIdx).toBeLessThan(grinderIdx)
+  })
+})
+
+// =============================================================================
 // getAvailableOpponentTypes / isValidOpponentTypeFilter
 // =============================================================================
 
@@ -465,6 +599,53 @@ describe('getHistory', () => {
     expect(byOpponent.get(rival1)).toBe('Alice')
     expect(byOpponent.get(rival2)).toBe('Bob')
   })
+
+  // ---------------------------------------------------------------------
+  // gamesWon/gamesLost — per-row GAMES split (owner's 2026-07-28 ruling).
+  // Same three resolution branches as getLeaderboard's mixed fixture above,
+  // but asserted per-row here (getHistory never aggregates).
+  // ---------------------------------------------------------------------
+
+  it('resolves an EXACT gamesWon/gamesLost for an online match from games.seals0/seals1 via the caller\'s own seat', async () => {
+    const a = acct('history-games-online')
+    const opponent = acct('history-games-online-opp')
+    const gameUuid = `guuid-hist-online-${a}`
+    // Caller sits in seat 1 this time (seat mapping is per-match, never a
+    // constant) — seals1 is "mine", seals0 is "theirs".
+    await seedGame({ gameUuid, seals0: 1, seals1: 2 })
+    await seedSeat(gameUuid, 0, opponent)
+    await seedSeat(gameUuid, 1, a)
+    await seedMatch({
+      accountId: a, opponentType: 'online', opponentAccountId: opponent, source: 'online_authoritative',
+      gameUuid, playerScore: 130, opponentScore: 90, won: true, timestamp: Date.now(),
+    })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows[0]!.gamesWon).toBe(2) // seat 1's own seals
+    expect(rows[0]!.gamesLost).toBe(1) // seat 0's seals
+  })
+
+  it('falls back to a 1-0/0-1 approximation by `won` for a LEGACY vs-AI row with no stored split', async () => {
+    const a = acct('history-games-legacy')
+    await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 20, opponentScore: 45, won: false, timestamp: Date.now() })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows[0]!.gamesWon).toBe(0)
+    expect(rows[0]!.gamesLost).toBe(1)
+  })
+
+  it('resolves the EXACT stored split for a vs-AI row reported with an explicit games_won/games_lost (migration 0004)', async () => {
+    const a = acct('history-games-explicit')
+    await seedMatch({
+      accountId: a, opponentType: 'hard3', source: 'client_reported',
+      playerScore: 300, opponentScore: 210, won: true, timestamp: Date.now(),
+      gamesWon: 3, gamesLost: 2,
+    })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows[0]!.gamesWon).toBe(3)
+    expect(rows[0]!.gamesLost).toBe(2)
+  })
 })
 
 // =============================================================================
@@ -553,6 +734,80 @@ describe('reportMatch', () => {
 
     const rows = await getHistory(DB(), a)
     expect(rows.length).toBe(1) // the duplicate never landed a 2nd row
+  })
+
+  // ---------------------------------------------------------------------
+  // games_won/games_lost persistence (migration 0004 — owner's 2026-07-28
+  // GAMES-first ruling). src/store/gameStore.ts's vs-ai nextRound sends the
+  // match's own final `seals` here.
+  // ---------------------------------------------------------------------
+
+  describe('games_won/games_lost (migration 0004)', () => {
+    it('persists a valid explicit split, readable back via getHistory', async () => {
+      const a = acct('report-games-split')
+      const result = await reportMatch(DB(), a, {
+        opponent_type: 'medium', player_score: 90, opponent_score: 60, won: true, timestamp: Date.now(),
+        games_won: 2, games_lost: 1,
+      })
+      expect(result).toEqual({ ok: true })
+
+      const rows = await getHistory(DB(), a)
+      expect(rows[0]!.gamesWon).toBe(2)
+      expect(rows[0]!.gamesLost).toBe(1)
+
+      const raw = await DB().prepare(`SELECT games_won, games_lost FROM matches WHERE account_id = ?`).bind(a).first<{ games_won: number; games_lost: number }>()
+      expect(raw).toEqual({ games_won: 2, games_lost: 1 }) // stored on the actual columns, not just resolved at read time
+    })
+
+    it('omitting the split entirely stores NULL on both columns — the report still succeeds, and getHistory falls back to the 1-0/0-1-by-won approximation', async () => {
+      const a = acct('report-games-omitted')
+      const result = await reportMatch(DB(), a, { opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now() })
+      expect(result).toEqual({ ok: true })
+
+      const raw = await DB().prepare(`SELECT games_won, games_lost FROM matches WHERE account_id = ?`).bind(a).first<{ games_won: number | null; games_lost: number | null }>()
+      expect(raw).toEqual({ games_won: null, games_lost: null })
+
+      const rows = await getHistory(DB(), a)
+      expect(rows[0]!.gamesWon).toBe(1) // fallback: 1-0 by won
+      expect(rows[0]!.gamesLost).toBe(0)
+    })
+
+    it('an out-of-range games_won/games_lost (e.g. negative, non-integer, >5) is skipped — the report still succeeds, both columns stay NULL', async () => {
+      const a = acct('report-games-insane')
+      const result = await reportMatch(DB(), a, {
+        opponent_type: 'easy', player_score: 10, opponent_score: 5, won: false, timestamp: Date.now(),
+        games_won: -1, games_lost: 1,
+      })
+      expect(result).toEqual({ ok: true }) // never fails the report over a bad split
+
+      const raw = await DB().prepare(`SELECT games_won, games_lost FROM matches WHERE account_id = ?`).bind(a).first<{ games_won: number | null; games_lost: number | null }>()
+      expect(raw).toEqual({ games_won: null, games_lost: null })
+    })
+
+    it('providing only ONE of games_won/games_lost stores NULL on BOTH — never a half-written split', async () => {
+      const a = acct('report-games-half')
+      const result = await reportMatch(DB(), a, {
+        opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: Date.now(),
+        games_won: 2, // games_lost omitted
+      })
+      expect(result).toEqual({ ok: true })
+
+      const raw = await DB().prepare(`SELECT games_won, games_lost FROM matches WHERE account_id = ?`).bind(a).first<{ games_won: number | null; games_lost: number | null }>()
+      expect(raw).toEqual({ games_won: null, games_lost: null })
+    })
+  })
+})
+
+// =============================================================================
+// migration 0004 — games_won/games_lost columns present on `matches`
+// =============================================================================
+
+describe('migration 0004 (games_won/games_lost columns)', () => {
+  it('the `matches` table has both new nullable columns', async () => {
+    const { results } = await DB().prepare(`PRAGMA table_info(matches)`).all<{ name: string }>()
+    const columnNames = results.map((r) => r.name)
+    expect(columnNames).toContain('games_won')
+    expect(columnNames).toContain('games_lost')
   })
 })
 

@@ -27,6 +27,29 @@ export interface MatchRecord {
   opponent_score: number
   won: boolean
   timestamp: number
+  /** This match's exact per-GAME split (owner's 2026-07-28 GAMES-first
+   *  ruling — see worker/src/do/rivalry.ts's file header). Present for: a
+   *  vs-ai match recorded from now on (gameStore.ts's nextRound sends the
+   *  match's own final `seals`), or any match pulled via pullVGamesHistory
+   *  (worker/src/do/stats.ts#getHistory always resolves a split, exact or
+   *  approximated, for every row). Undefined only for a LEGACY locally-
+   *  persisted record from before this field existed — callers must fall
+   *  back to the same 1-0/0-1-by-`won` approximation the worker uses for a
+   *  legacy row with no stored split (see resolveMatchGames below). */
+  games_won?: number
+  games_lost?: number
+}
+
+/** Resolves a MatchRecord's per-GAME win/loss split — the exact split when
+ *  the record carries one, or the "1 game by won" approximation for a
+ *  legacy local record from before this field existed (same fallback rule
+ *  worker/src/do/stats.ts applies server-side to a legacy `matches` row with
+ *  no stored split — exact for the dominant matchLength-1 case). Centralized
+ *  here (rather than re-implemented per call site) so StatsDashboard.tsx's
+ *  MY RECORDS tables (vs-AI + Online Rivals) apply this fallback identically. */
+export function resolveMatchGames(m: Pick<MatchRecord, 'won' | 'games_won' | 'games_lost'>): { gamesWon: number; gamesLost: number } {
+  if (m.games_won != null && m.games_lost != null) return { gamesWon: m.games_won, gamesLost: m.games_lost }
+  return { gamesWon: m.won ? 1 : 0, gamesLost: m.won ? 0 : 1 }
 }
 
 interface StatsState {
@@ -296,6 +319,13 @@ export const useStatsStore = create<StatsStore>()(
             // report (or a retryPendingReports resend, which never carries
             // one) never grows a body for nothing.
             ...(log && log.length > 0 ? { log: capLogForReport(log) } : {}),
+            // The exact per-GAME split, when this MatchRecord carries one —
+            // omitted entirely (never sent as undefined) when absent, so the
+            // worker's reportMatch sees a genuinely-missing field rather than
+            // an explicit `undefined` (matches `log`'s own omission style).
+            ...(match.games_won != null && match.games_lost != null
+              ? { games_won: match.games_won, games_lost: match.games_lost }
+              : {}),
           })
           if (result.ok) set({ lastSyncError: null })
           return !!result.ok
@@ -428,6 +458,11 @@ export const useStatsStore = create<StatsStore>()(
             opponent_score: m.opponentScore,
             won: m.won,
             timestamp: m.timestamp, // already epoch-ms (ADDENDUM V — D1's INTEGER column)
+            // getHistory always resolves a split (exact or approximated —
+            // never null) for every row, so this is always real data, not a
+            // guess made here.
+            games_won: m.gamesWon,
+            games_lost: m.gamesLost,
           }))
           // Merge server history with any local matches not yet synced up,
           // de-duped by timestamp (string-vs-number normalized defensively —
@@ -481,24 +516,54 @@ export const useStatsStore = create<StatsStore>()(
   )
 )
 
-// Selectors for aggregates
+// Selectors for aggregates. Owner's 2026-07-28 GAMES-first ruling (see
+// StatsDashboard.tsx/RivalryModal.tsx's precedent): GAMES are the primary
+// lifetime record; MATCHES are secondary context. `gamesWon`/`gamesLost`
+// resolve each MatchRecord via `resolveMatchGames` — exact when the record
+// carries its own split, "1 game by won" for a legacy record with none.
+// Both consumers of this hook (StatsStrip.tsx's bottom badge,
+// ProfileOverlay.tsx's CAREER STATS panel) read the GAMES fields as primary;
+// ProfileOverlay additionally surfaces the MATCH fields as a muted secondary
+// line.
 export const useStatsAggregates = () => {
   const matches = useStatsStore((state) => state.matches)
 
   const totalMatches = matches.length
-  const wins = matches.filter((m) => m.won).length
-  const losses = totalMatches - wins
-  const winRate = totalMatches > 0 ? (wins / totalMatches) * 100 : 0
+  const matchWins = matches.filter((m) => m.won).length
+  const matchLosses = totalMatches - matchWins
+
+  let gamesWon = 0
+  let gamesLost = 0
+  for (const m of matches) {
+    const split = resolveMatchGames(m)
+    gamesWon += split.gamesWon
+    gamesLost += split.gamesLost
+  }
+  const totalGames = gamesWon + gamesLost
+  const winRate = totalGames > 0 ? (gamesWon / totalGames) * 100 : 0
+
+  // A raw SUM (never divided), so it's invariant to grouping: match-level
+  // player_score/opponent_score already accumulate every game's own score
+  // within that match (gameStore.ts's matchScores += result.scores per
+  // round), so summing per-match deltas across every match already equals
+  // summing every individual GAME's delta across the player's whole history.
+  // No change needed here for the games-first ruling — it was already
+  // "game-derived" by construction.
   const totalDelta = matches.reduce(
     (acc, m) => acc + (m.player_score - m.opponent_score),
     0
   )
 
   return {
-    totalMatches,
-    wins,
-    losses,
+    // GAMES — primary.
+    gamesWon,
+    gamesLost,
+    totalGames,
     winRate,
     totalDelta,
+    // MATCHES — secondary/compat.
+    totalMatches,
+    matchWins,
+    matchLosses,
   }
 }

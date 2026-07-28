@@ -1,5 +1,5 @@
 import { useState, useEffect, type CSSProperties } from 'react'
-import { useStatsStore } from '../store/statsStore'
+import { useStatsStore, resolveMatchGames } from '../store/statsStore'
 import { leaderboard as fetchLeaderboard, myStyle as fetchMyStyle, rivalry as fetchRivalry } from '../net/online'
 import type { LeaderboardResponse, MyStyleResponse, RivalryResponse } from '../net/online'
 import type { TugRow, TugRowFormat } from '../shared/styleAgg'
@@ -382,11 +382,30 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const styleData = styleTier ? styleCache[styleTier] : undefined
 
   // ── MY RECORDS ─────────────────────────────────────────────────────────
+  //
+  // Owner's 2026-07-28 GAMES-first ruling (matches the shipped RIVALRY modal
+  // precedent — worker/src/do/rivalry.ts's file header): W/L/Win%/Avg Δ below
+  // are all computed on GAMES (deals/rounds), not matches (best-of-N
+  // sittings). Per-record splits (`resolveMatchGames`, statsStore.ts) are
+  // exact when a MatchRecord carries one — every vs-ai match reported from
+  // now on (gameStore.ts's nextRound), or ANY record pulled via
+  // pullVGamesHistory (the worker always resolves a split for history rows)
+  // — and fall back to "1 game by won" for a legacy locally-persisted record
+  // with no split. Avg Δ's numerator (a match's whole net score) is exact
+  // regardless; dividing by GAMES rather than MATCHES turns it into a true
+  // per-game average once a match can span more than one game.
   const aiStats = AI_TIERS.map((tier) => {
     const ms = matches.filter((m) => m.opponent_type === tier.id)
-    const wins = ms.filter((m) => m.won).length
+    let wins = 0
+    let losses = 0
+    for (const m of ms) {
+      const split = resolveMatchGames(m)
+      wins += split.gamesWon
+      losses += split.gamesLost
+    }
+    const games = wins + losses
     const totalDelta = ms.reduce((acc, m) => acc + (m.player_score - m.opponent_score), 0)
-    return { label: tier.label, games: ms.length, wins, losses: ms.length - wins, totalDelta }
+    return { label: tier.label, games, wins, losses, totalDelta }
   })
 
   const onlineMatches = matches.filter((m) => m.opponent_type === 'online')
@@ -395,13 +414,20 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   // seen for that id (worker/src/do/stats.ts#getHistory's `players` LEFT
   // JOIN, threaded through statsStore's pullVGamesHistory) so the table can
   // render a real name instead of the raw UUID (2026-07-27 fix — "Online
-  // Rivals" was showing e.g. "a1b2c3d4-..." for every rival).
-  const rivalMap = new Map<string, { name: string | null; wins: number; losses: number; totalDelta: number }>()
+  // Rivals" was showing e.g. "a1b2c3d4-..." for every rival). GAMES are now
+  // primary (wins/losses below); MATCHES are tracked alongside as secondary
+  // context (matchWins/matchLosses — rendered as a muted "m NW-NL" line,
+  // same idiom as the GLOBAL leaderboard below and the RivalryModal's
+  // shipped precedent).
+  const rivalMap = new Map<string, { name: string | null; wins: number; losses: number; matchWins: number; matchLosses: number; totalDelta: number }>()
   onlineMatches.forEach((m) => {
     const id = m.opponent_id || 'Unknown'
-    const s = rivalMap.get(id) ?? { name: null, wins: 0, losses: 0, totalDelta: 0 }
+    const s = rivalMap.get(id) ?? { name: null, wins: 0, losses: 0, matchWins: 0, matchLosses: 0, totalDelta: 0 }
     if (!s.name && m.opponent_name) s.name = m.opponent_name
-    if (m.won) s.wins++; else s.losses++
+    if (m.won) s.matchWins++; else s.matchLosses++
+    const split = resolveMatchGames(m)
+    s.wins += split.gamesWon
+    s.losses += split.gamesLost
     s.totalDelta += (m.player_score - m.opponent_score)
     rivalMap.set(id, s)
   })
@@ -416,6 +442,8 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
       name: s.name ?? (id === 'Unknown' ? 'Unknown' : `Player ${id.slice(0, 8)}`),
       wins: s.wins,
       losses: s.losses,
+      matchWins: s.matchWins,
+      matchLosses: s.matchLosses,
       totalDelta: s.totalDelta,
       games: s.wins + s.losses,
     }))
@@ -504,6 +532,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
             )}
             <section style={{ marginBottom: 28 }}>
               <h3 style={sectionHeaderStyle}>VS ARTIFICIAL INTELLIGENCE</h3>
+              <div style={unitCaptionStyle}>W-L-Win %-Avg Δ are all counted by GAMES played, not matches.</div>
               <div style={{ overflowX: 'auto' }}>
                 <table style={tableStyle}>
                   <thead>
@@ -536,9 +565,11 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
               <h3 style={sectionHeaderStyle}>ONLINE RIVALS</h3>
               {rivals.length === 0 ? (
                 <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>
-                  No online matches yet.
+                  No online games yet.
                 </div>
               ) : (
+                <>
+                <div style={unitCaptionStyle}>W-L-Win %-Avg Δ are GAMES; the muted "m W-L" line under each name is matches.</div>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={tableStyle}>
                     <thead>
@@ -563,7 +594,10 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                           onMouseEnter={() => setHoveredRivalId(r.id)}
                           onMouseLeave={() => setHoveredRivalId((prev) => (prev === r.id ? null : prev))}
                         >
-                          <td style={{ ...tdStyle, fontSize: 12 }}>{r.name}</td>
+                          <td style={{ ...tdStyle, fontSize: 12 }}>
+                            {r.name}
+                            <div style={secondaryLineStyle}>m {r.matchWins}-{r.matchLosses}</div>
+                          </td>
                           <td style={tdStyle}>{r.wins}</td>
                           <td style={tdStyle}>{r.losses}</td>
                           <td style={tdStyle}>{winPct(r.wins, r.games)}</td>
@@ -575,6 +609,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </section>
           </>
@@ -681,30 +716,40 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                     No data for this category yet.
                   </div>
                 ) : (
+                  <>
+                  <div style={unitCaptionStyle}>Ranked by GAMES; the muted "m W-L" line under each name is matches.</div>
                   <div style={{ overflowX: 'auto' }}>
                     <table style={tableStyle}>
                       <thead>
                         <tr style={tableHeaderRowStyle}>
                           <th style={{ ...thStyle, width: 28 }}>#</th>
                           <th style={thStyle}>Player</th>
-                          <th style={thStyle}>Games</th>
-                          <th style={thStyle}>Wins</th>
+                          <th style={thStyle}>W</th>
+                          <th style={thStyle}>L</th>
                           <th style={thStyle}>Win %</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {activeRows.map((r, i) => (
-                          <tr key={r.accountId} style={trStyle}>
-                            <td style={{ ...tdStyle, color: '#666', fontSize: 11 }}>{i + 1}</td>
-                            <td style={{ ...tdStyle, fontWeight: 700, color: '#f0c030' }}>{r.displayName}</td>
-                            <td style={tdStyle}>{r.games}</td>
-                            <td style={tdStyle}>{r.wins}</td>
-                            <td style={tdStyle}>{fmtWinRate(r.winRate)}</td>
-                          </tr>
-                        ))}
+                        {activeRows.map((r, i) => {
+                          const totalGames = r.gamesWon + r.gamesLost
+                          const gamesWinRate = totalGames > 0 ? r.gamesWon / totalGames : 0
+                          return (
+                            <tr key={r.accountId} style={trStyle}>
+                              <td style={{ ...tdStyle, color: '#666', fontSize: 11 }}>{i + 1}</td>
+                              <td style={{ ...tdStyle, fontWeight: 700, color: '#f0c030' }}>
+                                {r.displayName}
+                                <div style={secondaryLineStyle}>m {r.wins}-{r.games - r.wins}</div>
+                              </td>
+                              <td style={tdStyle}>{r.gamesWon}</td>
+                              <td style={tdStyle}>{r.gamesLost}</td>
+                              <td style={tdStyle}>{fmtWinRate(gamesWinRate)}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
+                  </>
                 )}
               </>
             )}
@@ -960,6 +1005,20 @@ const activeViewBtnStyle: CSSProperties = {
 const sectionHeaderStyle: CSSProperties = {
   fontSize: 11, fontWeight: 900, color: '#f0c030', letterSpacing: 1.5,
   marginBottom: 12, borderBottom: '1px solid #333', paddingBottom: 6,
+}
+// Owner's 2026-07-28 GAMES-first ruling — one small italic caption per
+// games-primary table, spelling out the unit ONCE per section rather than
+// relabeling every "W"/"L" header cell (which stay unit-agnostic, same as
+// the RivalryModal's shipped precedent).
+const unitCaptionStyle: CSSProperties = {
+  fontSize: 10, color: '#776', fontStyle: 'italic', marginBottom: 8,
+}
+// The muted "m NW-NL" (matches) secondary line under a Player/Rival name
+// cell — same compact-secondary idiom in both MY RECORDS (Online Rivals) and
+// GLOBAL (below), so the primary GAMES numbers never need their own column
+// relabeled to fit a "matches" count too.
+const secondaryLineStyle: CSSProperties = {
+  fontSize: 10, color: '#776', marginTop: 2,
 }
 const subTabRowStyle: CSSProperties = {
   display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16,
