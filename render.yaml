@@ -16,6 +16,16 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     routes:
+      # Same-origin API proxy — some iOS content blockers / DNS filters block
+      # *.workers.dev wholesale (the SITE loads fine from onrender.com, but
+      # every direct API fetch dies at the network layer with a TypeError —
+      # Sureka's phone, 2026-07-27). Proxying /api/* first-party makes the
+      # API invisible to those blocklists; src/net/http.ts falls back to this
+      # path automatically when a direct worker fetch throws.
+      # MUST stay ABOVE the SPA catch-all — routes evaluate in order.
+      - type: rewrite
+        source: /api/*
+        destination: https://vjaipur-worker.theonenonlyvj.workers.dev/*
       - type: rewrite
         source: /*
         destination: /index.html

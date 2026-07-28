@@ -61,14 +61,75 @@ async function safeJson(res: Response): Promise<unknown> {
   }
 }
 
+// Same-origin proxy fallback (2026-07-27, "Sureka's phone" failure class):
+// some iOS content blockers / DNS filters block *.workers.dev wholesale, so
+// the SITE loads (onrender.com) while every direct API fetch THROWS at the
+// network layer. render.yaml rewrites /api/* -> the worker; when a direct
+// fetch throws, we retry once through that first-party path. The proxy
+// response must actually BE JSON: until the Render Blueprint is synced,
+// /api/* falls into the SPA catch-all and returns index.html with a 200 —
+// trusting that would corrupt every caller, so a non-JSON proxy response
+// rethrows the ORIGINAL network error instead. After one proxy success the
+// device is clearly workers.dev-blocked, so subsequent calls go proxy-first
+// (sticky per session; falls back to direct if the proxy stops serving JSON).
+// An explicit VITE_VJAIPUR_WORKER_URL disables the fallback entirely — the
+// same-origin proxy targets PROD, which would be the wrong backend for a
+// staging override. The WS nudge stays direct: a blocked WS just degrades to
+// the sync polling that is the data path anyway.
+const PROXY_BASE = '/api'
+let proxyPreferred = false
+let proxyBaseOverride: string | null | undefined // tests only
+
+function proxyBase(): string | null {
+  if (proxyBaseOverride !== undefined) return proxyBaseOverride
+  if (!import.meta.env.PROD) return null
+  if (import.meta.env.VITE_VJAIPUR_WORKER_URL) return null
+  if (typeof window === 'undefined') return null
+  return PROXY_BASE
+}
+
+/** Tests only — force/disable the proxy base and reset stickiness. */
+export function __setProxyBaseForTests(base: string | null | undefined): void {
+  proxyBaseOverride = base
+  proxyPreferred = false
+}
+
+function isJsonResponse(res: Response): boolean {
+  return (res.headers.get('content-type') ?? '').includes('json')
+}
+
 async function rawFetch(path: string, method: string, body: unknown, token: string | null | undefined): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
-  return fetch(`${workerBaseUrl()}${path}`, {
+  const init: RequestInit = {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  }
+  const proxy = proxyBase()
+
+  if (proxy && proxyPreferred) {
+    const res = await fetch(`${proxy}${path}`, init)
+    if (isJsonResponse(res)) return res
+    // Proxy stopped serving JSON (Blueprint rolled back?) — back to direct.
+    proxyPreferred = false
+    return fetch(`${workerBaseUrl()}${path}`, init)
+  }
+
+  try {
+    return await fetch(`${workerBaseUrl()}${path}`, init)
+  } catch (err) {
+    if (!proxy) throw err
+    let res: Response
+    try {
+      res = await fetch(`${proxy}${path}`, init)
+    } catch {
+      throw err // both paths dead — surface the original network error
+    }
+    if (!isJsonResponse(res)) throw err // proxy not wired yet (SPA catch-all HTML)
+    proxyPreferred = true
+    return res
+  }
 }
 
 /**
