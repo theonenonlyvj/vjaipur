@@ -467,3 +467,52 @@ describe('StatsDashboard MY RECORDS — pending-sync banner + Sync now', () => {
     expect(screen.queryByRole('button', { name: /^log in$/i })).not.toBeInTheDocument()
   })
 })
+
+// BUG 3 fix (2026-07-27): "Online Rivals" was showing the rival's raw
+// account UUID because MatchRecord never carried a resolved name — the
+// worker's getHistory now LEFT JOINs `players` for it (opponent_name),
+// threaded through statsStore's pullVGamesHistory onto MatchRecord.
+describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not the raw UUID', () => {
+  it('renders the rival\'s display name instead of their account_id', () => {
+    useStatsStore.setState({
+      matches: [
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Sureka', player_score: 40, opponent_score: 30, won: true, timestamp: 1 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Sureka', player_score: 20, opponent_score: 35, won: false, timestamp: 2 },
+      ],
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    expect(screen.getByText('Sureka')).toBeInTheDocument()
+    expect(screen.queryByText('acct-rival-uuid-1234')).not.toBeInTheDocument()
+  })
+
+  it('falls back to a truncated id label when no name has ever resolved for that rival', () => {
+    useStatsStore.setState({
+      matches: [
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-5678', opponent_name: null, player_score: 10, opponent_score: 5, won: true, timestamp: 1 },
+      ],
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    expect(screen.getByText('Player acct-riv')).toBeInTheDocument()
+    expect(screen.queryByText('acct-rival-uuid-5678')).not.toBeInTheDocument()
+  })
+
+  it('uses the FIRST non-null name seen for a rival even if an earlier-recorded local match predates the name field', () => {
+    useStatsStore.setState({
+      matches: [
+        // Newest first (as pullVGamesHistory/local addMatch both prepend) —
+        // an older match recorded before this field existed (undefined) must
+        // not blank out a name a later-scanned match DOES carry.
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-9', opponent_name: undefined, player_score: 1, opponent_score: 2, won: false, timestamp: 2 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-9', opponent_name: 'Bob', player_score: 5, opponent_score: 1, won: true, timestamp: 1 },
+      ],
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    expect(screen.getByText('Bob')).toBeInTheDocument()
+  })
+})

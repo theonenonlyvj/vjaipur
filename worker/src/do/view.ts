@@ -38,6 +38,17 @@ export type ClientPlayer = {
   controlledByAi: boolean
 }
 
+/** Round-end/match_over reveal of the ENDED round's real per-seat goods
+ *  tokens + realized bonus-point SUMS (never individual bonus token
+ *  values — see `lastRoundReveal`'s own docstring on `ClientView` for why
+ *  that split is safe). Both arrays are indexed by SEAT (0/1), not
+ *  mine/opponent — same convention `ClientView.seals`/`winnerSeat` already
+ *  use. */
+export type LastRoundReveal = {
+  goodsTokens: [GoodsToken[], GoodsToken[]]
+  bonusPoints: [number, number]
+}
+
 export type ClientView = {
   mySeat: number
   phase: MatchPhase
@@ -48,6 +59,19 @@ export type ClientView = {
   /** Full RoundResult (scores + camelWinner + sealAwardedTo) — ONLY populated
    *  at `round_end`/`match_over` (scores are private information mid-round). */
   lastRoundResult: RoundResult | null
+  /** The ended round's real opponent goods tokens + both seats' realized
+   *  bonus-point SUMS — ONLY populated at `round_end`/`match_over`, `null`
+   *  otherwise (mid-round). Goods token VALUES are safe to reveal here: the
+   *  token rail is visible to both players all game, so which piles each
+   *  seat holds (and thus their values) is already public-derivable once the
+   *  round has ended — this just saves the client from re-deriving it.
+   *  Individual BONUS token values, by contrast, stay hidden even here
+   *  (`game.oppBonusTokens` still carries tier-only entries) — revealing a
+   *  bonus token's face value would let a patient opponent count down the
+   *  remaining face-down bonus pool across rounds. Only the realized SUM is
+   *  revealed, which is already derivable from `lastRoundResult.scores` minus
+   *  the (now-public) goods total anyway, so this leaks nothing new. */
+  lastRoundReveal: LastRoundReveal | null
   /** NEW (owner's decision 2026-07-18, no-AI-takeover rework): is the
    *  OPPONENT currently present (heartbeated within `PRESENCE_MS`)? Lets the
    *  client show a "waiting for them" state instead of silently freezing —
@@ -103,6 +127,13 @@ function ownScore(player: GameState['players'][0]): number {
   return goods + bonus
 }
 
+/** Sum of a player's bonus token VALUES (never exposed individually to the
+ *  opponent — see `LastRoundReveal`'s docstring) — the same reduction
+ *  `ownScore` above does inline for its own bonus half. */
+function bonusSum(player: GameState['players'][0]): number {
+  return player.bonusTokens.reduce((s, t) => s + t.value, 0)
+}
+
 /**
  * Build the per-seat redacted view. `state` is the CURRENT round's snapshot;
  * `meta` is MatchState (the ONLY authoritative seals/round/phase — ADDENDUM
@@ -127,6 +158,18 @@ export function buildClientView(
   const lastRoundResult: RoundResult | null =
     meta.phase === 'round_end' || meta.phase === 'match_over' ? scoreRound(state) : null
 
+  // Same phase gate as `lastRoundResult` above — `state` is still the ended
+  // round's final GameState at round_end/match_over (see this function's own
+  // docstring), so both seats' REAL goods tokens are read straight off it.
+  // Indexed by seat (0/1), matching `LastRoundReveal`'s own convention.
+  const lastRoundReveal: LastRoundReveal | null =
+    meta.phase === 'round_end' || meta.phase === 'match_over'
+      ? {
+          goodsTokens: [state.players[0].tokens, state.players[1].tokens],
+          bonusPoints: [bonusSum(state.players[0]), bonusSum(state.players[1])],
+        }
+      : null
+
   const oppSeat = seats[oppIndex]
   const opponentPresent = !!oppSeat && isSeatPresent(oppSeat, now)
   // NULL last_seen_at (never heartbeated yet — e.g. the instant after
@@ -149,6 +192,7 @@ export function buildClientView(
     matchLength: meta.match_length,
     winnerSeat: meta.winner_seat,
     lastRoundResult,
+    lastRoundReveal,
     opponentPresent,
     claimWinAvailable,
     players: buildPlayerRoster(seats),

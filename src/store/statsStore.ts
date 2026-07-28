@@ -17,6 +17,12 @@ const TOKEN_REFRESH_SKEW_SECONDS = 10 * 60
 export interface MatchRecord {
   opponent_type: string
   opponent_id?: string | null
+  /** The opponent's resolved display name (worker/src/do/stats.ts#getHistory's
+   *  `players` LEFT JOIN, mapped through pullVGamesHistory below) — undefined
+   *  for a match recorded before this field existed, null for a genuinely
+   *  unresolved opponent. StatsDashboard.tsx's "Online Rivals" table uses
+   *  this instead of the raw `opponent_id` UUID when available. */
+  opponent_name?: string | null
   player_score: number
   opponent_score: number
   won: boolean
@@ -417,6 +423,7 @@ export const useStatsStore = create<StatsStore>()(
           const cloud: MatchRecord[] = rows.map((m) => ({
             opponent_type: m.opponentType,
             opponent_id: m.opponentAccountId ?? null,
+            opponent_name: m.opponentName ?? null,
             player_score: m.playerScore,
             opponent_score: m.opponentScore,
             won: m.won,

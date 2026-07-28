@@ -53,6 +53,13 @@ export function RoundEndScreen() {
   const myIndex = mode === 'online' ? (useGameStore.getState().onlinePlayerIndex ?? 0) : 0
   const p0Name = myIndex === 0 ? (playerName || 'Player 1') : (opponentName || 'Opponent')
   const p1Name = myIndex === 1 ? (playerName || 'Player 2') : (opponentName || 'Opponent')
+  // Online only, opponent seat only — the OPPONENT's ScoreCard is the one
+  // built from redacted placeholders (viewToRenderState's oppBonusTokens are
+  // always value-0), so it's the only one that needs the server-revealed sum
+  // (see BUG 1's fix — worker/src/do/view.ts's lastRoundReveal). The self
+  // card's playerState.bonusTokens are already real; leaving its override
+  // undefined keeps ScoreCard's own summing path unchanged for it.
+  const oppIndex: 0 | 1 | null = mode === 'online' ? ((1 - myIndex) as 0 | 1) : null
 
   const totalSeals = Math.floor(matchLength / 2) + 1
 
@@ -126,6 +133,11 @@ export function RoundEndScreen() {
               name={p === 0 ? p0Name : p1Name}
               totalSeals={totalSeals}
               currentSeals={currentSealsFor(p)}
+              // Graceful when the reveal is absent (older server mid-deploy,
+              // or a non-online mode where oppIndex is null): undefined here
+              // makes ScoreCard fall back to its current placeholder-sum
+              // behavior (which is already 0 for a redacted opponent).
+              bonusPointsOverride={p === oppIndex ? (onlineView?.lastRoundReveal?.bonusPoints[p] ?? undefined) : undefined}
             />
           ))}
         </div>

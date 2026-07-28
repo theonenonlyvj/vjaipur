@@ -64,6 +64,7 @@ function makeView(overrides: Partial<ClientView> = {}): ClientView {
     matchLength: 3,
     winnerSeat: null,
     lastRoundResult: null,
+    lastRoundReveal: null,
     opponentPresent: true,
     claimWinAvailable: false,
     players: [
@@ -181,6 +182,71 @@ describe('viewToRenderState', () => {
     expect(state.players[1].tokens).toHaveLength(3)
     for (const t of state.players[1].tokens) expect(t.value).toBe(0)
     expect(state.players[1].bonusTokens).toEqual([{ tier: 3, value: 0 }, { tier: 5, value: 0 }])
+  })
+
+  // BUG 1 fix (2026-07-27): round-end/match_over screens were showing a FAKE
+  // opponent goods breakdown ("LEATHER: 17, 0 pts") because viewToRenderState
+  // always synthesized value-0 leather placeholders for the opponent, even
+  // once the server had revealed their real tokens (worker/src/do/view.ts's
+  // lastRoundReveal — goods values are public-derivable by round end).
+  describe('lastRoundReveal (BUG 1 — round-end opponent goods reveal)', () => {
+    it('uses the revealed REAL goods tokens for the opponent when lastRoundReveal is present', () => {
+      const view = makeView({
+        mySeat: 0,
+        phase: 'round_end',
+        game: { oppGoodsTokenCount: 2 } as ClientView['game'],
+        lastRoundReveal: {
+          goodsTokens: [
+            [{ good: 'spice', value: 5 }],
+            [{ good: 'diamond', value: 7 }, { good: 'gold', value: 6 }],
+          ],
+          bonusPoints: [3, 8],
+        },
+      })
+      const state = viewToRenderState(view)
+      // seat 1 (opponent, mySeat=0) gets goodsTokens[1] — the REAL tokens,
+      // not a leather/value-0 placeholder sized off oppGoodsTokenCount.
+      expect(state.players[1].tokens).toEqual([{ good: 'diamond', value: 7 }, { good: 'gold', value: 6 }])
+    })
+
+    it('indexes the reveal by SEAT — mySeat=1 reads goodsTokens[0] for the opponent', () => {
+      const view = makeView({
+        mySeat: 1,
+        phase: 'round_end',
+        players: [
+          { seat: 0, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
+          { seat: 1, displayName: 'Me', ownerType: 'human', controlledByAi: false },
+        ],
+        game: { oppGoodsTokenCount: 1 } as ClientView['game'],
+        lastRoundReveal: {
+          goodsTokens: [
+            [{ good: 'silver', value: 4 }],
+            [{ good: 'cloth', value: 2 }],
+          ],
+          bonusPoints: [1, 2],
+        },
+      })
+      const state = viewToRenderState(view)
+      expect(state.players[0].tokens).toEqual([{ good: 'silver', value: 4 }])
+    })
+
+    it('falls back to placeholder tokens when lastRoundReveal is null (mid-round, or an older server)', () => {
+      const view = makeView({ mySeat: 0, phase: 'playing', lastRoundReveal: null, game: { oppGoodsTokenCount: 3 } as ClientView['game'] })
+      const state = viewToRenderState(view)
+      expect(state.players[1].tokens).toHaveLength(3)
+      for (const t of state.players[1].tokens) { expect(t.good).toBe('leather'); expect(t.value).toBe(0) }
+    })
+
+    it('opponent bonus tokens stay tier-only, value-0 placeholders even when lastRoundReveal is present — only the SUM is ever revealed', () => {
+      const view = makeView({
+        mySeat: 0,
+        phase: 'round_end',
+        game: { oppBonusTokens: [{ tier: 4 }] } as ClientView['game'],
+        lastRoundReveal: { goodsTokens: [[], []], bonusPoints: [3, 9] },
+      })
+      const state = viewToRenderState(view)
+      expect(state.players[1].bonusTokens).toEqual([{ tier: 4, value: 0 }])
+    })
   })
 
   it('the deck is placeholder-length only (deckCount), contents/order never real', () => {
@@ -418,6 +484,65 @@ describe('onNudge', () => {
     await useGameStore.getState().onNudge()
 
     expect(useGameStore.getState().lastMoveDescription).toBe('RIVAL: took a gold')
+  })
+
+  // BUG 2 fix (2026-07-27): confirmed from the D1 archive — Sureka closed
+  // both R1 and R2 by selling 3 silver, and at the START of the NEXT round
+  // her phone still showed "YOU: sold 3 silver" as the banner. Root cause:
+  // a nudge delivered only the bare round_start move for the new round (its
+  // real actions, once played, arrive later) — the OLD loop `continue`d past
+  // round_start and, finding nothing else in `moves`, exited without ever
+  // calling set(), leaving lastMoveDescription stuck on whatever it was
+  // before (the ended round's last action).
+  it('a bare round_start move (new round, no actions yet) CLEARS a stale lastMoveDescription instead of leaving it stuck', async () => {
+    useGameStore.setState({
+      mode: 'online', roomCode: 'ABC123', onlineView: makeView({ mySeat: 0 }),
+      opponentName: 'Rival', lastMoveDescription: 'YOU: sold 3 silver',
+    })
+    const moves: ClientMove[] = [
+      { moveIndex: 5, round: 2, seatIndex: 0, type: 'round_start', payload: { type: 'round_start', round: 2 }, byAi: false },
+    ]
+    vi.mocked(onlineApi.sync).mockResolvedValueOnce({ moveIndex: 5, view: makeView({ round: 2 }), moves })
+
+    await useGameStore.getState().onNudge()
+
+    expect(useGameStore.getState().lastMoveDescription).toBeNull()
+  })
+
+  it('round_start reached BEFORE any real action (newest-first) clears, even with an older round_end further back in the same batch', async () => {
+    useGameStore.setState({
+      mode: 'online', roomCode: 'ABC123', onlineView: makeView({ mySeat: 0 }),
+      opponentName: 'Rival', lastMoveDescription: 'YOU: sold 3 silver',
+    })
+    // Oldest-to-newest: round_end (round 1) followed by round_start (round 2)
+    // — the newest-first walk must hit round_start FIRST and clear/return,
+    // never falling through to round 1's round_end/last action.
+    const moves: ClientMove[] = [
+      { moveIndex: 4, round: 1, seatIndex: 0, type: 'round_end', payload: { type: 'round_end', result: {}, seals: [0, 0] }, byAi: false },
+      { moveIndex: 5, round: 2, seatIndex: 0, type: 'round_start', payload: { type: 'round_start', round: 2 }, byAi: false },
+    ]
+    vi.mocked(onlineApi.sync).mockResolvedValueOnce({ moveIndex: 5, view: makeView({ round: 2 }), moves })
+
+    await useGameStore.getState().onNudge()
+
+    expect(useGameStore.getState().lastMoveDescription).toBeNull()
+  })
+
+  it('round_end still resolves to the ended round\'s last REAL action ("Final Play") — the round_start fix does not regress this', async () => {
+    useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: makeView({ mySeat: 0 }), opponentName: 'Rival' })
+    const moves: ClientMove[] = [
+      { moveIndex: 3, round: 1, seatIndex: 0, type: 'SELL', payload: { type: 'SELL', good: 'silver', count: 3 }, byAi: false },
+      { moveIndex: 4, round: 1, seatIndex: 0, type: 'round_end', payload: { type: 'round_end', result: {}, seals: [1, 0] }, byAi: false },
+    ]
+    vi.mocked(onlineApi.sync).mockResolvedValueOnce({
+      moveIndex: 4,
+      view: makeView({ phase: 'round_end' }),
+      moves,
+    })
+
+    await useGameStore.getState().onNudge()
+
+    expect(useGameStore.getState().lastMoveDescription).toBe('YOU: sold 3 silver')
   })
 
   it('a resign move is narrated by seat', async () => {

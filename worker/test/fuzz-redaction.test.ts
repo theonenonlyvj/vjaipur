@@ -284,7 +284,19 @@ function assertViewShape(view: ClientView, label: string): void {
   }
   if (view.phase === 'playing') {
     expect(view.lastRoundResult, `${label}: lastRoundResult must be null mid-round (scores are private)`).toBeNull()
+    // BUG 1 fix (2026-07-27) invariant: lastRoundReveal (the round-end
+    // opponent-goods reveal — see do/view.ts's ClientView docstring) must
+    // stay null for the entire duration of an in-progress round, same gate
+    // as lastRoundResult.
+    expect(view.lastRoundReveal, `${label}: lastRoundReveal must be null mid-round`).toBeNull()
   }
+  // At round_end/match_over, lastRoundReveal's bonusPoints are plain summed
+  // numbers (never individual bonus token values — the structural
+  // oppBonusTokens[i] check above already proves that array itself never
+  // carries a value key) so there is nothing further to assert here beyond
+  // the null-mid-round gate; the numeric ground-truth scans below never
+  // mistake a bonusPoints sum for a hidden card id (collectCardIds only
+  // counts a number sitting in an actual `{id,type}` shape's `id` field).
   view.game.myHand.forEach((c, i) => assertCardShape(c, `${label}.myHand[${i}]`))
   view.game.market.forEach((c, i) => assertCardShape(c, `${label}.market[${i}]`))
 }

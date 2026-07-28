@@ -154,6 +154,15 @@ export type MatchHistoryRow = {
   id: number
   opponentType: string
   opponentAccountId: string | null
+  /** The opponent's display name, resolved via a `players` LEFT JOIN on
+   *  `opponentAccountId` — `null` for a local vs-AI report (no
+   *  `opponent_account_id` at all) or the rare online match whose opponent
+   *  never got a `players` row (see `do/archive.ts`'s upsert-on-every-touch
+   *  contract; should be effectively unreachable for a real online match,
+   *  but the LEFT JOIN degrades to `null` rather than dropping the row).
+   *  Callers (StatsDashboard.tsx's "Online Rivals" table) must fall back to
+   *  a truncated `opponentAccountId` display, never show a bare `null`. */
+  opponentName: string | null
   playerScore: number
   opponentScore: number
   won: boolean
@@ -167,6 +176,7 @@ type HistoryDbRow = {
   id: number
   opponent_type: string
   opponent_account_id: string | null
+  opponent_name: string | null
   player_score: number
   opponent_score: number
   won: number
@@ -177,13 +187,21 @@ type HistoryDbRow = {
 }
 
 /** The caller's OWN matches, newest first (authed route — index.ts resolves
- *  `accountId` from the Bearer token, never a query param). */
+ *  `accountId` from the Bearer token, never a query param). LEFT JOINs
+ *  `players` on `opponent_account_id` to resolve the opponent's real display
+ *  name (2026-07-27 fix: "Online Rivals" was showing the rival's raw account
+ *  UUID — StatsDashboard.tsx never had a name to render). A LEFT (not INNER)
+ *  join so a match with no `opponent_account_id` (a local vs-AI report) or a
+ *  not-yet-cached opponent still returns its row, just with `opponentName:
+ *  null`. */
 export async function getHistory(db: D1Database, accountId: string): Promise<MatchHistoryRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, opponent_type, opponent_account_id, player_score, opponent_score,
-              won, source, ai_covered, game_uuid, timestamp
-       FROM matches WHERE account_id = ? ORDER BY timestamp DESC`,
+      `SELECT m.id, m.opponent_type, m.opponent_account_id, p.display_name AS opponent_name,
+              m.player_score, m.opponent_score, m.won, m.source, m.ai_covered, m.game_uuid, m.timestamp
+       FROM matches m
+       LEFT JOIN players p ON p.account_id = m.opponent_account_id
+       WHERE m.account_id = ? ORDER BY m.timestamp DESC`,
     )
     .bind(accountId)
     .all<HistoryDbRow>()
@@ -192,6 +210,7 @@ export async function getHistory(db: D1Database, accountId: string): Promise<Mat
     id: r.id,
     opponentType: r.opponent_type,
     opponentAccountId: r.opponent_account_id,
+    opponentName: r.opponent_name,
     playerScore: r.player_score,
     opponentScore: r.opponent_score,
     won: r.won === 1,
