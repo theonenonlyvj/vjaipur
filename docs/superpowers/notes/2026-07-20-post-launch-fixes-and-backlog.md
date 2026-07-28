@@ -138,3 +138,21 @@ humans), and redaction (opp bonus values become inferable when ordered).
    the fixture using an unreachable pile ([5,3,3]→[2,1,1], `5098ffe`). 622 tests.
 4. Next session: per-game verifier runs (Vijay dispatching each game's agents);
    decommission still HELD ("will retire later").
+
+## UPDATE 2026-07-27 — first match_logs harvest: ISMCTS health check + early stop (430c2ac)
+Corpus: 87 real Vijay-vs-ISMCTS games (07-25→27), 1729 human + 1681 bot moves,
+1645 with root-candidate diagnostics. Record vs ISMCTS overall: Vijay 44W-66L.
+**Search verdict: HEALTHY, no strength tuning warranted** (median 60,612
+iters/move, top1 share 0.84, 10% near-ties, q well-calibrated +0.43/-0.16 in
+eventual wins/losses). Deliberately did NOT touch strength knobs (c, budget,
+rollouts) — the bot wins 60% fairly, which is exactly what Vijay asked for.
+**Shipped: unconditional-winner early stop** (65% of moves ended settled at
+>=3x visit gap — the bot was thinking long after the move was decided).
+Stops when the visit lead exceeds 1.25x the iterations the remaining budget
+could run; max-visits pick provably unchanged. Gate: 0/69 fired stops changed
+a move; ~30% avg think-time cut at 3000ms. Wall-clock mode only — pinned-
+iteration fairness proofs untouched (both green). earlyStopped now in debug
+info -> future match_logs can report fire rate in the wild.
+Style notes for Vijay delivered in-session (token/card 3.79 vs bot 3.44; the
+4-bonus gap 38 vs 56 is the main margin; loss trajectory = small compounding
+deficits, win trajectory = late surge).
