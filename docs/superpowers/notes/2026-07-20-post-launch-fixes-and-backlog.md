@@ -156,3 +156,23 @@ info -> future match_logs can report fire rate in the wild.
 Style notes for Vijay delivered in-session (token/card 3.79 vs bot 3.44; the
 4-bonus gap 38 vs 56 is the main margin; loss trajectory = small compounding
 deficits, win trajectory = late surge).
+
+That one-off analysis is now a re-runnable tool: `tools/mlogs/analyze.mjs`
+(`--pull` to dump match_logs/matches/players from D1, then a read mode that
+prints the bot health block + a per-player style report for every account
+with >=5 logged games). Frozen baseline + re-run instructions + "what to
+watch in 3 months" at `docs/ai/2026-07-27-ismcts-baseline-eval.md`. Verified
+digit-for-digit against the original Python script's output on the same
+dump; metric definitions pinned by `tests/tools/mlogsAnalyze.test.ts` so they
+can't silently drift.
+
+## BACKLOG ADD 2026-07-27 — in-app "You vs the Bot" style panel
+Surface the scripted analyzer's per-player report (action mix, sell-size
+distribution, bonus sales, precious-at-2, tokens-per-card vs the bot's,
+camel-take rate, score trajectory, round-end trigger) as a StatsDashboard tab
+in the app itself, instead of only via `tools/mlogs/analyze.mjs` on demand.
+Needs either a worker aggregate endpoint (`GET /my-style` or similar,
+computing over that account's match_logs server-side) or a client-side
+compute pass over already-fetched match data. **NOT started — awaiting
+Vijay's call** on whether this is worth a tab (vs. staying a run-when-curious
+CLI tool) and, if so, endpoint vs. client-compute.

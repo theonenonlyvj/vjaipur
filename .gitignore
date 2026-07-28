@@ -14,3 +14,6 @@ reference/*.zip
 
 # generated stats-migration artifacts (contain account ids)
 worker/scripts/out/
+
+# match_logs analyzer dumps (contain account ids + full per-move game state)
+tools/mlogs/data/
