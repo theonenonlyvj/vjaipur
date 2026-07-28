@@ -106,3 +106,35 @@ Implementation notes: one-line engine setup change (sorted vs shuffle) but
 ripples: certified-engine care + tests, bot evals assume random draws
 (re-benchmark under variant — deterministic bonuses make ISMCTS stronger vs
 humans), and redaction (opp bonus values become inferable when ordered).
+
+## UPDATE 2026-07-26 — selection-staleness fix + persistent login (all SHIPPED, main=5098ffe)
+1. **Selection follows the CARD, not the slot (`a71b820`).** Vijay: pre-selecting
+   during the opponent's turn sometimes fired a move he never chose; and
+   camels-selected + hand-click didn't switch intent. Council (4 lenses) isolated
+   both: (A) index-keyed selection re-pointed when the market compacted/refilled
+   under it (only reachable vs async bots + online); (B) the mid-exchange gate
+   `selMarket.length<2` mistook a 2-3-camel group-select for an exchange.
+   Fix confined to GameScreen.tsx: **Card.id-keyed selection re-resolved to live
+   indices every render** (id stability verified in BOTH modes — engine moves
+   refs; worker view.ts sends market/myHand verbatim). Fail-safe: vanished
+   single silently clears; a broken multi-card exchange collapses WHOLE (the
+   app may clear, never substitute). Herd-camel -1 stays a plain counter.
+   HARD CONSTRAINT honored: no turn-gating, no confirms, zero added latency —
+   a still-valid selection survives the opponent's move untouched (test A3).
+   +7 tests (592).
+2. **Persistent login (`7a06490` + identity `vgames-platform@4e92f29`).**
+   Measured: /auth/login minted 1h tokens vs /auth/quick's 24h — logging in was
+   worse than staying a guest; refresh was reactive-only (401). Client:
+   tokenExpiry.ts + tokenRefresh.ts (boot/visibility/focus/15-min proactive
+   refresh, 10-min skew), post-login upgrade to the 24h device token, failed
+   refresh can never sign out a valid session. Identity service: **vgames TTL
+   1h→24h** (deploys from vgames-platform/services/identity/ — viota's copy is
+   legacy). Verified live 1.0h→24.0h; vjaipur+viota consumers 200 pre+post.
+   vwiki agent notified in-repo. NOTE (pre-existing): viota /my-games 401s on
+   vgames-iss login tokens (its client only uses quick tokens — latent, not live).
+   +29 tests (621).
+3. **Rules check by execution: sell 4 into a 3-token pile still earns the
+   FOUR-tier bonus** (tier = cards sold). Regression test added; Vijay caught
+   the fixture using an unreachable pile ([5,3,3]→[2,1,1], `5098ffe`). 622 tests.
+4. Next session: per-game verifier runs (Vijay dispatching each game's agents);
+   decommission still HELD ("will retire later").
