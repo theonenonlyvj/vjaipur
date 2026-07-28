@@ -13,7 +13,10 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
   }, [])
 
   const { displayName, friendCode, claimed, sessionExpired, secureAccount, restoreAccount, clearStats } = useStatsStore()
-  const { totalMatches, wins, losses, winRate } = useStatsAggregates()
+  // Owner's 2026-07-28 GAMES-first ruling — CAREER STATS is GAMES-primary
+  // (gamesWon/gamesLost/totalGames/winRate), with the match totals demoted
+  // to a muted secondary caption under the grid (see render below).
+  const { gamesWon, gamesLost, totalGames, winRate, matchWins, matchLosses } = useStatsAggregates()
 
   // Auto-expand the login form when arriving with a dead session — no
   // separate tap needed to find the way back in (see SessionBanner/
@@ -108,8 +111,8 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
           <div style={{ fontSize: 14, color: '#aaa', marginBottom: 8 }}>CAREER STATS</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={statBoxStyle}>
-              <div style={statLabelStyle}>MATCHES</div>
-              <div style={statValueStyle}>{totalMatches}</div>
+              <div style={statLabelStyle}>GAMES</div>
+              <div style={statValueStyle}>{totalGames}</div>
             </div>
             <div style={statBoxStyle}>
               <div style={statLabelStyle}>WIN RATE</div>
@@ -117,13 +120,17 @@ export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
             </div>
             <div style={statBoxStyle}>
               <div style={statLabelStyle}>WINS</div>
-              <div style={{ ...statValueStyle, color: '#80ff80' }}>{wins}</div>
+              <div style={{ ...statValueStyle, color: '#80ff80' }}>{gamesWon}</div>
             </div>
             <div style={statBoxStyle}>
               <div style={statLabelStyle}>LOSSES</div>
-              <div style={{ ...statValueStyle, color: '#ff8080' }}>{losses}</div>
+              <div style={{ ...statValueStyle, color: '#ff8080' }}>{gamesLost}</div>
             </div>
           </div>
+          {/* Matches — secondary/compat context under the games-primary grid
+              above (same "m W-L" idiom as StatsDashboard.tsx's GLOBAL board
+              and Online Rivals table). */}
+          <div style={matchesSecondaryStyle}>m {matchWins}-{matchLosses} matches</div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
@@ -267,6 +274,13 @@ const statValueStyle: CSSProperties = {
   fontSize: 18,
   fontWeight: 900,
   color: '#fff',
+}
+
+const matchesSecondaryStyle: CSSProperties = {
+  fontSize: 10,
+  color: '#666',
+  marginTop: 8,
+  textAlign: 'center',
 }
 
 const primaryBtnStyle: CSSProperties = {

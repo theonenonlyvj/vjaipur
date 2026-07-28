@@ -275,6 +275,52 @@ describe('statsStore', () => {
       expect(useStatsStore.getState().pendingReports[0]).toMatchObject(matchData)
     })
 
+    // Owner's 2026-07-28 GAMES-first ruling — src/store/gameStore.ts's vs-ai
+    // nextRound now sends the match's own final seals as games_won/games_lost.
+    describe('with a games_won/games_lost split (migration 0004)', () => {
+      const matchWithSplit = { ...matchData, games_won: 2, games_lost: 1 }
+
+      it('records the split in local history and sends it on the /stats/report body', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-split', accountId: 'vg-acc-split' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchWithSplit)
+
+        expect(useStatsStore.getState().matches[0]).toMatchObject({ games_won: 2, games_lost: 1 })
+        expect(reportMatch).toHaveBeenCalledWith(
+          expect.objectContaining({ games_won: 2, games_lost: 1 })
+        )
+      })
+
+      it('omits games_won/games_lost from the report body entirely when the match carries no split', async () => {
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-nosplit', accountId: 'vg-acc-nosplit' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+
+        await useStatsStore.getState().addMatch(matchData) // no games_won/games_lost
+
+        const payload = vi.mocked(reportMatch).mock.calls[0][0] as any
+        expect(payload.games_won).toBeUndefined()
+        expect(payload.games_lost).toBeUndefined()
+      })
+
+      it('preserves the split through a failed report into pendingReports, and sends it again on retry', async () => {
+        vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('offline'))
+        await useStatsStore.getState().addMatch(matchWithSplit)
+
+        expect(useStatsStore.getState().pendingReports).toHaveLength(1)
+        expect(useStatsStore.getState().pendingReports[0]).toMatchObject({ games_won: 2, games_lost: 1 })
+
+        vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-retry', accountId: 'vg-acc-retry' })
+        vi.mocked(reportMatch).mockResolvedValueOnce({ ok: true })
+        await useStatsStore.getState().retryPendingReports()
+
+        expect(reportMatch).toHaveBeenCalledWith(
+          expect.objectContaining({ games_won: 2, games_lost: 1 })
+        )
+        expect(useStatsStore.getState().pendingReports).toHaveLength(0)
+      })
+    })
+
     describe('with an aiGameLog (per-move logging — src/store/aiGameLog.ts)', () => {
       const logEntry = {
         ply: 1,
@@ -593,6 +639,7 @@ describe('statsStore', () => {
             id: 1, opponentType: 'ai_easy', opponentAccountId: null, opponentName: null, playerScore: 10, opponentScore: 5,
             won: true, source: 'client_reported', aiCovered: false, gameUuid: null,
             timestamp: Date.UTC(2026, 0, 1), // ADDENDUM V: D1's INTEGER column is epoch-ms already
+            gamesWon: 1, gamesLost: 0,
           },
         ],
       })
@@ -613,6 +660,7 @@ describe('statsStore', () => {
           {
             id: 2, opponentType: 'online', opponentAccountId: 'acct-rival-1', opponentName: 'Rivalina', playerScore: 40, opponentScore: 33,
             won: true, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-1', timestamp: 1_700_000_000_000,
+            gamesWon: 2, gamesLost: 1,
           },
         ],
       })
@@ -620,6 +668,27 @@ describe('statsStore', () => {
       await useStatsStore.getState().pullVGamesHistory()
 
       expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_type: 'online', opponent_id: 'acct-rival-1' })
+    })
+
+    // Owner's 2026-07-28 GAMES-first ruling — getHistory always resolves a
+    // gamesWon/gamesLost split (exact or approximated), and pullVGamesHistory
+    // must thread it onto the local MatchRecord unchanged (StatsDashboard.tsx's
+    // MY RECORDS tables read it from there).
+    it('maps a history row\'s gamesWon/gamesLost onto the local games_won/games_lost fields', async () => {
+      useStatsStore.setState({ vgamesToken: 'vg-tok', vgamesAccountId: 'vg-acc', matches: [] })
+      vi.mocked(history).mockResolvedValueOnce({
+        matches: [
+          {
+            id: 99, opponentType: 'online', opponentAccountId: 'acct-rival-games', opponentName: 'Games Rival', playerScore: 200, opponentScore: 150,
+            won: true, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-games', timestamp: 1_700_000_099_000,
+            gamesWon: 3, gamesLost: 1,
+          },
+        ],
+      })
+
+      await useStatsStore.getState().pullVGamesHistory()
+
+      expect(useStatsStore.getState().matches[0]).toMatchObject({ games_won: 3, games_lost: 1 })
     })
 
     // BUG 3 fix (2026-07-27): "Online Rivals" was showing the rival's raw
@@ -634,6 +703,7 @@ describe('statsStore', () => {
           {
             id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Sureka', playerScore: 20, opponentScore: 25,
             won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-2', timestamp: 1_700_000_001_000,
+            gamesWon: 0, gamesLost: 1,
           },
         ],
       })
@@ -650,6 +720,7 @@ describe('statsStore', () => {
           {
             id: 4, opponentType: 'online', opponentAccountId: 'acct-rival-3', opponentName: null, playerScore: 5, opponentScore: 5,
             won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-3', timestamp: 1_700_000_002_000,
+            gamesWon: 0, gamesLost: 1,
           },
         ],
       })

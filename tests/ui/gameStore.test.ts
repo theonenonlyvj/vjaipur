@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useGameStore } from '../../src/store/gameStore'
+import { useStatsStore } from '../../src/store/statsStore'
 import { getLegalActions } from '../../src/engine'
 import type { Action } from '../../src/engine'
 import {
@@ -18,6 +19,17 @@ vi.mock('../../src/ai/mediumAi', async (importOriginal) => {
   return { ...actual, pickMediumAction: vi.fn(actual.pickMediumAction) }
 })
 import { pickMediumAction } from '../../src/ai/mediumAi'
+
+// The vs-ai match-end test below needs a CONTROLLED round outcome (a
+// specific seal winner + score) without hand-building a fully-scoreable
+// GameState (real tokens/bonusTokens/herd) — wraps the real scoreRound so
+// every other test keeps its real scoring behavior, while that one test can
+// mockReturnValueOnce a decisive result.
+vi.mock('../../src/engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/engine')>()
+  return { ...actual, scoreRound: vi.fn(actual.scoreRound) }
+})
+import { scoreRound } from '../../src/engine'
 
 beforeEach(() => {
   useGameStore.setState({ state: null, mode: null, error: null })
@@ -91,6 +103,70 @@ describe('nextRound', () => {
     useGameStore.getState().startGame('local')
     useGameStore.getState().nextRound()
     expect(useGameStore.getState().state!.phase).toBe('playing')
+  })
+
+  // Owner's 2026-07-28 GAMES-first ruling — a vs-ai match's own final `seals`
+  // IS its exact per-game split (a seal = one game/round won); nextRound must
+  // pass it straight through to addMatch as games_won/games_lost.
+  describe('vs-ai match end: games_won/games_lost split', () => {
+    afterEach(() => {
+      vi.mocked(scoreRound).mockRestore()
+      // This describe block is the only place in the file that mutates
+      // difficulty/matchLength/matchScores directly via setState (every
+      // other test either leaves them at their defaults or restores them
+      // itself, e.g. the 'difficulty' describe below) — restore them so a
+      // later test (like "difficulty > defaults to easy") never sees this
+      // block's leftovers. The top-level beforeEach only resets
+      // state/mode/error.
+      useGameStore.setState({ difficulty: 'easy', matchLength: 1, matchScores: [0, 0] })
+    })
+
+    it('passes the match\'s final seals as the exact games_won/games_lost split to addMatch', () => {
+      useGameStore.getState().startGame('vs-ai')
+      const baseState = useGameStore.getState().state!
+      useGameStore.setState({
+        matchLength: 3, // sealsNeeded = 2
+        difficulty: 'medium',
+        matchScores: [50, 40],
+        state: { ...baseState, phase: 'round-end', seals: [1, 1] },
+      })
+      // Seat 0 (the human) takes this round's seal -> newSeals [2, 1], which
+      // clears sealsNeeded(2) -> match over.
+      vi.mocked(scoreRound).mockReturnValueOnce({ camelWinner: null, scores: [30, 20], bonusTokenCounts: [0, 0], sealAwardedTo: 0 })
+      const addMatchSpy = vi.spyOn(useStatsStore.getState(), 'addMatch').mockResolvedValue(undefined)
+
+      useGameStore.getState().nextRound()
+
+      expect(useGameStore.getState().state!.phase).toBe('game-over')
+      expect(useGameStore.getState().state!.seals).toEqual([2, 1])
+      expect(addMatchSpy).toHaveBeenCalledWith(
+        { opponent_type: 'medium', player_score: 80, opponent_score: 60, won: true, games_won: 2, games_lost: 1 },
+        [],
+      )
+    })
+
+    it('a losing final split (opponent seals > mine) reports won:false with the matching games_lost > games_won', () => {
+      useGameStore.getState().startGame('vs-ai')
+      const baseState = useGameStore.getState().state!
+      useGameStore.setState({
+        matchLength: 5, // sealsNeeded = 3
+        difficulty: 'hard2',
+        matchScores: [10, 10],
+        state: { ...baseState, phase: 'round-end', seals: [1, 2] },
+      })
+      // Seat 1 (the AI) takes this round's seal -> newSeals [1, 3], clearing
+      // sealsNeeded(3) -> match over, a LOSS for the human.
+      vi.mocked(scoreRound).mockReturnValueOnce({ camelWinner: null, scores: [15, 25], bonusTokenCounts: [0, 0], sealAwardedTo: 1 })
+      const addMatchSpy = vi.spyOn(useStatsStore.getState(), 'addMatch').mockResolvedValue(undefined)
+
+      useGameStore.getState().nextRound()
+
+      expect(useGameStore.getState().state!.seals).toEqual([1, 3])
+      expect(addMatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ opponent_type: 'hard2', won: false, games_won: 1, games_lost: 3 }),
+        [],
+      )
+    })
   })
 })
 

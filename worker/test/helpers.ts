@@ -104,8 +104,32 @@ const SCHEMA_STATEMENTS: readonly string[] = [
    )`,
 ]
 
+/**
+ * Migration 0004 (worker/migrations/0004_match_game_split.sql) is an ALTER
+ * TABLE, not a CREATE — SQLite has no `ADD COLUMN IF NOT EXISTS`, so (unlike
+ * every `CREATE TABLE/INDEX IF NOT EXISTS` statement above) simply
+ * re-running it on a second `applyD1Schema` call — which happens in
+ * practice, since D1 storage is shared across test FILES per this file's own
+ * docstring (`fileParallelism:false`/`isolate:false`), and every stats-
+ * adjacent test file calls `applyD1Schema` in its own `beforeAll` — would
+ * throw "duplicate column name". Guarded the same way `wrangler d1
+ * migrations apply` guards a real migration re-run: check first via `PRAGMA
+ * table_info`, only ALTER if the column is actually missing. `table`/
+ * `column` are always this file's own hardcoded literals (never external
+ * input), so inlining them into the PRAGMA (which — unlike a normal query —
+ * cannot bind `?` parameters) is safe.
+ */
+async function addColumnIfMissing(db: D1Database, table: string, column: string, ddl: string): Promise<void> {
+  const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
+  if (results.some((r) => r.name === column)) return
+  await db.exec(ddl)
+}
+
 export async function applyD1Schema(db: D1Database): Promise<void> {
   for (const stmt of SCHEMA_STATEMENTS) {
     await db.exec(stmt.replace(/\s+/g, ' ').trim())
   }
+  // Migration 0004 — per-match GAME split (worker/migrations/0004_match_game_split.sql).
+  await addColumnIfMissing(db, 'matches', 'games_won', 'ALTER TABLE matches ADD COLUMN games_won INTEGER')
+  await addColumnIfMissing(db, 'matches', 'games_lost', 'ALTER TABLE matches ADD COLUMN games_lost INTEGER')
 }

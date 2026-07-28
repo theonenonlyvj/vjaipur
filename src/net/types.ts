@@ -168,9 +168,19 @@ export interface MyGamesResponse {
 export interface LeaderboardRow {
   accountId: string
   displayName: string
+  /** MATCH count (kept for compat — see worker/src/do/stats.ts's
+   *  LeaderboardRow docstring). NOT the primary record anymore. */
   games: number
+  /** MATCH wins (compat). */
   wins: number
+  /** MATCH win rate (compat). */
   winRate: number
+  /** Per-GAME win/loss totals — the PRIMARY lifetime record (owner's
+   *  2026-07-28 GAMES-first ruling; see worker/src/do/stats.ts's
+   *  LeaderboardRow docstring for the exact per-row resolution rule). Also
+   *  what the ranking (server-side rankBySkill) is fed. */
+  gamesWon: number
+  gamesLost: number
 }
 
 export interface LeaderboardResponse {
@@ -202,6 +212,11 @@ export interface MatchHistoryRow {
   aiCovered: boolean
   gameUuid: string | null
   timestamp: number
+  /** This row's per-GAME split — always present (never null); see
+   *  worker/src/do/stats.ts#getHistory's MatchHistoryRow docstring for the
+   *  exact/approximated resolution rule. */
+  gamesWon: number
+  gamesLost: number
 }
 
 export interface HistoryResponse {
@@ -220,6 +235,12 @@ export interface ReportMatchBody {
    *  independently and simply skips storing it (never fails the report) on
    *  anything malformed or oversized. */
   log?: string
+  /** Optional exact per-GAME split for this vs-ai match (the match's final
+   *  `seals` — see src/store/gameStore.ts's nextRound). Both fields must be
+   *  present and sane or the worker skips storing either (never fails the
+   *  report over it) — see worker/src/do/stats.ts#reportMatch's docstring. */
+  games_won?: number
+  games_lost?: number
 }
 
 export type ReportMatchResult = { ok: true; duplicate?: true }

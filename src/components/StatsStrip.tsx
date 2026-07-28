@@ -6,15 +6,20 @@ interface StatsStripProps {
 }
 
 export function StatsStrip({ onClick }: StatsStripProps) {
-  const { wins, losses, totalDelta } = useStatsAggregates()
+  // Owner's 2026-07-28 GAMES-first ruling — RECORD is the most visible
+  // record in the app, so it's GAMES-primary (gamesWon/gamesLost), same as
+  // every other stats surface. TOTAL Δ is unchanged: it's a raw sum, already
+  // game-derived by construction (see useStatsAggregates's docstring) — no
+  // games-vs-matches distinction applies to a sum.
+  const { gamesWon, gamesLost, totalDelta } = useStatsAggregates()
   const [isHovered, setIsHovered] = useState(false)
-  
+
   return (
-    <div 
+    <div
       style={{
         ...containerStyle,
         background: isHovered ? 'rgba(30,30,30,0.8)' : 'rgba(0,0,0,0.6)',
-      }} 
+      }}
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -22,7 +27,7 @@ export function StatsStrip({ onClick }: StatsStripProps) {
       <div style={contentStyle}>
         <div style={statGroupStyle}>
           <span style={labelStyle}>RECORD</span>
-          <span style={valueStyle}>{wins}W - {losses}L</span>
+          <span style={valueStyle}>{gamesWon}W - {gamesLost}L</span>
         </div>
         
         <div style={dividerStyle} />

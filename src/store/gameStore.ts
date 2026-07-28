@@ -663,6 +663,11 @@ export const useGameStore = create<GameStore>((set, get) => {
             player_score: newMatchScores[0],
             opponent_score: newMatchScores[1],
             won: newSeals[0] > newSeals[1],
+            // The match's own final seal count IS its exact per-GAME split
+            // (a seal = one game/round won — see worker/src/do/rivalry.ts's
+            // file header) — seat 0 is always the human in vs-ai mode.
+            games_won: newSeals[0],
+            games_lost: newSeals[1],
           }, aiGameLog)
         }
       } else {

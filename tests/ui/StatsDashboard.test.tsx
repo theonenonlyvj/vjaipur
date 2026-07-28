@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { StatsDashboard } from '../../src/components/StatsDashboard'
 import { useStatsStore } from '../../src/store/statsStore'
 import type { LeaderboardResponse, MyStyleResponse, RivalryResponse } from '../../src/net/online'
@@ -29,56 +29,70 @@ vi.mock('../../src/socket/socketService', () => ({
 // generic mechanism (src/ai/tiers.ts + StatsDashboard's
 // buildOpponentGroups/getFamilyMembers) — zero component-side branching per
 // family.
+// gamesWon/gamesLost mirror games/wins 1:1 in every fixture below EXCEPT
+// GAMES_PRIMARY_FIXTURE (see the dedicated "games-primary rendering"
+// describe block) — these toggle/family tests are about filter/fetch
+// wiring, not the games-vs-matches split, so a games==matches fixture keeps
+// them decoupled from that concern.
 const UNFILTERED: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-1', displayName: 'Alice', games: 5, wins: 4, winRate: 0.8 }],
-  verified: [{ accountId: 'acct-1', displayName: 'Alice', games: 3, wins: 2, winRate: 0.667 }],
+  overall: [{ accountId: 'acct-1', displayName: 'Alice', games: 5, wins: 4, winRate: 0.8, gamesWon: 4, gamesLost: 1 }],
+  verified: [{ accountId: 'acct-1', displayName: 'Alice', games: 3, wins: 2, winRate: 0.667, gamesWon: 2, gamesLost: 1 }],
   availableOpponents: ['online', 'medium', 'hard', 'fair', 'hard2', 'ismcts'],
 }
 
 const ONLINE_ONLY: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-2', displayName: 'Bob', games: 3, wins: 3, winRate: 1 }],
-  verified: [{ accountId: 'acct-2', displayName: 'Bob', games: 3, wins: 3, winRate: 1 }],
+  overall: [{ accountId: 'acct-2', displayName: 'Bob', games: 3, wins: 3, winRate: 1, gamesWon: 3, gamesLost: 0 }],
+  verified: [{ accountId: 'acct-2', displayName: 'Bob', games: 3, wins: 3, winRate: 1, gamesWon: 3, gamesLost: 0 }],
 }
 
 // Only 'medium' itself has data (hard/fair don't) — used for the flat
 // single-data-member-family scenario.
 const MEDIUM_ONLY: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-3', displayName: 'Carol', games: 4, wins: 1, winRate: 0.25 }],
+  overall: [{ accountId: 'acct-3', displayName: 'Carol', games: 4, wins: 1, winRate: 0.25, gamesWon: 1, gamesLost: 3 }],
   verified: [],
 }
 
 // The "Medium" family's aggregate — all 3 members (medium, hard, fair).
 const MEDIUM_FAMILY_AGGREGATE: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-4', displayName: 'Dave', games: 9, wins: 6, winRate: 0.667 }],
+  overall: [{ accountId: 'acct-4', displayName: 'Dave', games: 9, wins: 6, winRate: 0.667, gamesWon: 6, gamesLost: 3 }],
   verified: [],
 }
 
 // Drilled into just the 'hard' member (label "Hard (Classic)") within the
 // Medium family drill-down.
 const MEDIUM_CLASSIC_ONLY: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-5', displayName: 'Eve', games: 4, wins: 1, winRate: 0.25 }],
+  overall: [{ accountId: 'acct-5', displayName: 'Eve', games: 4, wins: 1, winRate: 0.25, gamesWon: 1, gamesLost: 3 }],
   verified: [],
 }
 
 // A snapshot where only hard2 (of the Hard family) has data — used for the
 // flat single-data-member-family scenario.
 const SOLO_HARD2_AVAILABLE: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-6', displayName: 'Frank', games: 2, wins: 2, winRate: 1 }],
+  overall: [{ accountId: 'acct-6', displayName: 'Frank', games: 2, wins: 2, winRate: 1, gamesWon: 2, gamesLost: 0 }],
   verified: [],
   availableOpponents: ['medium', 'hard2'],
 }
 
 // The "Hard" family's aggregate — both (now only) members: hard2, ismcts.
 const HARD_FAMILY_AGGREGATE: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-7', displayName: 'Grace', games: 7, wins: 5, winRate: 0.714 }],
+  overall: [{ accountId: 'acct-7', displayName: 'Grace', games: 7, wins: 5, winRate: 0.714, gamesWon: 5, gamesLost: 2 }],
   verified: [],
 }
 
 // Drilled into just the 'ismcts' member (label "Hard (ISMCTS)") within the
 // Hard family drill-down.
 const ISMCTS_ONLY: LeaderboardResponse = {
-  overall: [{ accountId: 'acct-8', displayName: 'Heidi', games: 5, wins: 4, winRate: 0.8 }],
+  overall: [{ accountId: 'acct-8', displayName: 'Heidi', games: 5, wins: 4, winRate: 0.8, gamesWon: 4, gamesLost: 1 }],
   verified: [],
+}
+
+// Owner's 2026-07-28 GAMES-first ruling — gamesWon/gamesLost deliberately
+// DIFFERENT from games/wins (the compat MATCH totals) so a test can prove
+// the table renders the GAMES numbers as primary, not the match totals.
+const GAMES_PRIMARY_FIXTURE: LeaderboardResponse = {
+  overall: [{ accountId: 'acct-games-primary', displayName: 'Zara', games: 10, wins: 6, winRate: 0.6, gamesWon: 25, gamesLost: 9 }],
+  verified: [],
+  availableOpponents: ['online'],
 }
 
 beforeEach(() => {
@@ -368,7 +382,7 @@ describe('StatsDashboard global leaderboard — family collapse threshold (<2 da
 
   it('the same threshold applies independently to the Medium family: only "medium" has data (hard/fair do not) stays flat too', async () => {
     vi.spyOn(onlineApi, 'leaderboard').mockResolvedValue({
-      overall: [{ accountId: 'acct-9', displayName: 'Ivan', games: 6, wins: 2, winRate: 0.333 }],
+      overall: [{ accountId: 'acct-9', displayName: 'Ivan', games: 6, wins: 2, winRate: 0.333, gamesWon: 2, gamesLost: 4 }],
       verified: [],
       availableOpponents: ['medium', 'hard2', 'ismcts'],
     } satisfies LeaderboardResponse)
@@ -393,6 +407,29 @@ describe('StatsDashboard global leaderboard — family collapse threshold (<2 da
     await waitFor(() => expect(onlineApi.leaderboard).toHaveBeenLastCalledWith(['medium', 'hard', 'fair']))
     await waitFor(() => expect(screen.getByText('Carol')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'All Medium' })).not.toBeInTheDocument()
+  })
+})
+
+// Owner's 2026-07-28 GAMES-first ruling — the GLOBAL board's W/L/Win% columns
+// are now the per-account GAMES record (worker/src/do/stats.ts's
+// gamesWon/gamesLost), with the compat MATCH totals (games/wins) demoted to a
+// muted "m W-L" secondary line under the player name.
+describe('StatsDashboard GLOBAL leaderboard — games-primary + matches-secondary rendering', () => {
+  it('renders gamesWon/gamesLost as the primary W/L/Win% columns, with a muted "m W-L" matches line under the name', async () => {
+    vi.spyOn(onlineApi, 'leaderboard').mockResolvedValue(GAMES_PRIMARY_FIXTURE)
+    await openGlobal()
+    await waitFor(() => expect(screen.getByText('Zara')).toBeInTheDocument())
+
+    const row = screen.getByText('Zara').closest('tr')!
+    // Primary: the GAMES record (25 won / 9 lost) — NOT the fixture's
+    // matches totals (games:10, wins:6), which never appear as bare cells.
+    expect(within(row).getByText('25')).toBeInTheDocument()
+    expect(within(row).getByText('9')).toBeInTheDocument()
+    expect(within(row).getByText('74%')).toBeInTheDocument() // 25/34 games, rounded
+    expect(within(row).queryByText('10')).not.toBeInTheDocument()
+    expect(within(row).queryByText('60%')).not.toBeInTheDocument() // the OLD matches-based win rate
+    // Secondary: matches, muted, under the name — "m 6-4" (wins=6, matches-wins=10-6=4).
+    expect(within(row).getByText('m 6-4')).toBeInTheDocument()
   })
 })
 
@@ -468,6 +505,37 @@ describe('StatsDashboard MY RECORDS — pending-sync banner + Sync now', () => {
   })
 })
 
+// Owner's 2026-07-28 GAMES-first ruling — the "VS ARTIFICIAL INTELLIGENCE"
+// table's W/L/Win%/Avg Δ are computed on GAMES (statsStore.ts's
+// resolveMatchGames), not matches: exact when a local record carries its own
+// games_won/games_lost split, approximated "1 game by won" for a legacy
+// record with no split at all.
+describe('StatsDashboard MY RECORDS — GAMES-first vs-AI table', () => {
+  it('renders game-based W/L/Win%/Avg Δ from a mix of an explicit split and a legacy no-split record', () => {
+    useStatsStore.setState({
+      matches: [
+        // Explicit split (e.g. a matchLength-5 win, 3 games to 1) — the
+        // exact per-game record this MatchRecord carries.
+        { opponent_type: 'medium', player_score: 210, opponent_score: 140, won: true, timestamp: 1, games_won: 3, games_lost: 1 },
+        // LEGACY record — no split at all (predates migration 0004) — falls
+        // back to "1 game by won" (a loss here -> 0 won, 1 lost).
+        { opponent_type: 'medium', player_score: 20, opponent_score: 45, won: false, timestamp: 2 },
+      ],
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    // A match-count-based table would have shown 1W-1L (50%) for these same
+    // 2 records; the GAMES-based table sums 3+0 won / 1+1 lost = 3W-2L (60%).
+    const row = screen.getByText('Medium').closest('tr')!
+    expect(within(row).getByText('3')).toBeInTheDocument()
+    expect(within(row).getByText('2')).toBeInTheDocument()
+    expect(within(row).getByText('60%')).toBeInTheDocument()
+    // Avg Δ: (70 + -25) / 5 games = +9.0 (divided by GAMES, not the 2 matches).
+    expect(within(row).getByText('+9.0')).toBeInTheDocument()
+  })
+})
+
 // BUG 3 fix (2026-07-27): "Online Rivals" was showing the rival's raw
 // account UUID because MatchRecord never carried a resolved name — the
 // worker's getHistory now LEFT JOINs `players` for it (opponent_name),
@@ -514,6 +582,33 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not
     render(<StatsDashboard onClose={() => {}} />)
 
     expect(screen.getByText('Bob')).toBeInTheDocument()
+  })
+})
+
+// Owner's 2026-07-28 GAMES-first ruling — ONLINE RIVALS' W/L/Win%/Avg Δ are
+// GAMES (resolveMatchGames, exact when a synced MatchRecord carries a
+// split), with the MATCH totals demoted to a muted "m W-L" secondary line —
+// same idiom as the GLOBAL board, and consistent with the shipped RivalryModal.
+describe('StatsDashboard MY RECORDS — ONLINE RIVALS games-primary + matches-secondary', () => {
+  it('sums per-match splits into a games-primary W/L, with matches shown as a muted secondary line', () => {
+    useStatsStore.setState({
+      matches: [
+        // A synced 3-game match win, 2 games to 1.
+        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Reks', player_score: 150, opponent_score: 110, won: true, timestamp: 1, games_won: 2, games_lost: 1 },
+        // A second synced match, also won, 2-0.
+        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Reks', player_score: 90, opponent_score: 40, won: true, timestamp: 2, games_won: 2, games_lost: 0 },
+      ],
+    })
+
+    render(<StatsDashboard onClose={() => {}} />)
+
+    const row = screen.getByText('Reks').closest('tr')!
+    // Primary: GAMES — 2+2=4 won, 1+0=1 lost.
+    expect(within(row).getByText('4')).toBeInTheDocument()
+    expect(within(row).getByText('1')).toBeInTheDocument()
+    expect(within(row).getByText('80%')).toBeInTheDocument() // 4/5
+    // Secondary: MATCHES — both won, "m 2-0".
+    expect(within(row).getByText('m 2-0')).toBeInTheDocument()
   })
 })
 

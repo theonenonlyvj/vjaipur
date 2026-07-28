@@ -136,4 +136,46 @@ describe('ProfileOverlay', () => {
       expect(screen.queryByPlaceholderText('Username')).not.toBeInTheDocument()
     })
   })
+
+  // ── CAREER STATS (owner's 2026-07-28 GAMES-first ruling) ───────────────────
+  describe('CAREER STATS', () => {
+    it('labels the primary stat GAMES (not MATCHES) and sums the games record from a mix of an explicit split and a legacy no-split record', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({
+        matches: [
+          // Explicit split (a matchLength-5 win, 3 games to 1).
+          { opponent_type: 'medium', player_score: 210, opponent_score: 140, won: true, timestamp: 1, games_won: 3, games_lost: 1 },
+          // Legacy record, no split — falls back to 1 game by won (a loss -> 0-1).
+          { opponent_type: 'medium', player_score: 20, opponent_score: 45, won: false, timestamp: 2 },
+        ],
+      })
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.getByText('GAMES')).toBeInTheDocument()
+      expect(screen.queryByText('MATCHES')).not.toBeInTheDocument()
+
+      // GAMES: 3+0=3 won, 1+1=2 lost, 5 total -> 60% win rate. A match-count
+      // table would have shown GAMES=2 (matches) / 1W-1L / 50%.
+      expect(screen.getByText('5')).toBeInTheDocument() // totalGames
+      expect(screen.getByText('60%')).toBeInTheDocument()
+      expect(screen.getByText('3')).toBeInTheDocument() // gamesWon
+      expect(screen.getByText('2')).toBeInTheDocument() // gamesLost
+
+      // Matches — secondary/compat, muted caption under the grid: 1 match
+      // won, 1 lost.
+      expect(screen.getByText('m 1-1 matches')).toBeInTheDocument()
+    })
+
+    it('shows 0/0%/m 0-0 matches for a fresh account with no history', () => {
+      useStatsStore.getState().clearStats()
+      useStatsStore.getState().ensureAccount()
+
+      render(<ProfileOverlay onClose={() => {}} />)
+
+      expect(screen.getByText('0%')).toBeInTheDocument()
+      expect(screen.getByText('m 0-0 matches')).toBeInTheDocument()
+    })
+  })
 })
