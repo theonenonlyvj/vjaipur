@@ -230,3 +230,27 @@ dormant bug in tools/mlogs/analyze.mjs phase bucketing (array-index vs ply)
 run).
 Rejected (recorded): global bot-baseline pooling for low-N players — no
 population to pool yet; per-row gates already prevent the harm.
+
+## UPDATE 2026-07-28 (cont) — RIVALRY modal + deck warning (864e56b) + GAMES-first stats everywhere (9df4a24)
+1. **RIVALRY modal**: click an Online Rival -> "YOU vs <name>" — games record
+   + streak ("4-0 in games · across 2 matches"), lifetime points,
+   camel-majority games, biggest game, per-game history grouped by match,
+   craft rows (volume-gated), and the EDGE FINDER (Vijay overruled my
+   no-coaching rule: "why not coaching?" — each viewer privately sees their
+   largest opponent-favored gap as banter; leads-everywhere and
+   not-enough-data fallbacks). Computed ON DEMAND from the public archive via
+   deterministic goods-pile replay (engine's initialTokenPiles; no new
+   logging, no cache needed at rivalry scale). Seat-swap correctness proven
+   by fixture (seats differ per match). 404 no_shared_games; first smoke's
+   404-for-everything was edge propagation lag, not a bug.
+2. **Deck count warning**: amber #f09030 at <=6, red #e05050 at <=3.
+3. **GAMES-first units everywhere** (Vijay's ruling; matches the home
+   screen's own "1 GAME / 3 GAMES" vocabulary): GLOBAL leaderboard (ranking
+   comparator unchanged, fed games), MY RECORDS, home RECORD strip,
+   ProfileOverlay CAREER STATS. Split resolution: online EXACT via archive
+   seals join; vs-AI forward EXACT via matches.games_won/games_lost
+   (migration 0004 applied+verified); legacy vs-AI null -> by match result
+   (exact for dominant matchLength-1). TOTAL Δ untouched — sum of per-match
+   deltas == sum of per-game deltas (grouping invariance).
+Suites: client 747 / worker 287. Known wall-clock contention flake
+(hardAi2-class) appeared once per full run, green in isolation each time.
