@@ -104,3 +104,32 @@ describe('BonusReveal', () => {
     expect(screen.getByText('BONUS!')).toBeInTheDocument()
   })
 })
+
+// Deck-count warning color: a round ends the instant the deck empties, so a
+// shrinking deck is a real "wrap it up" signal. Amber <=6, red <=3, normal
+// (unstyled, i.e. the base #888) otherwise. deck contents don't matter here —
+// only .length — so a same-length slice of the freshly-dealt deck is fine.
+describe('Deck count warning color', () => {
+  function setDeckLength(n: number) {
+    const s = useGameStore.getState().state!
+    useGameStore.setState({ state: { ...s, deck: s.deck.slice(0, n) } })
+  }
+
+  it.each([6, 5, 4])('renders amber (#f09030, bold) at %i cards left', (n) => {
+    setDeckLength(n)
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#f09030', fontWeight: 800 })
+  })
+
+  it.each([3, 2, 1, 0])('renders red (#e05050, bold) at %i cards left', (n) => {
+    setDeckLength(n)
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#e05050', fontWeight: 800 })
+  })
+
+  it('renders the normal (unstyled) color at 7+ cards left', () => {
+    setDeckLength(7)
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+    expect(screen.getByText('Deck: 7')).toHaveStyle({ color: '#888' })
+  })
+})

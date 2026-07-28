@@ -22,6 +22,7 @@ import type {
   ReportMatchResult,
   ResignResponse,
   ResolveResponse,
+  RivalryResponse,
   SyncResponse,
   WaitingRoomView,
 } from './types'
@@ -160,6 +161,19 @@ export async function myStyle(tier: string): Promise<MyStyleResponse> {
   return workerFetch<MyStyleResponse>(`/stats/my-style?tier=${encodeURIComponent(tier)}`, { method: 'GET', token: authToken() })
 }
 
+/** GET /stats/rivalry?opponent= (authed) — the RIVALRY modal's only data
+ *  source (StatsDashboard.tsx: clicking an Online Rival). On-demand only,
+ *  same zero-idle-compute contract as myStyle above (see
+ *  worker/src/do/rivalry.ts's docstring) — callers must only invoke this on
+ *  click, never eagerly, and should cache the result per opponent for the
+ *  session (re-opening the same rival's modal should not re-fetch). 404s as
+ *  a WorkerError (code 'no_shared_games') when the two accounts have never
+ *  shared both seats of a completed/resigned match.
+ */
+export async function rivalry(opponentId: string): Promise<RivalryResponse> {
+  return workerFetch<RivalryResponse>(`/stats/rivalry?opponent=${encodeURIComponent(opponentId)}`, { method: 'GET', token: authToken() })
+}
+
 export type {
   ClientMove,
   ClientPlayer,
@@ -172,6 +186,17 @@ export type {
   MyStyleAvailableTier,
   MyStyleResponse,
   ReportMatchBody,
+  RivalryBiggestGame,
+  RivalryBonusSales,
+  RivalryCraft,
+  RivalryGamesRecord,
+  RivalryMatchesRecord,
+  RivalryPerGameEntry,
+  RivalryRecord,
+  RivalryResponse,
+  RivalryStreak,
+  RivalryTokensPerCard,
+  RivalryTotals,
   StyleFinalized,
   SyncResponse,
   WaitingRoomView,

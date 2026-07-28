@@ -4,6 +4,7 @@ import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx
 import { handlePreflight, withCors } from './do/cors'
 import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, touchPlayerLastSeen, type ReportMatchBody } from './do/stats'
 import { getMyStyle } from './do/style'
+import { getRivalry } from './do/rivalry'
 
 // Cloudflare resolves the Durable Object class from the entry module's exports.
 export { GameDO }
@@ -321,6 +322,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const accountId = url.searchParams.get('accountId')
     if (!accountId) return json({ error: 'missing_account_id' }, 400)
     return json(await getRollup(env.DB, accountId))
+  }
+  if (request.method === 'GET' && path === '/stats/rivalry') {
+    // Authed + on-demand-only (do/rivalry.ts's zero-idle-compute contract):
+    // this is the ONLY call site. `opponent` is a required account id — the
+    // caller's own id is resolved from the token, never a body/query field.
+    const auth = await requireAuth(request, env)
+    if (auth instanceof Response) return auth
+    const opponentId = url.searchParams.get('opponent')
+    if (!opponentId) return json({ error: 'missing_opponent' }, 400)
+    const result = await getRivalry(env.DB, auth.accountId, opponentId)
+    if ('error' in result) return json(result, 404)
+    return json(result)
   }
 
   return json({ error: 'not_found' }, 404)

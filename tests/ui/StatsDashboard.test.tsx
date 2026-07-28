@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { StatsDashboard } from '../../src/components/StatsDashboard'
 import { useStatsStore } from '../../src/store/statsStore'
-import type { LeaderboardResponse, MyStyleResponse } from '../../src/net/online'
+import type { LeaderboardResponse, MyStyleResponse, RivalryResponse } from '../../src/net/online'
 import * as onlineApi from '../../src/net/online'
 
 // Mock socket service as it's used transitively by statsStore (mirrors
@@ -871,5 +871,178 @@ describe('StatsDashboard MY STYLE — hard-bot reassurance line', () => {
 
     await waitFor(() => expect(screen.getByText('10W – 12L')).toBeInTheDocument())
     expect(screen.queryByText(/Hard bots are built to beat most players/)).not.toBeInTheDocument()
+  })
+})
+
+// =============================================================================
+// RIVALRY modal — click an Online Rival -> head-to-head panel (DELTA A/B,
+// owner 2026-07-28: games-primary/matches-secondary record shape + the
+// edgeFinder banter line). worker/src/do/rivalry.ts's RivalryResponse is the
+// wire contract these fixtures mirror.
+// =============================================================================
+
+const RIVAL_MATCHES = [
+  { opponent_type: 'online' as const, opponent_id: 'acct-rival-sureka', opponent_name: 'Sureka', player_score: 74, opponent_score: 67, won: true, timestamp: 1 },
+]
+
+const RIVALRY_RESPONSE_ELIGIBLE: RivalryResponse = {
+  opponentName: 'Sureka',
+  record: {
+    games: { wins: 3, losses: 1, currentStreak: { who: 'me', n: 2 } },
+    matches: { wins: 2, losses: 0 },
+  },
+  totals: {
+    myPoints: 300,
+    theirPoints: 250,
+    gamesWon: [3, 1],
+    camelMajorityGames: [3, 1],
+  },
+  biggestGame: { myScore: 85, theirScore: 64, matchCode: '6DRHAJ', gameNumber: 3 },
+  perGame: [
+    { matchCode: '6DRHAJ', gameNumberInMatch: 1, myScore: 70, theirScore: 60, won: true, endedAt: 5000 },
+    { matchCode: '6DRHAJ', gameNumberInMatch: 2, myScore: 55, theirScore: 70, won: false, endedAt: 5000 },
+    { matchCode: '6DRHAJ', gameNumberInMatch: 3, myScore: 85, theirScore: 64, won: true, endedAt: 5000 },
+    { matchCode: 'AAAA11', gameNumberInMatch: 1, myScore: 90, theirScore: 56, won: true, endedAt: 3000 },
+  ],
+  craft: {
+    tokensPerCard: { mine: 3.71, theirs: 3.35, myCards: 40, theirCards: 38, eligible: true },
+    bonusSales: { mine3: 5, mine4: 2, mine5: 1, theirs3: 3, theirs4: 6, theirs5: 1, eligible: true },
+  },
+  edgeFinder: 'Edge finder: Sureka converts more 3+ sales into 4s (6 vs your 2) — hold a beat longer.',
+}
+
+const RIVALRY_RESPONSE_INELIGIBLE_CRAFT: RivalryResponse = {
+  ...RIVALRY_RESPONSE_ELIGIBLE,
+  craft: {
+    tokensPerCard: { mine: 0, theirs: 0, myCards: 4, theirCards: 3, eligible: false },
+    bonusSales: { mine3: 0, mine4: 0, mine5: 0, theirs3: 1, theirs4: 0, theirs5: 0, eligible: false },
+  },
+  edgeFinder: 'Edge finder: play a few more games to unlock.',
+}
+
+async function openRivalsTab() {
+  useStatsStore.setState({ matches: RIVAL_MATCHES })
+  render(<StatsDashboard onClose={() => {}} />)
+  expect(screen.getByText('Sureka')).toBeInTheDocument()
+}
+
+describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
+  beforeEach(() => {
+    vi.spyOn(onlineApi, 'rivalry').mockReset()
+  })
+
+  it('never calls rivalry() before a rival row is clicked', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    await openRivalsTab()
+    expect(onlineApi.rivalry).not.toHaveBeenCalled()
+  })
+
+  it('clicking a rival row fetches once, keyed by that opponent id', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    await openRivalsTab()
+
+    fireEvent.click(screen.getByText('Sureka'))
+    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledWith('acct-rival-sureka'))
+    expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-opening the same rival (close then click again) does not re-fetch — session-cached', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    await openRivalsTab()
+
+    fireEvent.click(screen.getByText('Sureka'))
+    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.click(screen.getByText('Sureka'))
+    // Give any errant effect a tick to fire before asserting it didn't re-fetch.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('StatsDashboard RIVALRY modal — rendering', () => {
+  beforeEach(() => {
+    vi.spyOn(onlineApi, 'rivalry').mockReset()
+  })
+
+  it('renders the games-primary record, streak, matches-secondary line, totals, and biggest-game callout', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    await openRivalsTab()
+    fireEvent.click(screen.getByText('Sureka'))
+
+    await waitFor(() => expect(screen.getByText('YOU vs SUREKA')).toBeInTheDocument())
+    // Games record is the hero (DELTA A: games primary, matches secondary).
+    expect(screen.getByText(/3–1/)).toBeInTheDocument()
+    expect(screen.getByText('in games')).toBeInTheDocument()
+    expect(screen.getByText('won the last 2 games')).toBeInTheDocument()
+    expect(screen.getByText(/across 2 matches \(2–0\)/)).toBeInTheDocument()
+
+    // Biggest game — renamed from biggestRound, signed (not absolute-valued).
+    expect(screen.getByText('Your 85–64 — game 3 of 6DRHAJ')).toBeInTheDocument()
+
+    // The edgeFinder line (DELTA B) renders verbatim from the payload.
+    expect(screen.getByText(RIVALRY_RESPONSE_ELIGIBLE.edgeFinder)).toBeInTheDocument()
+  })
+
+  it('renders eligible craft rows (tokens per card, bonus sales) as tug-of-war rows with real numbers', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    await openRivalsTab()
+    fireEvent.click(screen.getByText('Sureka'))
+
+    await waitFor(() => expect(screen.getByText('Tokens per card')).toBeInTheDocument())
+    expect(screen.getByText('3-card bonus sales')).toBeInTheDocument()
+    expect(screen.getByText('4-card bonus sales')).toBeInTheDocument()
+    expect(screen.getByText('5-card bonus sales')).toBeInTheDocument()
+    expect(screen.queryByText('not enough sells yet to compare craft')).not.toBeInTheDocument()
+  })
+
+  it('shows the "not enough sells yet" fallback line for ineligible craft rows instead of a tug-of-war row', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_INELIGIBLE_CRAFT)
+    await openRivalsTab()
+    fireEvent.click(screen.getByText('Sureka'))
+
+    await waitFor(() => expect(screen.getAllByText('not enough sells yet to compare craft')).toHaveLength(2))
+    expect(screen.queryByText('Tokens per card')).not.toBeInTheDocument()
+  })
+
+  it('renders the per-game list grouped by match, newest match first, games ascending within a match', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
+    useStatsStore.setState({ matches: RIVAL_MATCHES })
+    const { container } = render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByText('Sureka'))
+
+    await waitFor(() => expect(screen.getByText(/MATCH 6DRHAJ/)).toBeInTheDocument())
+    expect(screen.getByText(/MATCH AAAA11/)).toBeInTheDocument()
+    // "Game 1" appears once per match group (6DRHAJ's game 1, AAAA11's game
+    // 1) — only games 2/3 are unique to the 6DRHAJ group.
+    expect(screen.getAllByText('Game 1')).toHaveLength(2)
+    expect(screen.getByText('Game 2')).toBeInTheDocument()
+    expect(screen.getByText('Game 3')).toBeInTheDocument()
+
+    // Newest match (6DRHAJ, endedAt=5000) appears before the older one
+    // (AAAA11, endedAt=3000) — same ordering convention as the coaching-
+    // card-order test above (container.textContent index comparison).
+    const text = container.textContent ?? ''
+    expect(text.indexOf('6DRHAJ')).toBeLessThan(text.indexOf('AAAA11'))
+  })
+
+  it('shows a loading state while the fetch is in flight', async () => {
+    let resolveFetch: (v: RivalryResponse) => void = () => {}
+    vi.spyOn(onlineApi, 'rivalry').mockReturnValue(new Promise((resolve) => { resolveFetch = resolve }))
+    await openRivalsTab()
+    fireEvent.click(screen.getByText('Sureka'))
+
+    expect(await screen.findByText(/Loading head-to-head/i)).toBeInTheDocument()
+    resolveFetch(RIVALRY_RESPONSE_ELIGIBLE)
+    await waitFor(() => expect(screen.getByText('YOU vs SUREKA')).toBeInTheDocument())
+  })
+
+  it('shows a friendly error state on fetch failure', async () => {
+    vi.spyOn(onlineApi, 'rivalry').mockRejectedValue(new Error('http_404'))
+    await openRivalsTab()
+    fireEvent.click(screen.getByText('Sureka'))
+
+    await waitFor(() => expect(screen.getByText(/Could not load head-to-head/i)).toBeInTheDocument())
   })
 })
