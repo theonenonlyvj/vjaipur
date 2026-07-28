@@ -203,3 +203,30 @@ secrecy: opponent bonus values mid-round would expose their running score
 EV. Round-END individual values are provably safe to reveal; the shipped
 sum-only display is UI minimalism, not security. Open offer: show the
 opponent's actual bonus tokens on the round-end screen if Vijay wants it.
+
+## UPDATE 2026-07-28 — MY STYLE tab SHIPPED (a834bab; client 718 / worker 255 tests)
+Per-player "You vs the Bot" style read as a third Hall of Records tab.
+Pipeline: mockup (docs/mockups/you-vs-bot-panel.html) -> Vijay picked
+Variant A (tug-of-war) -> 4-lens design council (data-viz / Jaipur strategy /
+statistics / product-UX) -> 5 blockers + ~20 accepted deltas ALL applied ->
+shipped. Answers to Vijay's questions recorded: online matches can feed style
+stats later from the public moves archive (full-info logging is client-side,
+vs-AI only — full-info only matters for bot TUNING); panel covers ANY bot
+tier (ismcts just has extra search diagnostics).
+Zero-idle-compute (his constraint): computed ONLY on tab open, incremental
+via style_cache(last_log_id) — merge-associativity proven in tests; match-end
+path never touches it. Migration 0003 applied remotely (table verified —
+first-run rollback quirk checked); worker deployed; live smoke: fresh ghost
+200 games:0, unauthed 401.
+Council highlights baked in: no fabricated numbers (test-enforced), coaching
+conditioned + never advises holding precious 3-stacks, per-row minimum-N
+floors (dimmed below), pp-vs-relative gap encoding split, 4-bonus as RATE,
+new camel-majority-at-round-end metric, shared-scale gated sparklines,
+neutral hero (win% only at 15+ games, "Hard bots are built to beat most
+players"), ply-based cap-resistant phase bucketing. Council also fixed a
+dormant bug in tools/mlogs/analyze.mjs phase bucketing (array-index vs ply)
+— noted in the eval doc's watch list; analyze.mjs itself NOT yet patched
+(baseline comparability unaffected today; patch alongside the next corpus
+run).
+Rejected (recorded): global bot-baseline pooling for low-N players — no
+population to pool yet; per-row gates already prevent the harm.
