@@ -398,11 +398,28 @@ export interface IsmctsOptions {
    * callers leave it unset and use budgetMs.
    */
   maxIterations?: number
+  /**
+   * Unconditional-winner early stop (default true; wall-clock mode only —
+   * ignored whenever maxIterations pins the count). Stops the search once the
+   * top child's visit lead is bigger than every iteration the remaining
+   * budget could run, i.e. once the max-visits pick is mathematically final.
+   * Latency-only: cannot change the chosen move. Benchmarks set false to
+   * compare against the full-budget baseline.
+   */
+  earlyStop?: boolean
 }
 
 const DEFAULT_BUDGET_MS = 3000
 const DEFAULT_C = 1.0
 const DEFAULT_USE_ROLLOUT = false // see PROFILING NOTES in the module doc comment at bottom
+// Early-stop cadence/floors — check every 512 iterations (~15-25ms of work at
+// the observed ~20k iters/sec, so the check itself is noise), never before
+// 600ms elapsed (rate estimate too noisy earlier), and overestimate remaining
+// capacity by 25% so the stop can only fire when the runner-up PROVABLY
+// cannot catch up.
+const EARLY_STOP_CHECK_EVERY = 512
+const EARLY_STOP_MIN_MS = 600
+const EARLY_STOP_SAFETY = 1.25
 
 /**
  * One selection+expansion+simulation+backprop pass through a freshly sampled
@@ -507,6 +524,9 @@ function runIteration(
 export interface IsmctsDebugInfo {
   iterations: number
   elapsedMs: number
+  /** True when the unconditional-winner early stop ended the search before
+   *  the wall-clock deadline (the chosen move was mathematically settled). */
+  earlyStopped: boolean
   rootChildVisits: Array<{ key: string; visits: number; q: number }>
 }
 
@@ -533,12 +553,51 @@ export function pickIsmctsAction(state: GameState, options: IsmctsOptions = {}):
   const deadline = Date.now() + budgetMs
   const fixedIterations = options.maxIterations
 
+  // Unconditional-winner early stop (wall-clock mode only). The final pick is
+  // max-VISITS, so once the top child's visit lead over the runner-up exceeds
+  // every iteration the remaining budget could possibly run, the choice is
+  // mathematically settled and further search only makes the human wait.
+  // Corpus motivation (87 real games, 2026-07-27): median 60k iterations/move
+  // and 65% of moves ending with a >=3x top1/top2 visit gap — most of the 3s
+  // budget was spent after the move was already decided. Remaining-iteration
+  // capacity is OVERESTIMATED by 25% so a rate wobble (JIT warmup, GC) can
+  // never make us stop while the runner-up could still catch up — the chosen
+  // move is provably identical to the full-budget run's, this is latency-only.
+  // Pinned-iteration mode (fairness proofs, benchmarks) never early-stops:
+  // iteration count IS the contract there.
+  const earlyStopEnabled = options.earlyStop ?? true
+  let earlyStopped = false
   let iterations = 0
   const start = Date.now()
   while (fixedIterations !== undefined ? iterations < fixedIterations : Date.now() < deadline) {
     const world = fairifyState(state, observerIndex)
     runIteration(root, world, observerIndex, c, useRollout)
     iterations++
+    if (
+      earlyStopEnabled &&
+      fixedIterations === undefined &&
+      iterations % EARLY_STOP_CHECK_EVERY === 0
+    ) {
+      const now = Date.now()
+      const elapsed = now - start
+      if (elapsed >= EARLY_STOP_MIN_MS) {
+        let v1 = -1
+        let v2 = -1
+        for (const child of root.children.values()) {
+          if (child.visits > v1) {
+            v2 = v1
+            v1 = child.visits
+          } else if (child.visits > v2) {
+            v2 = child.visits
+          }
+        }
+        const maxRemainingIters = ((deadline - now) * iterations / elapsed) * EARLY_STOP_SAFETY
+        if (v2 >= 0 && v1 - v2 > maxRemainingIters) {
+          earlyStopped = true
+          break
+        }
+      }
+    }
   }
   const elapsedMs = Date.now() - start
 
@@ -554,6 +613,7 @@ export function pickIsmctsAction(state: GameState, options: IsmctsOptions = {}):
   lastDebugInfo = {
     iterations,
     elapsedMs,
+    earlyStopped,
     rootChildVisits: Array.from(root.children.entries())
       .map(([key, child]) => ({ key, visits: child.visits, q: child.visits > 0 ? child.totalValue / child.visits : 0 }))
       .sort((a, b) => b.visits - a.visits),
