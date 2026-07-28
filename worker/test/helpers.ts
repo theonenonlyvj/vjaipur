@@ -93,6 +93,15 @@ const SCHEMA_STATEMENTS: readonly string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_mlogs_acct ON match_logs(account_id)`,
   `CREATE INDEX IF NOT EXISTS idx_mlogs_type ON match_logs(opponent_type)`,
+  // Migration 0003 — "MY STYLE" incremental cache (worker/migrations/0003_style_cache.sql).
+  `CREATE TABLE IF NOT EXISTS style_cache (
+     account_id   TEXT NOT NULL,
+     tier         TEXT NOT NULL,
+     last_log_id  INTEGER NOT NULL,
+     agg          TEXT NOT NULL,
+     updated_at   INTEGER NOT NULL,
+     PRIMARY KEY (account_id, tier)
+   )`,
 ]
 
 export async function applyD1Schema(db: D1Database): Promise<void> {

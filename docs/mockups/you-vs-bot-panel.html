@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOCKUP — You vs the Bot panel (vjaipur Hall of Records)</title>
+<style>
+  /* Mockup of a new "MY STYLE" tab inside the Hall of Records modal.
+     Real data: Vijay's 2026-07-27 corpus (87 games vs Hard ISMCTS). */
+  * { box-sizing: border-box; margin: 0; font-family: 'Iosevka Charon', ui-monospace, Menlo, monospace; }
+  body { background: #0d0805; color: #f0e8d8; padding: 24px 12px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+  .note { color: #886; font-size: 12px; max-width: 420px; text-align: center; }
+  .modal { width: 100%; max-width: 420px; background: #120a04; border: 2px solid #f0c030; border-radius: 20px; padding: 22px 18px; }
+  h1 { color: #f0c030; font-size: 22px; font-weight: 900; letter-spacing: 3px; }
+  .tabs { display: flex; margin: 16px 0; border: 1px solid #5a3a20; border-radius: 10px; overflow: hidden; }
+  .tab { flex: 1; text-align: center; padding: 9px 0; font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #a89; }
+  .tab.on { background: #f0c030; color: #000; }
+  .sec { color: #f0c030; font-size: 11px; font-weight: 800; letter-spacing: 2px; margin: 18px 0 10px; }
+  .hero { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .hero .rec { font-size: 26px; font-weight: 900; color: #f0e8d8; }
+  .hero .pct { font-size: 14px; color: #e05050; font-weight: 800; }
+  .sub { color: #997; font-size: 11.5px; margin-bottom: 14px; }
+  .vs { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+  .vs .lbl { grid-column: 1 / span 3; color: #997; font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; margin-top: 9px; }
+  .bar { height: 10px; border-radius: 5px; background: #2a1c0e; position: relative; overflow: hidden; }
+  .bar i { position: absolute; top: 0; bottom: 0; border-radius: 5px; }
+  .you i { right: 0; background: linear-gradient(90deg, #b8860b, #f0c030); }
+  .bot i { left: 0; background: #6a5a8a; }
+  .mid { font-size: 10px; color: #776; width: 34px; text-align: center; }
+  .win { color: #40c057; font-weight: 800; }
+  .badge { display: inline-block; background: rgba(240,192,48,.12); border: 1px solid rgba(240,192,48,.35); color: #f0c030; border-radius: 14px; padding: 3px 10px; font-size: 11px; margin: 2px 3px 2px 0; }
+  .coach { background: rgba(64,192,87,.08); border: 1px solid rgba(64,192,87,.3); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: #cde8cd; margin-top: 8px; line-height: 1.45; }
+  .coach b { color: #40c057; }
+  .traj { display: flex; gap: 16px; margin-top: 6px; }
+  .tcol { flex: 1; }
+  .tcol .t { font-size: 10.5px; color: #997; letter-spacing: 1px; margin-bottom: 5px; }
+  .spark { display: flex; align-items: flex-end; gap: 4px; height: 46px; }
+  .spark div { flex: 1; border-radius: 3px 3px 0 0; min-height: 3px; }
+  .g { background: #40c057; } .r { background: #e05050; }
+  .axis { font-size: 9px; color: #665; display: flex; justify-content: space-between; margin-top: 3px; }
+  .foot { color: #776; font-size: 10.5px; margin-top: 14px; font-style: italic; }
+  /* Variant A: tug-of-war */
+  .tughead { display: flex; justify-content: space-between; font-size: 9px; color: #665; letter-spacing: 1px; margin-bottom: 8px; }
+  .trow { margin-bottom: 13px; }
+  .tlbl { font-size: 12px; color: #dcd0b8; margin-bottom: 4px; }
+  .tlbl b.bad { color: #e05050; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; margin-left: 6px; }
+  .tlbl b.good { color: #40c057; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; margin-left: 6px; }
+  .track { position: relative; height: 14px; background: #221609; border-radius: 7px; overflow: hidden; }
+  .cline { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #554; z-index: 2; }
+  .pull { position: absolute; top: 2px; bottom: 2px; border-radius: 6px; }
+  .pull.you { background: linear-gradient(90deg, #b8860b, #f0c030); }
+  .pull.bot { background: linear-gradient(270deg, #4a3a6a, #7a68a8); }
+  .tnum { font-size: 10.5px; color: #997; margin-top: 3px; }
+  /* Variant B: dumbbells */
+  .drow { margin-bottom: 14px; }
+  .dtrack { position: relative; height: 14px; }
+  .dtrack::before { content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 2px; background: #332512; }
+  .dot { position: absolute; top: 2px; width: 10px; height: 10px; border-radius: 50%; z-index: 2; }
+  .dot.you2 { background: #f0c030; } .dot.bot2 { background: #7a68a8; }
+  .join { position: absolute; top: 5px; height: 4px; background: #664; border-radius: 2px; }
+  .dax { display: flex; justify-content: space-between; font-size: 9px; color: #554; margin-top: 2px; }
+  .dlegend { font-size: 10px; color: #997; }
+</style>
+</head>
+<body>
+
+<div class="note">MOCKUP — a third tab in the existing Hall of Records modal (MY RECORDS · GLOBAL · <b style="color:#f0c030">MY STYLE</b>). All numbers below are your real corpus (87 logged games vs Hard ISMCTS).</div>
+
+<div class="modal">
+  <h1>HALL OF RECORDS</h1>
+  <div class="tabs"><div class="tab">MY RECORDS</div><div class="tab">GLOBAL</div><div class="tab on">MY STYLE</div></div>
+
+  <div class="hero"><span class="rec">46W – 68L</span><span class="pct">40%</span></div>
+  <div class="sub">vs Hard (ISMCTS) · 87 analyzed games · updated after each match</div>
+
+  <div class="sec">YOU vs THE BOT <span style="color:#665">— who owns each part of the game</span></div>
+  <!-- VARIANT A: tug-of-war. One bar per metric anchored at "even"; it pulls
+       toward whoever is ahead, length = relative gap. Sorted biggest gap first. -->
+  <div class="tug">
+    <div class="tughead"><span>◀ BOT'S EDGE</span><span>EVEN</span><span>YOUR EDGE ▶</span></div>
+
+    <div class="trow"><div class="tlbl">4-card bonus sales <b class="bad">the decider</b></div>
+      <div class="track"><div class="cline"></div><div class="pull bot" style="right:50%;width:32%"></div></div>
+      <div class="tnum">38 vs <b>56</b> · bot +47%</div></div>
+
+    <div class="trow"><div class="tlbl">Camel grabs</div>
+      <div class="track"><div class="cline"></div><div class="pull bot" style="right:50%;width:19%"></div></div>
+      <div class="tnum">17% vs <b>21%</b> of moves</div></div>
+
+    <div class="trow"><div class="tlbl">Tokens per card sold <b class="good">your craft</b></div>
+      <div class="track"><div class="cline"></div><div class="pull you" style="left:50%;width:10%"></div></div>
+      <div class="tnum"><b>3.79</b> vs 3.44 · you +10%</div></div>
+
+    <div class="trow"><div class="tlbl">3- and 5-card bonuses</div>
+      <div class="track"><div class="cline"></div><div class="pull you" style="left:50%;width:2%"></div></div>
+      <div class="tnum">dead even — this is NOT your problem</div></div>
+  </div>
+
+  <div class="sec" style="margin-top:26px">SAME DATA, VARIANT B <span style="color:#665">— dumbbells (shared scale per row)</span></div>
+  <div class="dumb">
+    <div class="drow"><div class="tlbl">Tokens per card sold</div>
+      <div class="dtrack"><span class="dot you2" style="left:79%"></span><span class="dot bot2" style="left:44%"></span><i class="join" style="left:44%;width:35%"></i></div>
+      <div class="dax"><span>3.0</span><span>4.0</span></div></div>
+    <div class="drow"><div class="tlbl">4-card bonus sales</div>
+      <div class="dtrack"><span class="dot you2" style="left:54%"></span><span class="dot bot2" style="left:80%"></span><i class="join" style="left:54%;width:26%"></i></div>
+      <div class="dax"><span>0</span><span>70</span></div></div>
+    <div class="dlegend"><span class="dot you2" style="position:static;display:inline-block"></span> you &nbsp;&nbsp;<span class="dot bot2" style="position:static;display:inline-block"></span> bot</div>
+  </div>
+
+  <div class="sec">YOUR SIGNATURES</div>
+  <div>
+    <span class="badge">🎯 Cherry-picker — 34% single-card sales, always the pile top</span>
+    <span class="badge">💎 Clean precious tempo — 66% sold at exactly 2</span>
+    <span class="badge">🌊 Boom player — wins surge late, losses bleed slow</span>
+  </div>
+
+  <div class="sec">GAME SHAPE <span style="color:#665">(score gap vs bot by phase)</span></div>
+  <div class="traj">
+    <div class="tcol">
+      <div class="t">IN YOUR WINS</div>
+      <div class="spark"><div class="r" style="height:12%"></div><div class="g" style="height:14%"></div><div class="g" style="height:52%"></div><div class="g" style="height:94%"></div></div>
+      <div class="axis"><span>early</span><span>late</span></div>
+    </div>
+    <div class="tcol">
+      <div class="t">IN YOUR LOSSES</div>
+      <div class="spark"><div class="r" style="height:8%"></div><div class="r" style="height:18%"></div><div class="r" style="height:23%"></div><div class="r" style="height:58%"></div></div>
+      <div class="axis"><span>early</span><span>late</span></div>
+    </div>
+  </div>
+
+  <div class="sec">ONE THING TO STEAL FROM THE BOT</div>
+  <div class="coach"><b>Hold the 3-stack for a 4th.</b> Your 3-card and 5-card bonus sales match the bot — but it turns 3-stacks into 4-bonuses 56 times to your 38, worth ~+2.5 pts each. That gap ≈ your whole losing margin. Cheap goods especially: once the pile top is gone, the 4th card costs you almost nothing.</div>
+
+  <div class="foot">Style updates as you play. Compare vs a different bot with the tier filter (coming with more data).</div>
+</div>
+
+<div class="note">Implementation: one worker endpoint (GET /stats/my-style — aggregates your match_logs rows server-side, same math as tools/mlogs/analyze.mjs) + this tab in StatsDashboard. The coaching line is rule-based from the metrics (biggest you-vs-bot gap wins), not canned.</div>
+
+</body>
+</html>

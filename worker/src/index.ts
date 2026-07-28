@@ -3,6 +3,7 @@ import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
 import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, touchPlayerLastSeen, type ReportMatchBody } from './do/stats'
+import { getMyStyle } from './do/style'
 
 // Cloudflare resolves the Durable Object class from the entry module's exports.
 export { GameDO }
@@ -302,6 +303,19 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const result = await reportMatch(env.DB, auth.accountId, (body ?? {}) as ReportMatchBody)
     if ('error' in result) return json(result, 400)
     return json(result)
+  }
+  if (request.method === 'GET' && path === '/stats/my-style') {
+    // Authed + lazy: this is the ONLY call site in the whole worker that
+    // touches do/style.ts#getMyStyle — there is no hook at match-end (see
+    // do/style.ts's docstring for the zero-idle-compute contract this
+    // upholds). `tier` is required and must be a real AI tier id (or
+    // 'online', reused from isValidOpponentTypeFilter — harmless: match_logs
+    // never has an 'online' row, so that just yields an empty style).
+    const auth = await requireAuth(request, env)
+    if (auth instanceof Response) return auth
+    const tier = url.searchParams.get('tier')
+    if (!tier || !isValidOpponentTypeFilter(tier)) return json({ error: 'invalid_tier' }, 400)
+    return json(await getMyStyle(env.DB, auth.accountId, tier))
   }
   if (request.method === 'GET' && path === '/stats/rollup') {
     const accountId = url.searchParams.get('accountId')
