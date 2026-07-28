@@ -241,3 +241,94 @@ export interface MyStyleResponse {
 }
 
 export type { StyleFinalized }
+
+// ---- rivalry (worker/src/do/rivalry.ts) ------------------------------------
+//
+// VOCABULARY (owner's explicit call, 2026-07-28): a GAME is one deal/round
+// (produces a score + a seal); a MATCH is the best-of-N wrapper for one
+// sitting (the app's own "MATCH LENGTH: 1 GAME / 3 GAMES" picker). GAMES are
+// the lifetime stat (the hero record + streak); MATCHES are session context
+// (a secondary line). See worker/src/do/rivalry.ts's file header for the
+// full rationale — these types are its RivalryResponse, hand-mirrored.
+
+export interface RivalryStreak {
+  who: 'me' | 'them'
+  n: number
+}
+
+export interface RivalryGamesRecord {
+  wins: number
+  losses: number
+  currentStreak: RivalryStreak
+}
+
+export interface RivalryMatchesRecord {
+  wins: number
+  losses: number
+}
+
+export interface RivalryRecord {
+  games: RivalryGamesRecord
+  matches: RivalryMatchesRecord
+}
+
+export interface RivalryTotals {
+  myPoints: number
+  theirPoints: number
+  /** [mine, theirs] */
+  gamesWon: [number, number]
+  /** [mine, theirs] */
+  camelMajorityGames: [number, number]
+}
+
+export interface RivalryBiggestGame {
+  myScore: number
+  theirScore: number
+  matchCode: string
+  gameNumber: number
+}
+
+export interface RivalryPerGameEntry {
+  matchCode: string
+  gameNumberInMatch: number
+  myScore: number
+  theirScore: number
+  won: boolean
+  endedAt: number | null
+}
+
+export interface RivalryTokensPerCard {
+  mine: number
+  theirs: number
+  myCards: number
+  theirCards: number
+  eligible: boolean
+}
+
+export interface RivalryBonusSales {
+  mine3: number
+  mine4: number
+  mine5: number
+  theirs3: number
+  theirs4: number
+  theirs5: number
+  eligible: boolean
+}
+
+export interface RivalryCraft {
+  tokensPerCard: RivalryTokensPerCard
+  bonusSales: RivalryBonusSales
+}
+
+/** `GET /stats/rivalry?opponent=` response — see worker/src/do/rivalry.ts's
+ *  RivalryResponse docstring for what each field means and the games-vs-
+ *  matches distinction. */
+export interface RivalryResponse {
+  opponentName: string
+  record: RivalryRecord
+  totals: RivalryTotals
+  biggestGame: RivalryBiggestGame | null
+  perGame: RivalryPerGameEntry[]
+  craft: RivalryCraft
+  edgeFinder: string
+}

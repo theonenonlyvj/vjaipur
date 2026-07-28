@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type CSSProperties } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { MarketRow } from '../components/MarketRow'
@@ -18,6 +18,16 @@ import type { Good } from '../engine'
 
 export interface GameScreenProps {
   frozen?: boolean
+}
+
+/** Deck-count warning color (a round ends the instant the deck empties, so a
+ *  shrinking deck is a real "wrap it up" signal): amber at <=6 remaining,
+ *  red+bold at <=3, unchanged otherwise. Same weight (800) for both warning
+ *  tiers — only the color escalates. */
+function deckCountStyle(remaining: number): CSSProperties {
+  if (remaining <= 3) return { color: '#e05050', fontWeight: 800 }
+  if (remaining <= 6) return { color: '#f09030', fontWeight: 800 }
+  return {}
 }
 
 export function GameScreen({ frozen = false }: GameScreenProps) {
@@ -258,7 +268,7 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
           <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
             Market
           </span>
-          <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 1, ...deckCountStyle(state.deck.length) }}>
             Deck: {state.deck.length}
           </span>
         </div>

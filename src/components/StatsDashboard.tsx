@@ -1,10 +1,11 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
-import { leaderboard as fetchLeaderboard, myStyle as fetchMyStyle } from '../net/online'
-import type { LeaderboardResponse, MyStyleResponse } from '../net/online'
+import { leaderboard as fetchLeaderboard, myStyle as fetchMyStyle, rivalry as fetchRivalry } from '../net/online'
+import type { LeaderboardResponse, MyStyleResponse, RivalryResponse } from '../net/online'
 import type { TugRow, TugRowFormat } from '../shared/styleAgg'
 import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, getFamilyLabel, type TierFamily } from '../ai/tiers'
 import { ProfileOverlay } from './ProfileOverlay'
+import { RivalryModal } from './RivalryModal'
 
 interface StatsDashboardProps {
   onClose: () => void
@@ -240,6 +241,35 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const sessionExpired = useStatsStore((state) => state.sessionExpired)
   const [syncing, setSyncing] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+
+  // ── RIVALRY modal ─────────────────────────────────────────────────────
+  //
+  // Click an Online Rival row -> head-to-head panel vs that opponent
+  // (worker/src/do/rivalry.ts). Same lazy/on-demand contract as MY STYLE
+  // (fetch ONLY on click, session-cached per opponent id so re-opening the
+  // same rival never re-fetches).
+  const [rivalryOpponent, setRivalryOpponent] = useState<{ id: string; name: string } | null>(null)
+  const [rivalryCache, setRivalryCache] = useState<Record<string, RivalryResponse>>({})
+  const [rivalryLoading, setRivalryLoading] = useState(false)
+  const [rivalryError, setRivalryError] = useState('')
+  // Subtle hover affordance on a clickable rival row (StatsStrip.tsx's own
+  // onMouseEnter/onMouseLeave convention) — a single id, not per-row state.
+  const [hoveredRivalId, setHoveredRivalId] = useState<string | null>(null)
+
+  function openRivalry(id: string, name: string) {
+    setRivalryOpponent({ id, name })
+  }
+
+  useEffect(() => {
+    if (!rivalryOpponent) return
+    if (rivalryCache[rivalryOpponent.id]) return // session-cached — re-opening never re-fetches
+    setRivalryLoading(true)
+    setRivalryError('')
+    fetchRivalry(rivalryOpponent.id)
+      .then((data) => setRivalryCache((prev) => ({ ...prev, [rivalryOpponent.id]: data })))
+      .catch(() => setRivalryError('Could not load head-to-head — you may not have shared any games yet.'))
+      .finally(() => setRivalryLoading(false))
+  }, [rivalryOpponent, rivalryCache])
 
   // Drain the on-device pending-report queue ON DEMAND. Before this existed,
   // queued games only retried at app boot (retryPendingReports in main.tsx) —
@@ -522,7 +552,17 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                     </thead>
                     <tbody>
                       {rivals.map((r) => (
-                        <tr key={r.id} style={trStyle}>
+                        <tr
+                          key={r.id}
+                          style={{
+                            ...trStyle,
+                            cursor: 'pointer',
+                            background: hoveredRivalId === r.id ? 'rgba(240,192,48,.06)' : undefined,
+                          }}
+                          onClick={() => openRivalry(r.id, r.name)}
+                          onMouseEnter={() => setHoveredRivalId(r.id)}
+                          onMouseLeave={() => setHoveredRivalId((prev) => (prev === r.id ? null : prev))}
+                        >
                           <td style={{ ...tdStyle, fontSize: 12 }}>{r.name}</td>
                           <td style={tdStyle}>{r.wins}</td>
                           <td style={tdStyle}>{r.losses}</td>
@@ -875,6 +915,15 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
         </div>
       </div>
       {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
+      {rivalryOpponent && (
+        <RivalryModal
+          opponentName={rivalryOpponent.name}
+          loading={rivalryLoading}
+          error={rivalryError}
+          data={rivalryCache[rivalryOpponent.id] ?? null}
+          onClose={() => setRivalryOpponent(null)}
+        />
+      )}
     </div>
   )
 }
