@@ -15,6 +15,7 @@ import type {
   LeaveResponse,
   MoveResult,
   MyGamesResponse,
+  MyStyleResponse,
   NextRoundResult,
   ReclaimResponse,
   ReportMatchBody,
@@ -149,6 +150,16 @@ export async function reportMatch(body: ReportMatchBody): Promise<ReportMatchRes
   return workerFetch<ReportMatchResult>('/stats/report', { method: 'POST', body, token: authToken() })
 }
 
+/** GET /stats/my-style?tier= (authed) — the "MY STYLE" (You vs the Bot) tab's
+ *  only data source. Server-side lazy + incrementally cached (see
+ *  worker/src/do/style.ts) — this call itself is what triggers computation;
+ *  callers (StatsDashboard.tsx) must only invoke it on first activation of
+ *  the tab, never eagerly, to preserve the zero-idle-compute contract for a
+ *  player who never opens it. */
+export async function myStyle(tier: string): Promise<MyStyleResponse> {
+  return workerFetch<MyStyleResponse>(`/stats/my-style?tier=${encodeURIComponent(tier)}`, { method: 'GET', token: authToken() })
+}
+
 export type {
   ClientMove,
   ClientPlayer,
@@ -158,7 +169,10 @@ export type {
   LeaderboardRow,
   MatchHistoryRow,
   MatchPhase,
+  MyStyleAvailableTier,
+  MyStyleResponse,
   ReportMatchBody,
+  StyleFinalized,
   SyncResponse,
   WaitingRoomView,
 } from './types'

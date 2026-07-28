@@ -1,7 +1,8 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useStatsStore } from '../store/statsStore'
-import { leaderboard as fetchLeaderboard } from '../net/online'
-import type { LeaderboardResponse } from '../net/online'
+import { leaderboard as fetchLeaderboard, myStyle as fetchMyStyle } from '../net/online'
+import type { LeaderboardResponse, MyStyleResponse } from '../net/online'
+import type { TugRow, TugRowFormat } from '../shared/styleAgg'
 import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, getFamilyLabel, type TierFamily } from '../ai/tiers'
 import { ProfileOverlay } from './ProfileOverlay'
 
@@ -135,6 +136,103 @@ function fmtWinRate(rate: number) {
   return `${Math.round(rate * 100)}%`
 }
 
+// ── MY STYLE (You vs the Bot) ────────────────────────────────────────────
+//
+// Server-side lazy + incrementally cached (worker/src/do/style.ts) — this
+// tab's job is to never call fetchMyStyle until it's actually opened, and to
+// only ever fetch once per tier per session (styleCache below), never on
+// mount and never speculatively for a tier the player hasn't picked.
+
+/** Below this many logged (preState-joined) games for a tier, the style read
+ *  isn't statistically meaningful yet — show the placeholder instead. */
+const MIN_STYLE_GAMES = 5
+
+/** Design council item 5: the hero's win% is only bolded/shown once the
+ *  record has enough games to mean something — below this, the W-L count
+ *  alone is shown (still always present). */
+const MIN_HERO_WINPCT_GAMES = 15
+
+/** Design council item 4: the whole trajectory ("game shape") section is
+ *  gated on having at least this many WINS and this many LOSSES for the
+ *  selected tier — a lopsided or tiny record produces a misleading shape. */
+const MIN_TRAJECTORY_GAMES_PER_OUTCOME = 10
+
+/** The tab's opening tier, computed PURELY from data already loaded locally
+ *  (statsStore's own `matches` — no network round-trip needed to pick a
+ *  reasonable starting point): the vs-AI opponent_type with the most local
+ *  match rows. Returns null when the player has no vs-AI matches at all
+ *  (nothing to default to — the tab shows its own empty state instead of
+ *  fetching anything). */
+function computeDefaultStyleTier(matches: { opponent_type: string }[]): string | null {
+  const counts = new Map<string, number>()
+  for (const m of matches) {
+    if (m.opponent_type === 'online') continue
+    counts.set(m.opponent_type, (counts.get(m.opponent_type) ?? 0) + 1)
+  }
+  let best: string | null = null
+  let bestCount = 0
+  for (const [tier, count] of counts) {
+    if (count > bestCount) {
+      best = tier
+      bestCount = count
+    }
+  }
+  return best
+}
+
+function fmtStyleValue(v: number, format: TugRowFormat): string {
+  if (format === 'percent') return `${v.toFixed(0)}%`
+  return v.toFixed(2)
+}
+
+/** Bar width (0..45, leaving margin so it never overflows its half of the
+ *  track) for a tug-of-war row's pull — magnitude only, direction comes from
+ *  which side of the track it's anchored to. */
+function tugBarWidth(row: TugRow): number {
+  return Math.min(45, row.gapPct)
+}
+
+/** Design council item 11: "tier label spells it out once" — a short,
+ *  hand-authored plain-language tag per tier id, appended to the tier's own
+ *  label ONLY at the hero subtitle (the tier PICKER buttons keep the plain
+ *  getTierLabel text — see the render below). Purely descriptive UI copy
+ *  (not a numeric claim), so it's fine to author directly rather than reuse
+ *  ai/tiers.ts's longer marketing `tagline`. Falls back to no tag for any
+ *  tier id not listed (never throws on an unrecognized/future id). */
+const TIER_PLAIN_TAG: Record<string, string> = {
+  easy: 'a relaxed intro',
+  medium: 'a solid club player',
+  hard2: 'reads the odds, no peeking',
+  ismcts: 'the fair bot — imagines every hand',
+  hard3: 'sees your hand and the deck',
+  hard: 'the original hard bot',
+  fair: 'the original fair bot',
+}
+
+function tierPlainLabel(tier: string): string {
+  const tag = TIER_PLAIN_TAG[tier]
+  return tag ? `${getTierLabel(tier)} — ${tag}` : getTierLabel(tier)
+}
+
+/** Design council item 5's reassurance line ("Hard bots are built to beat
+ *  most players — losing here is the point") only makes sense against a
+ *  genuinely hard opponent — showing it under an Easy/Medium record would be
+ *  a non-sequitur. Reuses ai/tiers.ts's family tag (hard2/ismcts/hard/fair
+ *  are all `family:'hard'`) plus hard3 (Omniscient Bot, undefeated-by-design
+ *  and family-less in tiers.ts). */
+function isHardTier(tier: string): boolean {
+  return getTierFamily(tier) === 'hard' || tier === 'hard3'
+}
+
+/** Design council item 4: both trajectory sparkline columns share ONE scale
+ *  (the max |mean| across every phase of BOTH wins and losses) so a "surge"
+ *  in one column is visually comparable to a "drift" in the other, instead
+ *  of each column silently rescaling itself to its own max. */
+function sparkScale(wins: { mean: number }[], losses: { mean: number }[]): number {
+  const allMeans = [...wins, ...losses].map((p) => Math.abs(p.mean))
+  return Math.max(1, ...allMeans)
+}
+
 export function StatsDashboard({ onClose }: StatsDashboardProps) {
   const matches = useStatsStore((state) => state.matches)
   const pendingReports = useStatsStore((state) => state.pendingReports)
@@ -155,7 +253,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
       setSyncing(false)
     }
   }
-  const [view, setView] = useState<'mine' | 'global'>('mine')
+  const [view, setView] = useState<'mine' | 'global' | 'style'>('mine')
   // 'verified' = online_authoritative only (server-enforced, but NOT proof of
   // two distinct humans — worker/src/do/stats.ts's ADDENDUM T comment). Only
   // meaningful for the ALL_OPPONENTS board — a specific opponent filter shows
@@ -212,6 +310,46 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
       .catch(() => setLbError('Could not load leaderboard.'))
       .finally(() => setLbLoading(false))
   }, [view, opponentFilter, drillMember])
+
+  // ── MY STYLE ───────────────────────────────────────────────────────────
+  //
+  // The selected tier — null until the tab has been opened at least once
+  // (see the effect below, which seeds it from computeDefaultStyleTier the
+  // first time `view === 'style'`). Clicking a tier chip sets this directly.
+  const [styleTier, setStyleTier] = useState<string | null>(null)
+  // Per-tier response cache for THIS SESSION (component lifetime) — once a
+  // tier's data has been fetched, re-selecting it (or re-opening the tab)
+  // never re-fetches. Keyed by tier id.
+  const [styleCache, setStyleCache] = useState<Record<string, MyStyleResponse>>({})
+  const [styleLoading, setStyleLoading] = useState(false)
+  const [styleError, setStyleError] = useState('')
+
+  // Fetch ONLY on first activation of the tab (view === 'style') and ONLY
+  // for a tier not already cached this session — this is the entire
+  // enforcement of the "zero compute for a player who never opens the tab"
+  // contract on the client side (the real enforcement is server-side: see
+  // worker/src/do/style.ts's docstring — nothing computes there either
+  // unless this exact call fires). `matches` seeds the opening tier from
+  // data already loaded locally, no network round-trip required just to
+  // pick a starting tier.
+  useEffect(() => {
+    if (view !== 'style') return
+    const tier = styleTier ?? computeDefaultStyleTier(matches)
+    if (!tier) return // no vs-AI matches at all locally — nothing to default to
+    if (styleTier === null) {
+      setStyleTier(tier)
+      return // let the state update land; the next run of this effect fetches
+    }
+    if (styleCache[tier]) return // already have this tier's data this session
+    setStyleLoading(true)
+    setStyleError('')
+    fetchMyStyle(tier)
+      .then((data) => setStyleCache((prev) => ({ ...prev, [tier]: data })))
+      .catch(() => setStyleError('Could not load your style read.'))
+      .finally(() => setStyleLoading(false))
+  }, [view, styleTier, styleCache, matches])
+
+  const styleData = styleTier ? styleCache[styleTier] : undefined
 
   // ── MY RECORDS ─────────────────────────────────────────────────────────
   const aiStats = AI_TIERS.map((tier) => {
@@ -285,6 +423,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
         <div style={viewToggleStyle}>
           <button onClick={() => setView('mine')} style={view === 'mine' ? activeViewBtnStyle : viewBtnStyle}>MY RECORDS</button>
           <button onClick={() => setView('global')} style={view === 'global' ? activeViewBtnStyle : viewBtnStyle}>GLOBAL</button>
+          <button onClick={() => setView('style')} style={view === 'style' ? activeViewBtnStyle : viewBtnStyle}>MY STYLE</button>
         </div>
 
         {/* ── MY RECORDS ── */}
@@ -532,6 +671,205 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
           </>
         )}
 
+        {/* ── MY STYLE ── */}
+        {view === 'style' && (
+          <>
+            {!styleTier && (
+              <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: '40px 0' }}>
+                Play a few games against any AI to unlock your style read.
+              </div>
+            )}
+
+            {styleTier && (
+              <>
+                {styleData && styleData.availableTiers.length > 1 && (
+                  <div style={opponentToggleRowStyle}>
+                    {styleData.availableTiers.map((t) => (
+                      <button
+                        key={t.tier}
+                        onClick={() => setStyleTier(t.tier)}
+                        style={styleTier === t.tier ? activeOpponentToggleBtnStyle : opponentToggleBtnStyle}
+                      >
+                        {getTierLabel(t.tier)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {styleLoading && !styleData && (
+                  <div style={{ color: '#888', textAlign: 'center', padding: '40px 0', fontStyle: 'italic' }}>
+                    Loading your style read…
+                  </div>
+                )}
+                {styleError && !styleData && (
+                  <div style={{ color: '#ff6060', textAlign: 'center', padding: '20px 0' }}>{styleError}</div>
+                )}
+
+                {styleData && styleData.games < MIN_STYLE_GAMES && (
+                  <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: '24px 0' }}>
+                    Play {MIN_STYLE_GAMES - styleData.games} more games vs {getTierLabel(styleTier)} to unlock your style read.
+                  </div>
+                )}
+
+                {styleData && styleData.games >= MIN_STYLE_GAMES && (
+                  <>
+                    {/* ── Hero: W-L ALWAYS shown; win% only bolded once the
+                        record has enough games to mean anything (design
+                        council item 5) — neutral cream, never red/danger
+                        styling. Reassurance line only against a genuinely
+                        hard tier. */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+                      <span style={{ fontSize: 26, fontWeight: 900, color: '#f0e8d8' }}>
+                        {styleData.style.wins}W – {styleData.style.losses}L
+                      </span>
+                      {styleData.style.games >= MIN_HERO_WINPCT_GAMES && (
+                        <span style={{ fontSize: 14, color: '#cbbf9a', fontWeight: 800 }}>
+                          {Math.round(styleData.style.winPct)}%
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ color: '#997', fontSize: 11.5, marginBottom: 4 }}>
+                      vs {tierPlainLabel(styleTier)} · {styleData.style.games} analyzed games
+                    </div>
+                    {isHardTier(styleTier) && (
+                      <div style={{ color: '#776', fontSize: 11, fontStyle: 'italic', marginBottom: 14 }}>
+                        Hard bots are built to beat most players — losing here is the point.
+                      </div>
+                    )}
+
+                    {/* ── Coaching card moves UP, directly under the hero
+                        (design council item 9) — the tug-of-war rows below
+                        are its receipts, not the headline. */}
+                    <h3 style={sectionHeaderStyle}>ONE THING TO WATCH</h3>
+                    <div style={coachCardStyle}>{styleData.style.coaching}</div>
+
+                    <h3 style={{ ...sectionHeaderStyle, marginTop: 22 }}>YOU vs THE BOT <span style={{ color: '#665', fontWeight: 700 }}>— the receipts</span></h3>
+                    <div>
+                      {styleData.style.rows.map((row: TugRow) => (
+                        <div key={row.id} style={{ marginBottom: 13, opacity: row.eligible ? 1 : 0.5 }}>
+                          <div style={{ fontSize: 12, color: '#dcd0b8', marginBottom: 2 }}>
+                            {row.label}
+                            {row.tag === 'gap' && <span style={tugTagStyle}>BIGGEST GAP</span>}
+                          </div>
+                          {row.sublabel && (
+                            <div style={{ fontSize: 10, color: '#776', marginBottom: 4, fontStyle: 'italic' }}>{row.sublabel}</div>
+                          )}
+                          <div style={tugTrackStyle}>
+                            <div style={tugClineStyle} />
+                            {row.side !== 'even' && (
+                              <div
+                                style={
+                                  row.side === 'human'
+                                    ? { ...tugPullBaseStyle, left: '50%', width: `${tugBarWidth(row)}%`, background: 'linear-gradient(90deg, #b8860b, #f0c030)' }
+                                    : { ...tugPullBaseStyle, right: '50%', width: `${tugBarWidth(row)}%`, background: 'linear-gradient(270deg, #4a3a6a, #7a68a8)' }
+                                }
+                              />
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10.5, color: '#997', marginTop: 3 }}>
+                            {row.dead ? (
+                              'dead even — this is NOT your problem'
+                            ) : (
+                              <>
+                                {fmtStyleValue(row.human, row.format)} vs <b style={{ color: '#f0e8d8' }}>{fmtStyleValue(row.ai, row.format)}</b>
+                                {' · '}{row.side === 'human' ? 'you' : 'bot'} +{Math.round(row.gapPct)}
+                                {row.gapKind === 'points' ? ' pts' : '%'}
+                              </>
+                            )}
+                          </div>
+                          {row.subCaption && (
+                            <div style={{ fontSize: 10, color: '#776', marginTop: 2 }}>{row.subCaption}</div>
+                          )}
+                          {!row.eligible && (
+                            <div style={{ fontSize: 10, color: '#776', marginTop: 2, fontStyle: 'italic' }}>{row.sampleNote}</div>
+                          )}
+                        </div>
+                      ))}
+                      {styleData.style.notes.map((note) => (
+                        <div key={note} style={{ fontSize: 11, color: '#776', fontStyle: 'italic', marginBottom: 10 }}>{note}</div>
+                      ))}
+                    </div>
+
+                    <h3 style={sectionHeaderStyle}>YOUR SIGNATURES</h3>
+                    <div style={{ marginBottom: 8 }}>
+                      {styleData.style.signatures.cherryPicker && (
+                        <span style={badgeStyle}>
+                          🎯 Cherry-picker — {Math.round(styleData.style.signatures.cherryPickerPct)}% of your sales are single cards
+                        </span>
+                      )}
+                      {styleData.style.signatures.preciousTempo && (
+                        <span style={badgeStyle}>
+                          💎 Precious tempo — selling diamond/gold/silver at exactly 2 keeps more of the pile available later
+                          (you {Math.round(styleData.style.signatures.preciousTempoHumanPct)}% / bot {Math.round(styleData.style.signatures.preciousTempoAiPct)}%)
+                        </span>
+                      )}
+                      {styleData.style.signatures.boomPlayer && (
+                        <span style={badgeStyle}>🌊 Boom player — wins surge late, losses drift late</span>
+                      )}
+                      {!styleData.style.signatures.cherryPicker &&
+                        !styleData.style.signatures.preciousTempo &&
+                        !styleData.style.signatures.boomPlayer && (
+                          <span style={{ color: '#666', fontStyle: 'italic', fontSize: 12 }}>No strong signature yet — keep playing.</span>
+                        )}
+                    </div>
+
+                    <h3 style={sectionHeaderStyle}>GAME SHAPE</h3>
+                    {styleData.style.wins >= MIN_TRAJECTORY_GAMES_PER_OUTCOME && styleData.style.losses >= MIN_TRAJECTORY_GAMES_PER_OUTCOME ? (
+                      (() => {
+                        const scale = sparkScale(styleData.style.trajectoryWins, styleData.style.trajectoryLosses)
+                        const renderSpark = (phases: typeof styleData.style.trajectoryWins) => (
+                          <div style={sparkBarsStyle}>
+                            {phases.map((p, i) => (
+                              <div key={i} style={sparkBarColStyle}>
+                                {/* Non-color cue (design council item 4): a
+                                    +/- glyph so the sign reads even without
+                                    color perception. */}
+                                <span style={{ fontSize: 9, color: p.mean >= 0 ? '#40c057' : '#e05050' }}>{p.mean >= 0 ? '+' : '−'}</span>
+                                <div
+                                  style={{
+                                    width: '100%', borderRadius: '3px 3px 0 0', minHeight: 3,
+                                    height: `${Math.round((Math.abs(p.mean) / scale) * 100)}%`,
+                                    background: p.mean >= 0 ? '#40c057' : '#e05050',
+                                    border: p.mean >= 0 ? '1px solid #2f8a40' : '1px dashed #a83a3a',
+                                  }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )
+                        return (
+                          <>
+                            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+                              <div style={sparkColStyle}>
+                                <div style={sparkLabelStyle}>IN YOUR WINS</div>
+                                {renderSpark(styleData.style.trajectoryWins)}
+                                <div style={sparkAxisStyle}><span>early</span><span>late</span></div>
+                              </div>
+                              <div style={sparkColStyle}>
+                                <div style={sparkLabelStyle}>IN YOUR LOSSES</div>
+                                {renderSpark(styleData.style.trajectoryLosses)}
+                                <div style={sparkAxisStyle}><span>early</span><span>late</span></div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 10, color: '#776', marginTop: 6 }}>
+                              n={styleData.style.wins} wins / {styleData.style.losses} losses
+                            </div>
+                          </>
+                        )
+                      })()
+                    ) : (
+                      <div style={{ color: '#666', fontStyle: 'italic', fontSize: 12, padding: '8px 0' }}>
+                        Needs at least {MIN_TRAJECTORY_GAMES_PER_OUTCOME} wins and {MIN_TRAJECTORY_GAMES_PER_OUTCOME} losses to
+                        show a reliable shape (n={styleData.style.wins} wins / {styleData.style.losses} losses so far).
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+
         <div style={{ marginTop: 28, textAlign: 'center' }}>
           <button onClick={onClose} style={closePrimaryBtnStyle}>CLOSE</button>
         </div>
@@ -609,3 +947,36 @@ const closePrimaryBtnStyle: CSSProperties = {
   padding: '12px 32px', borderRadius: 8, fontWeight: 900,
   cursor: 'pointer', fontSize: 14, letterSpacing: 1,
 }
+
+// ── MY STYLE (You vs the Bot) — Variant A tug-of-war, per
+// docs/mockups/you-vs-bot-panel.html. Same gold/purple pull palette as the
+// rest of the modal's #f0c030 gold; the bot's purple (#7a68a8) is new here
+// (nothing else in this modal needed a second series color).
+const tugTrackStyle: CSSProperties = {
+  position: 'relative', height: 14, background: '#221609', borderRadius: 7, overflow: 'hidden',
+}
+const tugClineStyle: CSSProperties = {
+  position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, background: '#554', zIndex: 2,
+}
+const tugPullBaseStyle: CSSProperties = {
+  position: 'absolute', top: 2, bottom: 2, borderRadius: 6,
+}
+// Neutral tag for "biggest gap" — deliberately ONE style for both sides (no
+// red/green editorializing; see src/shared/styleAgg.ts's TugRowTag
+// docstring for the "why" — the design council's item 10).
+const tugTagStyle: CSSProperties = {
+  fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', marginLeft: 6, color: '#cbbf9a',
+}
+const badgeStyle: CSSProperties = {
+  display: 'inline-block', background: 'rgba(240,192,48,.12)', border: '1px solid rgba(240,192,48,.35)',
+  color: '#f0c030', borderRadius: 14, padding: '3px 10px', fontSize: 11, margin: '2px 3px 2px 0',
+}
+const coachCardStyle: CSSProperties = {
+  background: 'rgba(64,192,87,.08)', border: '1px solid rgba(64,192,87,.3)', borderRadius: 12,
+  padding: '10px 12px', fontSize: 12.5, color: '#cde8cd', marginTop: 8, lineHeight: 1.45,
+}
+const sparkColStyle: CSSProperties = { flex: 1 }
+const sparkLabelStyle: CSSProperties = { fontSize: 10.5, color: '#997', letterSpacing: 1, marginBottom: 5 }
+const sparkBarsStyle: CSSProperties = { display: 'flex', alignItems: 'flex-end', gap: 4, height: 46 }
+const sparkBarColStyle: CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }
+const sparkAxisStyle: CSSProperties = { fontSize: 9, color: '#665', display: 'flex', justifyContent: 'space-between', marginTop: 3 }

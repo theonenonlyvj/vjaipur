@@ -6,6 +6,13 @@
 // copied from the ACTUAL worker source, not the design doc's pseudo-types
 // (e.g. ClientPlayer has no `accountId`/`present` field in the real code).
 import type { BonusToken, Card, GoodsToken, RoundResult, TokenPiles } from '../engine'
+// StyleFinalized is DIFFERENT from every other type in this file: it isn't
+// hand-mirrored from worker/ because it doesn't need to be — src/shared/
+// styleAgg.ts lives in THIS package (src/), and the worker imports it FROM
+// here (same direction as its src/engine/src/ai/tiers imports), so the
+// worker's wire shape and this client type are structurally guaranteed to
+// match, not just kept in sync by hand.
+import type { StyleFinalized } from '../shared/styleAgg'
 
 export type MatchPhase = 'playing' | 'round_end' | 'match_over'
 export type SeatOwnerType = 'human' | 'ai' | 'open'
@@ -216,3 +223,21 @@ export interface ReportMatchBody {
 }
 
 export type ReportMatchResult = { ok: true; duplicate?: true }
+
+// ---- my-style (worker/src/do/style.ts) -------------------------------------
+
+export interface MyStyleAvailableTier {
+  tier: string
+  games: number
+}
+
+/** GET /stats/my-style response — see worker/src/do/style.ts's MyStyleResponse
+ *  docstring for the lazy/incremental-cache contract this is backed by. */
+export interface MyStyleResponse {
+  tier: string
+  games: number
+  availableTiers: MyStyleAvailableTier[]
+  style: StyleFinalized
+}
+
+export type { StyleFinalized }

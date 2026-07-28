@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { StatsDashboard } from '../../src/components/StatsDashboard'
 import { useStatsStore } from '../../src/store/statsStore'
-import type { LeaderboardResponse } from '../../src/net/online'
+import type { LeaderboardResponse, MyStyleResponse } from '../../src/net/online'
 import * as onlineApi from '../../src/net/online'
 
 // Mock socket service as it's used transitively by statsStore (mirrors
@@ -514,5 +514,362 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not
     render(<StatsDashboard onClose={() => {}} />)
 
     expect(screen.getByText('Bob')).toBeInTheDocument()
+  })
+})
+
+// =============================================================================
+// MY STYLE (You vs the Bot) — lazy fetch, <5-games gate, tug-of-war rendering.
+// Server-side lazy + incrementally cached (worker/src/do/style.ts); this tab
+// must never call myStyle() before it's opened, and must only ever call it
+// once per tier per session.
+// =============================================================================
+
+// games=22 (>=15, so the hero win% shows), wins=10/losses=12 (both >=10, so
+// the trajectory section shows). One row (bonus3Rate) is deliberately
+// ineligible to exercise the dimmed-row rendering; one gap ('gap') tag per
+// side (camelMajority ai-favored, tokensPerCard human-favored).
+const STYLE_RESPONSE_FULL: MyStyleResponse = {
+  tier: 'ismcts',
+  games: 22,
+  availableTiers: [{ tier: 'ismcts', games: 22 }],
+  style: {
+    games: 22,
+    wins: 10,
+    losses: 12,
+    winPct: 45.45,
+    rows: [
+      {
+        id: 'tokensPerCard',
+        label: 'Tokens per card sold',
+        sublabel: 'how much each card you sell is worth',
+        human: 3.79,
+        ai: 3.44,
+        format: 'decimal',
+        gapKind: 'relative',
+        gapPct: 10.2,
+        side: 'human',
+        dead: false,
+        tag: 'gap',
+        eligible: true,
+        sampleNote: '',
+        pointImpact: 0.5,
+      },
+      {
+        id: 'camelMajority',
+        label: 'Camel majority at round end',
+        human: 40,
+        ai: 60,
+        format: 'percent',
+        gapKind: 'points',
+        gapPct: 20,
+        side: 'ai',
+        dead: false,
+        tag: 'gap',
+        eligible: true,
+        sampleNote: '',
+        subCaption: '8 of 20 analyzed rounds · bot 12 · you take camels on 17% of your moves vs bot 21% (style, not verdict)',
+        pointImpact: 0.6,
+      },
+      {
+        id: 'bonus4Rate',
+        label: '4-card bonus rate',
+        human: 38,
+        ai: 56,
+        format: 'percent',
+        gapKind: 'points',
+        gapPct: 18,
+        side: 'ai',
+        dead: false,
+        tag: null,
+        eligible: true,
+        sampleNote: '',
+        subCaption: '5 of 13 bonus sales · bot 9 of 16',
+        pointImpact: 0.3,
+      },
+      {
+        id: 'bonus3Rate',
+        label: '3-card bonus rate',
+        human: 10,
+        ai: 15,
+        format: 'percent',
+        gapKind: 'points',
+        gapPct: 5,
+        side: 'ai',
+        dead: false,
+        tag: null,
+        eligible: false,
+        sampleNote: 'needs more data (n=4, need 10)',
+        pointImpact: 0.05,
+      },
+    ],
+    notes: [],
+    signatures: {
+      cherryPicker: true,
+      cherryPickerPct: 34,
+      cherryPickerEligible: true,
+      preciousTempo: true,
+      preciousTempoHumanPct: 66,
+      preciousTempoAiPct: 76,
+      preciousTempoEligible: true,
+      boomPlayer: true,
+      boomPlayerEligible: true,
+    },
+    trajectoryWins: [
+      { mean: -1, count: 5 },
+      { mean: 2, count: 5 },
+      { mean: 5, count: 5 },
+      { mean: 9, count: 5 },
+    ],
+    trajectoryLosses: [
+      { mean: -1, count: 6 },
+      { mean: -2, count: 6 },
+      { mean: -3, count: 6 },
+      { mean: -6, count: 6 },
+    ],
+    coaching: 'The bot ends rounds holding camel majority more often — test coaching message.',
+  },
+}
+
+describe('StatsDashboard MY STYLE — lazy fetch', () => {
+  beforeEach(() => {
+    vi.spyOn(onlineApi, 'myStyle').mockReset()
+  })
+
+  it('never calls myStyle() while MY RECORDS or GLOBAL is showing', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    vi.spyOn(onlineApi, 'leaderboard').mockResolvedValue({ overall: [], verified: [], availableOpponents: [] })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 10, opponent_score: 5, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    expect(onlineApi.myStyle).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'GLOBAL' }))
+    await waitFor(() => expect(onlineApi.leaderboard).toHaveBeenCalled())
+    expect(onlineApi.myStyle).not.toHaveBeenCalled()
+  })
+
+  it('fetches once MY STYLE is opened, defaulting to the most-played local vs-AI tier', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [
+        { opponent_type: 'ismcts', player_score: 10, opponent_score: 5, won: true, timestamp: 1 },
+        { opponent_type: 'ismcts', player_score: 10, opponent_score: 5, won: true, timestamp: 2 },
+        { opponent_type: 'easy', player_score: 10, opponent_score: 5, won: true, timestamp: 3 },
+        // 'online' matches must never be treated as a vs-AI tier candidate.
+        { opponent_type: 'online', opponent_id: 'x', player_score: 10, opponent_score: 5, won: true, timestamp: 4 },
+      ],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    await waitFor(() => expect(onlineApi.myStyle).toHaveBeenCalledWith('ismcts'))
+    expect(onlineApi.myStyle).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-opening the tab (without switching tiers) does not re-fetch — cached for the session', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 10, opponent_score: 5, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    await waitFor(() => expect(onlineApi.myStyle).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY RECORDS' }))
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    // Give any errant effect a tick to fire before asserting it didn't.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(onlineApi.myStyle).toHaveBeenCalledTimes(1)
+  })
+
+  it('with no local vs-AI matches at all, opening the tab shows an empty state and never calls myStyle', () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({ matches: [] })
+    render(<StatsDashboard onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    expect(screen.getByText(/unlock your style read/i)).toBeInTheDocument()
+    expect(onlineApi.myStyle).not.toHaveBeenCalled()
+  })
+})
+
+describe('StatsDashboard MY STYLE — <5-games gate', () => {
+  it('shows a progress-framed placeholder ("Play N more games vs <tier>"), instead of the panel', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue({
+      ...STYLE_RESPONSE_FULL,
+      games: 2,
+      style: { ...STYLE_RESPONSE_FULL.style, games: 2 },
+    })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'medium', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    await waitFor(() => expect(screen.getByText(/Play 3 more games vs Medium/i)).toBeInTheDocument())
+    expect(screen.queryByText(/YOU vs THE BOT/)).not.toBeInTheDocument()
+  })
+})
+
+describe('StatsDashboard MY STYLE — full panel rendering', () => {
+  it('renders tug-of-war rows (with sublabels/subCaptions), exactly one neutral "BIGGEST GAP" tag per side, dead-even styling, and signatures', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText('Tokens per card sold')).toBeInTheDocument())
+    expect(screen.getByText('how much each card you sell is worth')).toBeInTheDocument() // plain-language sublabel
+    expect(screen.getByText('Camel majority at round end')).toBeInTheDocument()
+    expect(screen.getByText('4-card bonus rate')).toBeInTheDocument()
+    expect(screen.getByText('3-card bonus rate')).toBeInTheDocument()
+
+    // Neutral "BIGGEST GAP" tag — exactly one per side (2 total), never the
+    // old "THE DECIDER"/"YOUR CRAFT" editorializing.
+    expect(screen.getAllByText('BIGGEST GAP')).toHaveLength(2)
+    expect(screen.queryByText('THE DECIDER')).not.toBeInTheDocument()
+    expect(screen.queryByText('YOUR CRAFT')).not.toBeInTheDocument()
+
+    // subCaption raw-number context renders.
+    expect(screen.getByText(/8 of 20 analyzed rounds/)).toBeInTheDocument()
+    expect(screen.getByText(/5 of 13 bonus sales/)).toBeInTheDocument()
+
+    // The ineligible row (bonus3Rate) shows its sampleNote.
+    expect(screen.getByText('needs more data (n=4, need 10)')).toBeInTheDocument()
+
+    expect(screen.getByText(/Cherry-picker/)).toBeInTheDocument()
+    expect(screen.getByText(/Precious tempo/)).toBeInTheDocument()
+    expect(screen.getByText(/you 66% \/ bot 76%/)).toBeInTheDocument() // both rates, neutral
+    expect(screen.getByText(/losses drift late/)).toBeInTheDocument() // softened wording
+    expect(screen.queryByText(/losses bleed slow/)).not.toBeInTheDocument()
+
+    // Coaching text is present (rule-based, not canned per-render).
+    expect(screen.getByText(STYLE_RESPONSE_FULL.style.coaching)).toBeInTheDocument()
+  })
+
+  it('the coaching card renders ABOVE the tug-of-war rows (design council item 9: moved directly under the hero)', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    const { container } = render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+    await waitFor(() => expect(screen.getByText(STYLE_RESPONSE_FULL.style.coaching)).toBeInTheDocument())
+
+    const text = container.textContent ?? ''
+    const coachingIndex = text.indexOf(STYLE_RESPONSE_FULL.style.coaching)
+    const receiptsIndex = text.indexOf('Tokens per card sold')
+    expect(coachingIndex).toBeGreaterThan(-1)
+    expect(receiptsIndex).toBeGreaterThan(-1)
+    expect(coachingIndex).toBeLessThan(receiptsIndex)
+  })
+})
+
+describe('StatsDashboard MY STYLE — dead-even row rendering', () => {
+  it('shows "dead even" wording for a row whose gap is under the threshold, and no tag on it', async () => {
+    const deadRow = { ...STYLE_RESPONSE_FULL.style.rows[2], id: 'bonus4Rate' as const, dead: true, tag: null, gapPct: 2 }
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue({
+      ...STYLE_RESPONSE_FULL,
+      style: { ...STYLE_RESPONSE_FULL.style, rows: [STYLE_RESPONSE_FULL.style.rows[0], deadRow] },
+    })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText(/dead even/i)).toBeInTheDocument())
+  })
+})
+
+describe('StatsDashboard MY STYLE — hero win% suppression below 15 games', () => {
+  it('shows only the W-L count (no win%) when games < 15', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue({
+      ...STYLE_RESPONSE_FULL,
+      games: 12,
+      style: { ...STYLE_RESPONSE_FULL.style, games: 12, wins: 5, losses: 7, winPct: 41.67 },
+    })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText('5W – 7L')).toBeInTheDocument())
+    expect(screen.queryByText('42%')).not.toBeInTheDocument()
+    expect(screen.queryByText('41%')).not.toBeInTheDocument()
+  })
+
+  it('shows the bold win% once games >= 15 (STYLE_RESPONSE_FULL has 22)', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText('10W – 12L')).toBeInTheDocument())
+    expect(screen.getByText('45%')).toBeInTheDocument()
+  })
+})
+
+describe('StatsDashboard MY STYLE — trajectory ("game shape") gate and shared sparkline scale', () => {
+  it('shows a needs-more-games message instead of sparklines when wins or losses are under 10', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue({
+      ...STYLE_RESPONSE_FULL,
+      style: { ...STYLE_RESPONSE_FULL.style, wins: 6, losses: 12, games: 18 },
+    })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText(/Needs at least 10 wins and 10 losses/)).toBeInTheDocument())
+    expect(screen.queryByText('IN YOUR WINS')).not.toBeInTheDocument()
+    expect(screen.queryByText('IN YOUR LOSSES')).not.toBeInTheDocument()
+  })
+
+  it('shows sparklines and an "n=X wins / Y losses" caption once both clear the floor', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL) // wins=10, losses=12
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText('IN YOUR WINS')).toBeInTheDocument())
+    expect(screen.getByText('IN YOUR LOSSES')).toBeInTheDocument()
+    expect(screen.getByText('n=10 wins / 12 losses')).toBeInTheDocument()
+  })
+})
+
+describe('StatsDashboard MY STYLE — hard-bot reassurance line', () => {
+  it('shows the reassurance line for a hard-family tier (ismcts)', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue(STYLE_RESPONSE_FULL)
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'ismcts', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText(/Hard bots are built to beat most players/)).toBeInTheDocument())
+  })
+
+  it('omits the reassurance line for a non-hard tier (medium)', async () => {
+    vi.spyOn(onlineApi, 'myStyle').mockResolvedValue({ ...STYLE_RESPONSE_FULL, tier: 'medium' })
+    useStatsStore.setState({
+      matches: [{ opponent_type: 'medium', player_score: 1, opponent_score: 0, won: true, timestamp: 1 }],
+    })
+    render(<StatsDashboard onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'MY STYLE' }))
+
+    await waitFor(() => expect(screen.getByText('10W – 12L')).toBeInTheDocument())
+    expect(screen.queryByText(/Hard bots are built to beat most players/)).not.toBeInTheDocument()
   })
 })

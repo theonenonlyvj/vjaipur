@@ -154,6 +154,18 @@ describe('net/online typed calls', () => {
     expect(workerFetch).toHaveBeenCalledWith('/stats/report', { method: 'POST', body, token: 'tok-abc' })
   })
 
+  it('myStyle GETs /stats/my-style?tier= with the token', async () => {
+    workerFetch.mockResolvedValueOnce({ tier: 'ismcts', games: 0, availableTiers: [], style: {} })
+    await onlineApi.myStyle('ismcts')
+    expect(workerFetch).toHaveBeenCalledWith('/stats/my-style?tier=ismcts', { method: 'GET', token: 'tok-abc' })
+  })
+
+  it('myStyle URL-encodes the tier value', async () => {
+    workerFetch.mockResolvedValueOnce({ tier: 'a b', games: 0, availableTiers: [], style: {} })
+    await onlineApi.myStyle('a b')
+    expect(workerFetch).toHaveBeenCalledWith('/stats/my-style?tier=a%20b', { method: 'GET', token: 'tok-abc' })
+  })
+
   it('resolves the token at CALL time, not import time (a later-minted token is used)', async () => {
     vgamesToken = null
     workerFetch.mockResolvedValueOnce({ matches: [] })
