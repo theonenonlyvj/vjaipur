@@ -186,7 +186,7 @@ describe('LobbyScreen -> "Your games" resume list', () => {
       moveIndex: 2,
       view: {
         mySeat: 1, phase: 'playing', round: 1, seals: [0, 0], matchLength: 3, winnerSeat: null,
-        lastRoundResult: null, opponentPresent: true, claimWinAvailable: false,
+        lastRoundResult: null, lastRoundReveal: null, opponentPresent: true, claimWinAvailable: false,
         players: [
           { seat: 0, displayName: 'Rival', ownerType: 'human', controlledByAi: false },
           { seat: 1, displayName: 'Me', ownerType: 'human', controlledByAi: false },

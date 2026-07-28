@@ -637,6 +637,81 @@ describe('REDACTION (ADDENDUM I closed allowlist)', () => {
   })
 })
 
+/**
+ * BUG 1 fix (2026-07-27) — the round-end screen was showing a FAKE opponent
+ * goods/bonus breakdown ("LEATHER: 17, 0 pts, Bonuses (3) 0 pts") because the
+ * client always synthesized placeholder tokens for the opponent, even once
+ * the round had ended and the server had the REAL values in hand. `view.ts`
+ * now populates `lastRoundReveal` at round_end/match_over with both seats'
+ * real goods tokens + realized bonus-point SUMS (never individual bonus
+ * values). These tests assert the null/populated GATE end-to-end (mirroring
+ * `lastRoundResult`'s own null-mid-round assertion above) against
+ * DO-internal ground truth, plus that individual bonus token values are
+ * STILL never exposed even though their sum now is.
+ */
+describe('lastRoundReveal (round-end/match_over opponent goods reveal)', () => {
+  /** Ground truth straight off the DO's own SQLite snapshot (never exposed
+   *  through fetch()) — the CURRENT round's real per-seat goods tokens +
+   *  bonus token values. At round_end/match_over this is still the ended
+   *  round's final state (do/view.ts's own docstring: "the DO never advances
+   *  the snapshot until the next dealRound"). */
+  async function readSnapshotTruth(stub: ReturnType<typeof stubFor>) {
+    return runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql as unknown as SqlLike
+      const repo = new GameRepository(sql)
+      return { snapshot: repo.getSnapshot()! }
+    })
+  }
+
+  it('is null mid-round, then populated with BOTH seats\' real goods tokens + correct bonus sums at round_end — same reveal from either seat\'s own view', async () => {
+    const { stub, tokens } = await createAndJoin('reveal-round-end', 3)
+
+    const mid = (await sync(stub, tokens[0])).body.view
+    expect(mid.phase).toBe('playing')
+    expect(mid.lastRoundReveal).toBeNull()
+
+    const endView = await playRoundToEnd(stub, tokens)
+    expect(endView.phase === 'round_end' || endView.phase === 'match_over').toBe(true)
+    expect(endView.lastRoundReveal).not.toBeNull()
+
+    const truth = await readSnapshotTruth(stub)
+    const realGoods = [truth.snapshot.players[0].tokens, truth.snapshot.players[1].tokens]
+    const realBonusSums = [0, 1].map(
+      (i) => truth.snapshot.players[i].bonusTokens.reduce((s: number, t: { value: number }) => s + t.value, 0),
+    )
+    expect(endView.lastRoundReveal.goodsTokens).toEqual(realGoods)
+    expect(endView.lastRoundReveal.bonusPoints).toEqual(realBonusSums)
+
+    // Goods VALUES are public-derivable (the token rail is visible to both
+    // players all game) — so both seats see the exact SAME reveal, unlike
+    // any other per-seat-redacted field.
+    const otherSeatView = (await sync(stub, tokens[1])).body.view
+    expect(otherSeatView.lastRoundReveal).toEqual(endView.lastRoundReveal)
+
+    // ...but individual bonus token VALUES still never leak, on EITHER
+    // seat's view — only the SUM travels via lastRoundReveal.bonusPoints.
+    for (const t of endView.game.oppBonusTokens) expect(Object.keys(t)).toEqual(['tier'])
+    for (const t of otherSeatView.game.oppBonusTokens) expect(Object.keys(t)).toEqual(['tier'])
+  })
+
+  it('stays populated at match_over (not just round_end)', async () => {
+    const { stub, tokens } = await createAndJoin('reveal-match-over', 1)
+    let endView: any
+    for (let attempt = 0; attempt < 4; attempt++) {
+      endView = await playRoundToEnd(stub, tokens)
+      if (endView.lastRoundResult.sealAwardedTo !== null) break
+      await stub.fetch(req('/next-round', { token: tokens[0], body: {} }))
+    }
+    expect(endView.phase).toBe('match_over')
+    expect(endView.lastRoundReveal).not.toBeNull()
+
+    const truth = await readSnapshotTruth(stub)
+    const realGoods = [truth.snapshot.players[0].tokens, truth.snapshot.players[1].tokens]
+    expect(endView.lastRoundReveal.goodsTokens).toEqual(realGoods)
+    expect(endView.lastRoundReveal.bonusPoints).toHaveLength(2)
+  })
+})
+
 describe('DETERMINISM (ADDENDUM G)', () => {
   it('replaying setupRound(seed) reproduces the exact persisted rounds.initial_state', async () => {
     const { stub } = await createAndJoin('determinism', 3)

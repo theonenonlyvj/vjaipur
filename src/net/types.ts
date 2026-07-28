@@ -33,6 +33,16 @@ export interface ClientViewGame {
   activePlayer: 0 | 1
 }
 
+/** Round-end/match_over reveal of the ended round's real per-seat goods
+ *  tokens + realized bonus-point SUMS — mirrors
+ *  worker/src/do/view.ts's `LastRoundReveal`. Both arrays are indexed by
+ *  SEAT (0/1), not mine/opponent — same convention `seals`/`winnerSeat`
+ *  already use. */
+export interface LastRoundReveal {
+  goodsTokens: [GoodsToken[], GoodsToken[]]
+  bonusPoints: [number, number]
+}
+
 export interface ClientView {
   mySeat: number
   phase: MatchPhase
@@ -41,6 +51,12 @@ export interface ClientView {
   matchLength: number
   winnerSeat: 0 | 1 | null
   lastRoundResult: RoundResult | null
+  /** The ended round's real opponent goods tokens + both seats' realized
+   *  bonus-point sums — ONLY populated at `round_end`/`match_over`, `null`
+   *  mid-round. See worker/src/do/view.ts's `ClientView.lastRoundReveal`
+   *  docstring for exactly why goods values are safe to reveal here while
+   *  individual bonus token values stay hidden (only their SUM is here). */
+  lastRoundReveal: LastRoundReveal | null
   /** NEW (no-AI-takeover rework, 2026-07-18): is the OPPONENT currently
    *  present (heartbeated within the worker's presence window)? Drives the
    *  "waiting for them" banner instead of a silent freeze. See
@@ -168,6 +184,10 @@ export interface MatchHistoryRow {
   id: number
   opponentType: string
   opponentAccountId: string | null
+  /** The opponent's resolved display name (worker/src/do/stats.ts#getHistory's
+   *  `players` LEFT JOIN) — `null` for a local vs-AI report or the rare
+   *  online match whose opponent has no cached `players` row yet. */
+  opponentName: string | null
   playerScore: number
   opponentScore: number
   won: boolean

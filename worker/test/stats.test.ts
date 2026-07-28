@@ -414,6 +414,57 @@ describe('getHistory', () => {
     const rows = await getHistory(DB(), a)
     expect(rows.every((r) => r.playerScore !== 3)).toBe(true) // the other account's row never leaks in
   })
+
+  // BUG 3 fix (2026-07-27): "Online Rivals" was showing the rival's raw
+  // account UUID because getHistory never resolved a name for
+  // opponent_account_id at all — StatsDashboard.tsx had nothing else to
+  // render. getHistory now LEFT JOINs `players` on opponent_account_id.
+  it('resolves the opponent\'s display name via a players LEFT JOIN on opponent_account_id', async () => {
+    const a = acct('history-with-rival')
+    const rival = acct('history-rival')
+    await seedPlayer(rival, 'Sureka')
+    await seedMatch({ accountId: a, opponentAccountId: rival, playerScore: 40, opponentScore: 33, won: true, timestamp: Date.now() })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows.length).toBe(1)
+    expect(rows[0]!.opponentAccountId).toBe(rival)
+    expect(rows[0]!.opponentName).toBe('Sureka')
+  })
+
+  it('opponentName is null (never the raw UUID) when the opponent has no players row yet', async () => {
+    const a = acct('history-unresolved-rival')
+    const neverSeenRival = acct('history-never-seen-rival')
+    await seedMatch({ accountId: a, opponentAccountId: neverSeenRival, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows[0]!.opponentAccountId).toBe(neverSeenRival) // still returned — LEFT, not INNER, join
+    expect(rows[0]!.opponentName).toBeNull()
+  })
+
+  it('opponentName is null for a local vs-AI report (no opponent_account_id at all)', async () => {
+    const a = acct('history-vs-ai')
+    await seedMatch({ accountId: a, opponentType: 'medium', opponentAccountId: null, source: 'client_reported', playerScore: 100, opponentScore: 80, won: true, timestamp: Date.now() })
+
+    const rows = await getHistory(DB(), a)
+    expect(rows[0]!.opponentAccountId).toBeNull()
+    expect(rows[0]!.opponentName).toBeNull()
+  })
+
+  it('two different rivals resolve to their own distinct names, not the caller\'s own display_name or each other\'s', async () => {
+    const a = acct('history-two-rivals')
+    const rival1 = acct('history-rival-1')
+    const rival2 = acct('history-rival-2')
+    await seedPlayer(a, 'MyOwnName') // never leaks into an opponentName column
+    await seedPlayer(rival1, 'Alice')
+    await seedPlayer(rival2, 'Bob')
+    await seedMatch({ accountId: a, opponentAccountId: rival1, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
+    await seedMatch({ accountId: a, opponentAccountId: rival2, playerScore: 5, opponentScore: 10, won: false, timestamp: Date.now() + 1 })
+
+    const rows = await getHistory(DB(), a)
+    const byOpponent = new Map(rows.map((r) => [r.opponentAccountId, r.opponentName]))
+    expect(byOpponent.get(rival1)).toBe('Alice')
+    expect(byOpponent.get(rival2)).toBe('Bob')
+  })
 })
 
 // =============================================================================

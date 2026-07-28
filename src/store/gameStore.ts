@@ -244,10 +244,22 @@ export function viewToRenderState(view: ClientView): GameState {
     tokens: g.myGoodsTokens,
     bonusTokens: g.myBonusTokens,
   }
+  // At round_end/match_over, view.lastRoundReveal carries the ended round's
+  // REAL opponent goods tokens (worker/src/do/view.ts's ClientView docstring
+  // — goods values are public-derivable from the token rail by round end, so
+  // the server reveals them instead of the client synthesizing fake
+  // placeholders). Use those when present; fall back to the mid-round
+  // zero-value placeholder (also covers an older server during deploy skew,
+  // which simply never populates lastRoundReveal). Bonus tokens stay
+  // tier-only placeholders regardless — individual bonus VALUES are never
+  // revealed (see the same docstring); only their SUM travels, via
+  // ScoreCard's bonusPointsOverride (RoundEndScreen.tsx), not through this
+  // GameState projection.
+  const revealedOppGoods = view.lastRoundReveal?.goodsTokens[oppSeat]
   const opponent: PlayerState = {
     hand: Array.from({ length: g.oppHandCount }, (_, i) => placeholderCard(-(i + 1))),
     herd: g.herds[oppSeat],
-    tokens: Array.from({ length: g.oppGoodsTokenCount }, () => ({ good: 'leather' as const, value: 0 })),
+    tokens: revealedOppGoods ?? Array.from({ length: g.oppGoodsTokenCount }, () => ({ good: 'leather' as const, value: 0 })),
     bonusTokens: g.oppBonusTokens.map((t) => ({ tier: t.tier, value: 0 })),
   }
 
@@ -984,11 +996,24 @@ function applyMoveDescription(
   // label, and any real action gets the full public-payload description.
   for (let i = moves.length - 1; i >= 0; i--) {
     const m = moves[i]
-    // round_start/round_end don't need narration here — the phase/round
-    // transition and the ScoreCard breakdown already show the round outcome;
-    // skipping them lets the last REAL action's description read naturally
-    // as "Final Play" on RoundEndScreen instead of being clobbered.
-    if (m.type === 'round_start' || m.type === 'round_end') continue
+    // A round_start reached BEFORE any real action means the CURRENT round
+    // genuinely has no moves yet — this must CLEAR the banner and stop, not
+    // just `continue` past it. Bug (2026-07-27, confirmed from live play +
+    // the D1 archive): a nudge right after /next-round typically delivers
+    // ONLY the bare round_start move (the ended round's real actions were
+    // already synced/described earlier, before the round ended) — `continue`
+    // would fall through this loop having never called set(), leaving
+    // lastMoveDescription stuck on the PREVIOUS round's last move (e.g. "YOU:
+    // sold 3 silver") lingering as the banner into the new round.
+    if (m.type === 'round_start') {
+      set({ lastMoveDescription: null })
+      return
+    }
+    // round_end doesn't need narration here — the phase/round transition and
+    // the ScoreCard breakdown already show the round outcome; skipping it
+    // lets the last REAL action's description read naturally as "Final Play"
+    // on RoundEndScreen instead of being clobbered.
+    if (m.type === 'round_end') continue
     const name = m.seatIndex === onlineView.mySeat ? 'YOU' : (get().opponentName || 'Opponent')
     set({ lastMoveDescription: describePublicMove(name, m.type, m.payload) })
     return

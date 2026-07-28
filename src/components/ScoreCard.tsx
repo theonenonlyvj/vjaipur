@@ -10,9 +10,18 @@ interface ScoreCardProps {
   name?: string
   totalSeals: number
   currentSeals: number
+  /** When provided (online mode's server-revealed round-end bonus SUM — see
+   *  worker/src/do/view.ts's `lastRoundReveal` + RoundEndScreen.tsx), used as
+   *  the displayed bonus POINTS TOTAL instead of summing
+   *  `playerState.bonusTokens` — which, for the opponent online, are
+   *  value-0 tier-only placeholders (individual bonus token values stay
+   *  hidden even at round end). The bonus COUNT display is unaffected — it's
+   *  still `playerState.bonusTokens.length`, which is always real (only the
+   *  per-token value is ever redacted). */
+  bonusPointsOverride?: number
 }
 
-export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, roundTotal, name, totalSeals, currentSeals }: ScoreCardProps) {
+export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, roundTotal, name, totalSeals, currentSeals, bonusPointsOverride }: ScoreCardProps) {
   const goodsBreakdown = playerState.tokens.reduce((acc, t) => {
     if (!acc[t.good]) acc[t.good] = { count: 0, total: 0 }
     acc[t.good].count++
@@ -27,7 +36,8 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
     acc.total += t.value
     return acc
   }, { count: 0, total: 0 })
-  
+  const bonusPointsDisplay = bonusPointsOverride ?? bonusBreakdown.total
+
   const camelBonus = camelWinner === playerIndex ? 5 : 0
 
   const cardStyle: React.CSSProperties = {
@@ -114,7 +124,7 @@ export function ScoreCard({ playerIndex, playerState, camelWinner, isWinner, rou
         {/* Bonuses */}
         <div style={rowStyle}>
           <span style={{ fontWeight: 600 }}>Bonuses ({bonusBreakdown.count})</span>
-          <span style={{ color: '#f0e8d8', fontWeight: 800 }}>{bonusBreakdown.total} pts</span>
+          <span style={{ color: '#f0e8d8', fontWeight: 800 }}>{bonusPointsDisplay} pts</span>
         </div>
 
         {/* Camels */}

@@ -222,16 +222,35 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   })
 
   const onlineMatches = matches.filter((m) => m.opponent_type === 'online')
-  const rivalMap = new Map<string, { wins: number; losses: number; totalDelta: number }>()
+  // Keyed by opponent_id (unchanged — the account UUID is still the only
+  // stable join key), but now also carries the first non-null opponent_name
+  // seen for that id (worker/src/do/stats.ts#getHistory's `players` LEFT
+  // JOIN, threaded through statsStore's pullVGamesHistory) so the table can
+  // render a real name instead of the raw UUID (2026-07-27 fix — "Online
+  // Rivals" was showing e.g. "a1b2c3d4-..." for every rival).
+  const rivalMap = new Map<string, { name: string | null; wins: number; losses: number; totalDelta: number }>()
   onlineMatches.forEach((m) => {
     const id = m.opponent_id || 'Unknown'
-    const s = rivalMap.get(id) ?? { wins: 0, losses: 0, totalDelta: 0 }
+    const s = rivalMap.get(id) ?? { name: null, wins: 0, losses: 0, totalDelta: 0 }
+    if (!s.name && m.opponent_name) s.name = m.opponent_name
     if (m.won) s.wins++; else s.losses++
     s.totalDelta += (m.player_score - m.opponent_score)
     rivalMap.set(id, s)
   })
   const rivals = Array.from(rivalMap.entries())
-    .map(([id, s]) => ({ id, ...s, games: s.wins + s.losses }))
+    .map(([id, s]) => ({
+      id,
+      // No resolved name (an older locally-cached match from before this
+      // field existed, or a genuinely never-synced opponent): fall back to a
+      // short id-derived label rather than a bare UUID. The synthetic
+      // 'Unknown' id (no opponent_id at all) keeps its own plain label
+      // instead of a nonsensical "Player Unknow".
+      name: s.name ?? (id === 'Unknown' ? 'Unknown' : `Player ${id.slice(0, 8)}`),
+      wins: s.wins,
+      losses: s.losses,
+      totalDelta: s.totalDelta,
+      games: s.wins + s.losses,
+    }))
     .sort((a, b) => b.games - a.games)
 
   // ── GLOBAL LEADERBOARD ─────────────────────────────────────────────────
@@ -365,7 +384,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                     <tbody>
                       {rivals.map((r) => (
                         <tr key={r.id} style={trStyle}>
-                          <td style={{ ...tdStyle, fontSize: 12 }}>{r.id}</td>
+                          <td style={{ ...tdStyle, fontSize: 12 }}>{r.name}</td>
                           <td style={tdStyle}>{r.wins}</td>
                           <td style={tdStyle}>{r.losses}</td>
                           <td style={tdStyle}>{winPct(r.wins, r.games)}</td>

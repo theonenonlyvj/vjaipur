@@ -590,7 +590,7 @@ describe('statsStore', () => {
       vi.mocked(history).mockResolvedValueOnce({
         matches: [
           {
-            id: 1, opponentType: 'ai_easy', opponentAccountId: null, playerScore: 10, opponentScore: 5,
+            id: 1, opponentType: 'ai_easy', opponentAccountId: null, opponentName: null, playerScore: 10, opponentScore: 5,
             won: true, source: 'client_reported', aiCovered: false, gameUuid: null,
             timestamp: Date.UTC(2026, 0, 1), // ADDENDUM V: D1's INTEGER column is epoch-ms already
           },
@@ -611,7 +611,7 @@ describe('statsStore', () => {
       vi.mocked(history).mockResolvedValueOnce({
         matches: [
           {
-            id: 2, opponentType: 'online', opponentAccountId: 'acct-rival-1', playerScore: 40, opponentScore: 33,
+            id: 2, opponentType: 'online', opponentAccountId: 'acct-rival-1', opponentName: 'Rivalina', playerScore: 40, opponentScore: 33,
             won: true, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-1', timestamp: 1_700_000_000_000,
           },
         ],
@@ -620,6 +620,43 @@ describe('statsStore', () => {
       await useStatsStore.getState().pullVGamesHistory()
 
       expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_type: 'online', opponent_id: 'acct-rival-1' })
+    })
+
+    // BUG 3 fix (2026-07-27): "Online Rivals" was showing the rival's raw
+    // account UUID because MatchRecord never carried a resolved name at all —
+    // worker/src/do/stats.ts#getHistory now LEFT JOINs `players` to resolve
+    // it, and pullVGamesHistory must thread that through onto opponent_name
+    // (StatsDashboard.tsx's rivals aggregation reads it from there).
+    it('maps an online match\'s opponentName onto the local opponent_name field', async () => {
+      useStatsStore.setState({ vgamesToken: 'vg-tok', vgamesAccountId: 'vg-acc', matches: [] })
+      vi.mocked(history).mockResolvedValueOnce({
+        matches: [
+          {
+            id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Sureka', playerScore: 20, opponentScore: 25,
+            won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-2', timestamp: 1_700_000_001_000,
+          },
+        ],
+      })
+
+      await useStatsStore.getState().pullVGamesHistory()
+
+      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_id: 'acct-rival-2', opponent_name: 'Sureka' })
+    })
+
+    it('a null opponentName (unresolved opponent) maps to a null opponent_name, not undefined/omitted', async () => {
+      useStatsStore.setState({ vgamesToken: 'vg-tok', vgamesAccountId: 'vg-acc', matches: [] })
+      vi.mocked(history).mockResolvedValueOnce({
+        matches: [
+          {
+            id: 4, opponentType: 'online', opponentAccountId: 'acct-rival-3', opponentName: null, playerScore: 5, opponentScore: 5,
+            won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-3', timestamp: 1_700_000_002_000,
+          },
+        ],
+      })
+
+      await useStatsStore.getState().pullVGamesHistory()
+
+      expect(useStatsStore.getState().matches[0].opponent_name).toBeNull()
     })
 
     it('is a no-op without a VGames token', async () => {
