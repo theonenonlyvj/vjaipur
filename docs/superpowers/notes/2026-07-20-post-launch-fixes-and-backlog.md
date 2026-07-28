@@ -176,3 +176,19 @@ computing over that account's match_logs server-side) or a client-side
 compute pass over already-fetched match data. **NOT started — awaiting
 Vijay's call** on whether this is worth a tab (vs. staying a run-when-curious
 CLI tool) and, if so, endpoint vs. client-compute.
+
+## UPDATE 2026-07-27 night — live-match bug sweep (5a465c2, worker deployed)
+Vijay+Sureka played WEFFFT (1-0) + 6DRHAJ (3-0, rounds 74-67/74-68/85-64 =
+233-199 — totals VERIFIED correct against the archive; his "scoring stats
+are off" was the fake breakdown). Three fixes shipped:
+1. lastRoundReveal: real opponent GOODS tokens + bonus SUMS at round_end/
+   match_over only (bonus VALUES still never leave the DO); fuzz-redaction
+   extended, reveal verified null mid-round live post-deploy.
+2. Stale final-move banner cleared at round_start (Sureka genuinely closed
+   R1 AND R2 selling 3 silver — right attribution, wrong timing).
+3. Online Rivals: display names via getHistory LEFT JOIN players (fallback
+   Player <id8>).
+CORRECTION on the earlier 21:12 join error: transient — NOT a workers.dev
+block (disproven by their play minutes later). /api proxy fallback stays as
+inert resilience; render.yaml route not active (auto-deploy takes builds,
+not routes config) and that's fine.
