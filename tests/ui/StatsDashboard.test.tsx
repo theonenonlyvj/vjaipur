@@ -415,7 +415,7 @@ describe('StatsDashboard global leaderboard — family collapse threshold (<2 da
 // gamesWon/gamesLost), with the compat MATCH totals (games/wins) demoted to a
 // muted "m W-L" secondary line under the player name.
 describe('StatsDashboard GLOBAL leaderboard — games-primary + matches-secondary rendering', () => {
-  it('renders gamesWon/gamesLost as the primary W/L/Win% columns, with a muted "m W-L" matches line under the name', async () => {
+  it('renders gamesWon/gamesLost as the ONLY W/L/Win% columns — no matches sub-line (owner: "it doesnt need the thing under the username")', async () => {
     vi.spyOn(onlineApi, 'leaderboard').mockResolvedValue(GAMES_PRIMARY_FIXTURE)
     await openGlobal()
     await waitFor(() => expect(screen.getByText('Zara')).toBeInTheDocument())
@@ -428,8 +428,8 @@ describe('StatsDashboard GLOBAL leaderboard — games-primary + matches-secondar
     expect(within(row).getByText('74%')).toBeInTheDocument() // 25/34 games, rounded
     expect(within(row).queryByText('10')).not.toBeInTheDocument()
     expect(within(row).queryByText('60%')).not.toBeInTheDocument() // the OLD matches-based win rate
-    // Secondary: matches, muted, under the name — "m 6-4" (wins=6, matches-wins=10-6=4).
-    expect(within(row).getByText('m 6-4')).toBeInTheDocument()
+    // NO matches sub-line — the owner rejected the "m W-L" clutter (2026-07-28).
+    expect(within(row).queryByText('m 6-4')).not.toBeInTheDocument()
   })
 })
 
@@ -590,7 +590,7 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not
 // split), with the MATCH totals demoted to a muted "m W-L" secondary line —
 // same idiom as the GLOBAL board, and consistent with the shipped RivalryModal.
 describe('StatsDashboard MY RECORDS — ONLINE RIVALS games-primary + matches-secondary', () => {
-  it('sums per-match splits into a games-primary W/L, with matches shown as a muted secondary line', () => {
+  it('sums per-match splits into a games-only W/L — no matches sub-line', () => {
     useStatsStore.setState({
       matches: [
         // A synced 3-game match win, 2 games to 1.
@@ -607,8 +607,8 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS games-primary + matches-se
     expect(within(row).getByText('4')).toBeInTheDocument()
     expect(within(row).getByText('1')).toBeInTheDocument()
     expect(within(row).getByText('80%')).toBeInTheDocument() // 4/5
-    // Secondary: MATCHES — both won, "m 2-0".
-    expect(within(row).getByText('m 2-0')).toBeInTheDocument()
+    // NO matches sub-line (owner rejected the clutter, 2026-07-28).
+    expect(within(row).queryByText('m 2-0')).not.toBeInTheDocument()
   })
 })
 

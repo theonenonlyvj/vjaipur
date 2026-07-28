@@ -33,3 +33,14 @@ html, body, #root {
 button, input, select, textarea {
   font-family: inherit;
 }
+
+/* Thin on-palette scrollbars — the default browser scrollbar glares inside
+   the gold-bordered modals (Hall of Records etc.). Applies app-wide. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #5a3a20 transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #5a3a20; border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: #7a5230; }

@@ -596,7 +596,6 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                         >
                           <td style={{ ...tdStyle, fontSize: 12 }}>
                             {r.name}
-                            <div style={secondaryLineStyle}>m {r.matchWins}-{r.matchLosses}</div>
                           </td>
                           <td style={tdStyle}>{r.wins}</td>
                           <td style={tdStyle}>{r.losses}</td>
@@ -717,7 +716,6 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                   </div>
                 ) : (
                   <>
-                  <div style={unitCaptionStyle}>Ranked by GAMES; the muted "m W-L" line under each name is matches.</div>
                   <div style={{ overflowX: 'auto' }}>
                     <table style={tableStyle}>
                       <thead>
@@ -738,7 +736,6 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
                               <td style={{ ...tdStyle, color: '#666', fontSize: 11 }}>{i + 1}</td>
                               <td style={{ ...tdStyle, fontWeight: 700, color: '#f0c030' }}>
                                 {r.displayName}
-                                <div style={secondaryLineStyle}>m {r.wins}-{r.games - r.wins}</div>
                               </td>
                               <td style={tdStyle}>{r.gamesWon}</td>
                               <td style={tdStyle}>{r.gamesLost}</td>
@@ -1017,9 +1014,6 @@ const unitCaptionStyle: CSSProperties = {
 // cell — same compact-secondary idiom in both MY RECORDS (Online Rivals) and
 // GLOBAL (below), so the primary GAMES numbers never need their own column
 // relabeled to fit a "matches" count too.
-const secondaryLineStyle: CSSProperties = {
-  fontSize: 10, color: '#776', marginTop: 2,
-}
 const subTabRowStyle: CSSProperties = {
   display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16,
 }
