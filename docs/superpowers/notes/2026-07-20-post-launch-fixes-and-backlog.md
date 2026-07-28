@@ -192,3 +192,14 @@ CORRECTION on the earlier 21:12 join error: transient — NOT a workers.dev
 block (disproven by their play minutes later). /api proxy fallback stays as
 inert resilience; render.yaml route not active (auto-deploy takes builds,
 not routes config) and that's fine.
+
+## CORRECTION 2026-07-27 (Vijay caught it) — bonus-reveal rationale
+Bonus piles are FULLY RESHUFFLED every round (setupRound -> initialBonusPiles(rng);
+matches official Jaipur's per-round re-setup), so "revealing individual bonus
+values at round end would let you count the pool between rounds" was WRONG.
+The real invariant — and what fuzz-redaction actually asserts — is MID-ROUND
+secrecy: opponent bonus values mid-round would expose their running score
+(deliberately hidden for round-end suspense) and shift same-round bonus-draw
+EV. Round-END individual values are provably safe to reveal; the shipped
+sum-only display is UI minimalism, not security. Open offer: show the
+opponent's actual bonus tokens on the round-end screen if Vijay wants it.
