@@ -272,3 +272,45 @@ describe('GameScreen selection — Group C: herd-camel -1 sentinel integrity (lo
     expect(call.handIndices).toHaveLength(2)
   })
 })
+
+describe('camel group self-heal (2026-08-03: bot GIVES camels to the market mid-preselect)', () => {
+  it('expands a preselected camel group to include camels the opponent just added', () => {
+    const market: Card[] = [
+      { id: 1, type: 'camel' }, { id: 2, type: 'camel' }, { id: 3, type: 'camel' },
+      { id: 4, type: 'silver' }, { id: 5, type: 'cloth' },
+    ]
+    const state = makeState(market, [{ id: 50, type: 'diamond' }], { activePlayer: 1 })
+    useGameStore.setState({ state, mode: 'vs-ai', error: null })
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+
+    // Preselect the (3-camel) herd during the opponent's turn.
+    fireEvent.click(screen.getAllByText('CAMEL')[0])
+
+    // Opponent's exchange gives TWO more camels and takes the silver+cloth.
+    const grown: Card[] = [
+      { id: 1, type: 'camel' }, { id: 2, type: 'camel' }, { id: 3, type: 'camel' },
+      { id: 90, type: 'camel' }, { id: 91, type: 'camel' },
+    ]
+    act(() => {
+      useGameStore.setState({ state: { ...state, market: grown, activePlayer: 0 } })
+    })
+
+    // ALL five camels must render selected — the group followed the herd, and
+    // Take Camels is offered (all-or-nothing move stays correct either way).
+    const camelCards = screen.getAllByText('CAMEL')
+    expect(camelCards).toHaveLength(5)
+    expect(screen.getByText('Take Camels')).toBeInTheDocument()
+    // CardView renders selection as a 3px solid #fff border (Card.tsx:75) on
+    // an ancestor container — walk up until we find a bordered element.
+    const selectedCount = camelCards.filter((el) => {
+      let node: HTMLElement | null = el as HTMLElement
+      for (let hops = 0; node && hops < 5; hops++) {
+        if (node.style?.border?.includes('3px')) return true
+        node = node.parentElement
+      }
+      return false
+    }).length
+    expect(selectedCount).toBe(5)
+    expect(screen.queryByText(/need \d+ more/)).not.toBeInTheDocument()
+  })
+})

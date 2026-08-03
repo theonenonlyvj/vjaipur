@@ -78,8 +78,19 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
   // 2-good Exchange collapsing into a 1-good Take). This is the invariant
   // that guarantees the app never dispatches a different move than intended.
   const resolvedMarketIdx = selMarketIds.map(id => state.market.findIndex(c => c.id === id))
-  const marketSelectionBroken = selMarketIds.length >= 2 && resolvedMarketIdx.includes(-1)
-  const selMarket = marketSelectionBroken ? [] : resolvedMarketIdx.filter(idx => idx !== -1)
+  // A CAMEL selection is exempt from the broken-exchange collapse below and
+  // instead self-heals to the whole herd: TAKE_CAMELS is all-or-nothing, so
+  // selecting camels means "the herd on offer", not those specific cards.
+  // 2026-08-03 bug: preselect 3 camels during the bot's turn, the bot's
+  // exchange GIVES 2 camels to the market — only the original 3 stayed
+  // highlighted (the move itself was still correct). Re-deriving the group
+  // from the live market every render keeps the highlight honest whether
+  // camels were added (opponent gave) or all taken (selection empties out).
+  const selectedACamel = selMarketIds.length > 0 && resolvedMarketIdx.some(idx => state.market[idx]?.type === 'camel')
+  const marketSelectionBroken = !selectedACamel && selMarketIds.length >= 2 && resolvedMarketIdx.includes(-1)
+  const selMarket = selectedACamel
+    ? state.market.map((c, i) => (c.type === 'camel' ? i : -1)).filter(i => i !== -1)
+    : marketSelectionBroken ? [] : resolvedMarketIdx.filter(idx => idx !== -1)
 
   const selHandReal = marketSelectionBroken
     ? []
