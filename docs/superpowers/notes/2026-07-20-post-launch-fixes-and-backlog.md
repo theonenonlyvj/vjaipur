@@ -292,3 +292,26 @@ floor 25,000 (HARD_CAP_MS 8000; early stop can't fire below floor; pinned
 mode untouched; benchmarks pass 0). Bridge timeout 5s->10s. 750 tests.
 Verified live: the deployed worker chunk carries the floor constant —
 eval v2 + floor shipped together in bundle index-CDTnwAIV.
+
+## UPDATE 2026-08-03 — estate-recon items + FULL STANDING-BUGS AUDIT (7683081, a6602cc + cleanup; worker deployed)
+Vijay: "agents closed out their work... take a strong look at this repo and
+clean it up. make sure we don't have any standing bugs."
+1. Estate-recon directed items (vgames-platform docs): identity-URL defaults
+   flipped viota-worker -> vgames-identity (ORDERING HAZARD CLEARED — viota
+   may remove its grace proxy); handoff/status bannered stale; platform docs
+   updated + inbox note consumed (their "leaderboard account_id" item was
+   stale — done since 07-20).
+2. analyze.mjs ply-bucketing patched (last council debt; 26 metric-pins green).
+3. AUDIT (18 agents: 6 finders -> adversarial verify): 10 CONFIRMED bugs
+   fixed (see a6602cc for the list — headline: the /api proxy fallback
+   couldn't help blocked devices because AUTH had no fallback and auth runs
+   first; auth races around login-vs-refresh and abandoned-game bot moves;
+   no sync fallback while playing; rivalry counted unfinished-round sells).
+   2 claims REFUTED under verification (resign win/loss inversion; ISMCTS
+   tree stat corruption) — recorded so they aren't re-found. Deep systems
+   (engine, redaction, idempotency, games-first SQL, eval v2 math) came
+   back CLEAN.
+4. Cleanup: junk untracked, gitignore gaps, README/AGENTS banners,
+   .env.example completed, testing.md live-pointer. server/ + socketService
+   left for Vijay's held decommission.
+Client 776 / worker 292 tests. Repo state: main=a6602cc + cleanup commit.
