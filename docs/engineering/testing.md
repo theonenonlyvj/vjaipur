@@ -11,11 +11,20 @@ npm run test:all
 
 ## Current Fresh Results
 
-As of 2026-07-09:
+Pass/fail counts drift too fast to hardcode here reliably (2026-08-03: this
+line was still reading "1 failed, 254 passed" from 2026-07-09 long after the
+real suite had grown past 750 client tests). Run the commands below and read
+their own summary line — that output is always the source of truth, not this
+doc:
 
-- `npm run build`: passed.
-- `npm run test`: 1 failed, 254 passed.
-- `npm run test:server`: 6 failed, 17 passed.
+- Client/engine/UI: `npm run test` (from the project root).
+- Worker: `cd worker && npm test`.
+- Legacy server (see "Server DB Tests" below): `npm run test:server`.
+
+tsconfig.json's `include` is `["src", "tests"]` — it does not cover
+`server/`, so `npm run build`'s `tsc` step never typechecks the legacy
+server; `npm run test:server` (vitest, not tsc) is the only gate on that
+code.
 
 ## Known Failing Areas
 
