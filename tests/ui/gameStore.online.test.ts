@@ -583,11 +583,132 @@ describe('onNudge', () => {
     expect(useGameStore.getState().onlineView).toBeNull()
   })
 
-  it('swallows a transient sync failure without throwing or setting a hard error', async () => {
+  it('swallows a transient sync failure without throwing or setting a hard error, and never leaves pendingMove stuck true', async () => {
     useGameStore.setState({ mode: 'online', roomCode: 'ABC123', onlineView: makeView(), error: null })
     vi.mocked(onlineApi.sync).mockRejectedValueOnce(new TypeError('offline'))
     await expect(useGameStore.getState().onNudge()).resolves.toBeUndefined()
     expect(useGameStore.getState().error).toBeNull()
+    expect(useGameStore.getState().pendingMove).toBe(false)
+  })
+
+  // BUG 4 (2026-08-03): onNudge only checked pendingMove on entry but never
+  // SET it while awaiting outbox.drain + sync, so a user move dispatched
+  // mid-drain raced the retry.
+  describe('pendingMove race window (BUG 4)', () => {
+    function seedMyTurn() {
+      const view = makeView({ mySeat: 0, game: { activePlayer: 0 } as ClientView['game'] })
+      useGameStore.setState({
+        mode: 'online', roomCode: 'ABC123', onlinePlayerIndex: 0,
+        onlineView: view, state: viewToRenderState(view), pendingMove: false, error: null,
+      })
+    }
+
+    it('holds pendingMove for the whole drain+sync span — a move dispatched mid-drain is safely rejected, not raced', async () => {
+      seedMyTurn()
+      let resolveDrain!: (v: null) => void
+      vi.mocked(outbox.drain).mockImplementationOnce(() => new Promise((res) => { resolveDrain = res }))
+
+      const nudgePromise = useGameStore.getState().onNudge()
+      expect(useGameStore.getState().pendingMove).toBe(true) // claimed synchronously, before the drain even resolves
+
+      await useGameStore.getState().dispatchOnline({ type: 'TAKE_CAMELS' })
+      expect(onlineApi.move).not.toHaveBeenCalled() // dispatchOnline's own entry guard bailed — no race
+
+      vi.mocked(onlineApi.sync).mockResolvedValueOnce({ moveIndex: 1, view: makeView(), moves: [] })
+      resolveDrain(null)
+      await nudgePromise
+
+      expect(useGameStore.getState().pendingMove).toBe(false) // released once onNudge itself is done
+    })
+
+    it('a delayed onNudge release does not clobber a LATER claim (a dispatchOnline for a game resumed while the old onNudge was still in flight)', async () => {
+      seedMyTurn()
+      let resolveDrain!: (v: null) => void
+      vi.mocked(outbox.drain).mockImplementationOnce(() => new Promise((res) => { resolveDrain = res }))
+
+      const nudgePromise = useGameStore.getState().onNudge() // claims pendingMove
+      expect(useGameStore.getState().pendingMove).toBe(true)
+
+      // Simulate a leave + resume-into-a-new-claim while the old onNudge is
+      // still hanging on its drain — pendingMove is reset (as a real
+      // disconnectOnline/resumeGame would), then a fresh dispatchOnline
+      // claims it again for the (possibly different) resumed game.
+      useGameStore.setState({ pendingMove: false })
+      seedMyTurn()
+      vi.mocked(onlineApi.move).mockReturnValueOnce(new Promise(() => {})) // never resolves in this test
+      void useGameStore.getState().dispatchOnline({ type: 'TAKE_CAMELS' })
+      expect(useGameStore.getState().pendingMove).toBe(true) // the NEW claim
+
+      // NOW the stale onNudge's drain finally resolves and it runs to completion.
+      vi.mocked(onlineApi.sync).mockResolvedValueOnce({ moveIndex: 1, view: makeView(), moves: [] })
+      resolveDrain(null)
+      await nudgePromise
+
+      // The stale onNudge's release must not have cleared the NEW claim.
+      expect(useGameStore.getState().pendingMove).toBe(true)
+    })
+  })
+})
+
+// ---- playing-status fallback poll (BUG 6) --------------------------------------
+
+describe('playing-status fallback poll (BUG 6 — nudge WS dead while playing)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    // A far-future expiry so joinOnline's ensureVGamesAccount() short-circuits
+    // on the cached token instead of attempting a real network mint.
+    useStatsStore.setState({ vgamesTokenExp: Math.floor(Date.now() / 1000) + 3600 })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function joinAndGoPlaying() {
+    // 'join' (not 'create') deals immediately — see joinOnline's own
+    // comment — so this is the straightforward way to land in 'playing'.
+    vi.mocked(onlineApi.resolveCode).mockResolvedValueOnce({ gameId: 'POLL1', status: 'active' })
+    vi.mocked(onlineApi.join).mockResolvedValueOnce({ seatIndex: 0, status: 'active', view: makeView({ mySeat: 0 }) })
+    return useGameStore.getState().joinOnline('join', 'poll1')
+  }
+
+  it('fires the sync path every ~10s while playing, and stops after leaving', async () => {
+    await joinAndGoPlaying()
+    expect(useGameStore.getState().onlineStatus).toBe('playing')
+
+    vi.mocked(onlineApi.sync).mockResolvedValue({ moveIndex: 0, view: makeView({ mySeat: 0 }), moves: [] })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(onlineApi.sync).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(onlineApi.sync).toHaveBeenCalledTimes(2)
+
+    useGameStore.getState().leaveOnline()
+    vi.mocked(onlineApi.sync).mockClear()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(onlineApi.sync).not.toHaveBeenCalled()
+  })
+
+  it('is skipped while the tab is hidden', async () => {
+    await joinAndGoPlaying()
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+
+    vi.mocked(onlineApi.sync).mockResolvedValue({ moveIndex: 0, view: makeView({ mySeat: 0 }), moves: [] })
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(onlineApi.sync).not.toHaveBeenCalled()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+
+  it('is skipped while a move is pending', async () => {
+    await joinAndGoPlaying()
+    useGameStore.setState({ pendingMove: true })
+
+    vi.mocked(onlineApi.sync).mockResolvedValue({ moveIndex: 0, view: makeView({ mySeat: 0 }), moves: [] })
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(onlineApi.sync).not.toHaveBeenCalled()
   })
 })
 
@@ -801,9 +922,13 @@ describe('joinOnline', () => {
       expect(useGameStore.getState().onlineStatus).toBe('playing')
       expect(useGameStore.getState().state).not.toBeNull()
 
-      // The poll stops once active (no further sync calls on subsequent ticks).
+      // The WAITING-room poll (2.5s cadence) stops once active — advance by
+      // less than the separate playing-status fallback poll's own 10s
+      // interval (BUG 6, which now legitimately polls WHILE playing) so this
+      // assertion stays specific to the waiting poll having stopped, without
+      // conflating it with that other poller's own first tick.
       const callsSoFar = vi.mocked(onlineApi.sync).mock.calls.length
-      await vi.advanceTimersByTimeAsync(10_000)
+      await vi.advanceTimersByTimeAsync(2_500)
       expect(vi.mocked(onlineApi.sync).mock.calls.length).toBe(callsSoFar)
     } finally {
       vi.useRealTimers()

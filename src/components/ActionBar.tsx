@@ -135,9 +135,16 @@ export function ActionBar({
     }
   } else if (selMarketCount >= 2) {
     const need = selMarketCount - selHandCount
+    // BUG 7 defense in depth: GameScreen now clamps hand/herd-camel
+    // additions so selHandCount can never exceed selMarketCount, but if it
+    // ever does anyway (a future regression, or a caller other than
+    // GameScreen), render a graceful "remove N" message instead of a
+    // nonsensical negative "need -1 more".
     const label = canConfirmExchange
       ? `Exchange ${selMarketCount}↔${selHandCount}`
-      : `Exchange (need ${need} more)`
+      : need < 0
+        ? `Exchange (remove ${-need} more)`
+        : `Exchange (need ${need} more)`
     contextBtn = (
       <button
         onClick={onConfirmExchange}

@@ -258,6 +258,95 @@ describe('aiThinking', () => {
     expect(useGameStore.getState().aiThinking).toBe(false)
     setWorkerBridge(null)
   })
+
+  // BUG 3 (2026-08-03): a bot move computed for an ABANDONED game (user
+  // backed out mid-think and started a fresh one) must never apply to the
+  // fresh game, and must never clobber the fresh game's own aiThinking.
+  describe('gameEpoch stale-move guard', () => {
+    it('discards a stale AI resolution from an abandoned game — the new game\'s state/aiThinking are untouched', async () => {
+      useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+      useGameStore.getState().startGame('vs-ai')
+
+      let resolveWorker!: (action: Action | null) => void
+      const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+      mockBridge.getAction = (_state) => new Promise<Action | null>(res => { resolveWorker = res })
+      setWorkerBridge(mockBridge)
+
+      const oldState = useGameStore.getState().state!
+      const actions = getLegalActions(oldState)
+      useGameStore.getState().dispatch(actions[0]) // triggers runAi against `oldState`'s result, epoch E0
+
+      expect(useGameStore.getState().aiThinking).toBe(true)
+
+      // The player backs out and starts a FRESH game (bumps gameEpoch) while
+      // the old worker call is still pending.
+      useGameStore.getState().startGame('vs-ai')
+      const freshState = useGameStore.getState().state!
+      expect(useGameStore.getState().aiThinking).toBe(false)
+
+      // The stale worker call now resolves.
+      resolveWorker({ type: 'TAKE_CAMELS' })
+      await new Promise(r => setTimeout(r, 0))
+      await new Promise(r => setTimeout(r, 0))
+
+      // The fresh game must be completely unaffected: same state reference,
+      // aiThinking still false (never flipped true then back by the stale
+      // resolution's own set() calls).
+      expect(useGameStore.getState().state).toBe(freshState)
+      expect(useGameStore.getState().aiThinking).toBe(false)
+      setWorkerBridge(null)
+    })
+
+    it('a matching-epoch resolution still applies normally (no regression)', async () => {
+      useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+      useGameStore.getState().startGame('vs-ai')
+
+      let resolveWorker!: (action: Action | null) => void
+      const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+      mockBridge.getAction = (_state) => new Promise<Action | null>(res => { resolveWorker = res })
+      setWorkerBridge(mockBridge)
+
+      const state = useGameStore.getState().state!
+      const actions = getLegalActions(state)
+      useGameStore.getState().dispatch(actions[0])
+
+      resolveWorker({ type: 'TAKE_CAMELS' })
+      await new Promise(r => setTimeout(r, 0))
+
+      expect(useGameStore.getState().aiThinking).toBe(false)
+      expect(useGameStore.getState().state!.activePlayer).toBe(0) // AI moved, turn is back to the human
+      setWorkerBridge(null)
+    })
+
+    it('discards a stale resolution on the error-fallback path too (both the worker AND medium-AI fail, but for an abandoned game)', async () => {
+      useGameStore.setState({ difficulty: 'hard', aiThinking: false })
+      useGameStore.getState().startGame('vs-ai')
+
+      const mockBridge = new WorkerBridge(() => { throw new Error('not used') })
+      let rejectWorker!: (e: Error) => void
+      mockBridge.getAction = () => new Promise<Action | null>((_res, rej) => { rejectWorker = rej })
+      setWorkerBridge(mockBridge)
+      vi.mocked(pickMediumAction).mockImplementationOnce(() => { throw new Error('fallback crashed') })
+
+      const state = useGameStore.getState().state!
+      const actions = getLegalActions(state)
+      useGameStore.getState().dispatch(actions[0])
+      expect(useGameStore.getState().aiThinking).toBe(true)
+
+      useGameStore.getState().startGame('vs-ai') // abandon mid-think
+      const freshState = useGameStore.getState().state!
+      expect(useGameStore.getState().aiThinking).toBe(false)
+
+      rejectWorker(new Error('worker crashed'))
+      await new Promise(r => setTimeout(r, 0))
+      await new Promise(r => setTimeout(r, 0))
+      await new Promise(r => setTimeout(r, 0))
+
+      expect(useGameStore.getState().state).toBe(freshState)
+      expect(useGameStore.getState().aiThinking).toBe(false)
+      setWorkerBridge(null)
+    })
+  })
 })
 
 // Tier-lineup rework (2026-07-20): 'Hard' in the picker is now the hardAi2

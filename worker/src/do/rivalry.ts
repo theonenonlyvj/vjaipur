@@ -267,6 +267,21 @@ function replayMatch(moves: MoveDbRow[], mySeat: number): MatchReplay {
     const piles = initialTokenPiles() // fresh pile this round — official starting values
     let roundEnd: RoundEndPayload | null = null
 
+    // BUG 5 (2026-08-03): SELL contributions are buffered per-round and only
+    // merged into the cross-match craft accumulators (myGoodsValue/
+    // myCardsSold/myBonusSales/...) AFTER `roundEnd` is confirmed below —
+    // mirroring how `rounds` itself is only pushed once confirmed. The OLD
+    // code merged straight into the outer accumulators inside this loop,
+    // before the `if (!roundEnd) continue` check even ran, so a
+    // resigned-mid-round's sells (a round that never produced a score) still
+    // permanently polluted tokensPerCard/bonusSales.
+    let roundMyGoodsValue = 0
+    let roundTheirGoodsValue = 0
+    let roundMyCardsSold = 0
+    let roundTheirCardsSold = 0
+    const roundMyBonusSales = emptyBonusBuckets()
+    const roundTheirBonusSales = emptyBonusBuckets()
+
     for (const m of roundMoves) {
       if (m.type === 'SELL') {
         const sell = parseSell(m.payload)
@@ -275,20 +290,20 @@ function replayMatch(moves: MoveDbRow[], mySeat: number): MatchReplay {
         const taken = pile.splice(0, sell.count)
         const value = taken.reduce((s, v) => s + v, 0)
         if (m.seat_index === mySeat) {
-          myGoodsValue += value
-          myCardsSold += sell.count
-          if (sell.count >= 3) myBonusSales[bucketSellSize(sell.count)] += 1
+          roundMyGoodsValue += value
+          roundMyCardsSold += sell.count
+          if (sell.count >= 3) roundMyBonusSales[bucketSellSize(sell.count)] += 1
         } else if (m.seat_index === theirSeat) {
-          theirGoodsValue += value
-          theirCardsSold += sell.count
-          if (sell.count >= 3) theirBonusSales[bucketSellSize(sell.count)] += 1
+          roundTheirGoodsValue += value
+          roundTheirCardsSold += sell.count
+          if (sell.count >= 3) roundTheirBonusSales[bucketSellSize(sell.count)] += 1
         }
       } else if (m.type === 'round_end') {
         roundEnd = parseRoundEnd(m.payload)
       }
     }
 
-    if (!roundEnd) continue // round never completed (e.g. a mid-round resignation) — no score to attribute
+    if (!roundEnd) continue // round never completed (e.g. a mid-round resignation) — no score to attribute, and its sells are excluded below
     rounds.push({
       round: roundNum,
       myScore: roundEnd.scores[mySeat]!,
@@ -296,6 +311,19 @@ function replayMatch(moves: MoveDbRow[], mySeat: number): MatchReplay {
       roundWinner: roundEnd.sealAwardedTo === mySeat ? 'me' : roundEnd.sealAwardedTo === theirSeat ? 'them' : null,
       camelWinner: roundEnd.camelWinner === mySeat ? 'me' : roundEnd.camelWinner === theirSeat ? 'them' : null,
     })
+
+    // Round confirmed complete — NOW merge its buffered sells into the
+    // cross-match accumulators.
+    myGoodsValue += roundMyGoodsValue
+    theirGoodsValue += roundTheirGoodsValue
+    myCardsSold += roundMyCardsSold
+    theirCardsSold += roundTheirCardsSold
+    myBonusSales[3] += roundMyBonusSales[3]
+    myBonusSales[4] += roundMyBonusSales[4]
+    myBonusSales[5] += roundMyBonusSales[5]
+    theirBonusSales[3] += roundTheirBonusSales[3]
+    theirBonusSales[4] += roundTheirBonusSales[4]
+    theirBonusSales[5] += roundTheirBonusSales[5]
   }
 
   return { rounds, myGoodsValue, theirGoodsValue, myCardsSold, theirCardsSold, myBonusSales, theirBonusSales }

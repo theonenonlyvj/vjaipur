@@ -132,17 +132,65 @@ export async function getMyStyle(db: D1Database, accountId: string, tier: string
   const { agg, lastLogId, foldedAny } = await foldNewRows(db, accountId, tier, sinceLogId, startAgg)
 
   if (foldedAny) {
-    await db
-      .prepare(
-        `INSERT INTO style_cache (account_id, tier, last_log_id, agg, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, tier) DO UPDATE SET last_log_id = excluded.last_log_id, agg = excluded.agg, updated_at = excluded.updated_at`,
-      )
-      .bind(accountId, tier, lastLogId, JSON.stringify(agg), Date.now())
-      .run()
+    await writeCache(db, accountId, tier, sinceLogId, lastLogId, agg, cacheRow != null)
   }
 
   const games = availableTiers.find((t) => t.tier === tier)?.games ?? 0
 
   return { tier, games, availableTiers, style: finalizeStyle(agg) }
+}
+
+/**
+ * Conditional cache write (BUG 9, 2026-08-03). The old write was an
+ * unconditional UPSERT: two concurrent requests both reading the SAME stale
+ * `last_log_id` could race to write, and whichever's write landed SECOND
+ * would win regardless of which one actually folded further — silently
+ * regressing `last_log_id` BACKWARD and permanently stranding the rows the
+ * first writer had already folded from ever being re-read (they're now
+ * below the — now smaller — cached watermark).
+ *
+ * Fix: an existing row is only advanced via `UPDATE ... WHERE last_log_id =
+ * sinceLogId` (the value THIS request read at the start); a brand-new row is
+ * created via `INSERT ... ON CONFLICT DO NOTHING`. Either way, a 0-row
+ * result means a concurrent request already advanced (or created) the cache
+ * past what this request knows about — since both requests started from the
+ * same `sinceLogId` and folded forward deterministically, the winner's row
+ * is always a superset of (or equal to) what this request just computed, so
+ * this request simply SKIPS the write and serves its own already-computed
+ * `style` — never blocking the read on winning the write, and a later open
+ * naturally self-heals from wherever the cache actually landed.
+ */
+async function writeCache(
+  db: D1Database,
+  accountId: string,
+  tier: string,
+  sinceLogId: number,
+  lastLogId: number,
+  agg: StyleAgg,
+  rowExisted: boolean,
+): Promise<void> {
+  const now = Date.now()
+  if (rowExisted) {
+    await db
+      .prepare(
+        `UPDATE style_cache SET last_log_id = ?, agg = ?, updated_at = ?
+         WHERE account_id = ? AND tier = ? AND last_log_id = ?`,
+      )
+      .bind(lastLogId, JSON.stringify(agg), now, accountId, tier, sinceLogId)
+      .run()
+    // 0 rows changed => a concurrent writer already advanced last_log_id
+    // past sinceLogId — skip, per this function's docstring.
+    return
+  }
+  // No row existed when this request started — INSERT. Two concurrent
+  // FIRST-ever writers can race here too; ON CONFLICT DO NOTHING lets
+  // whichever commits first win, same "skip, don't clobber" rule.
+  await db
+    .prepare(
+      `INSERT INTO style_cache (account_id, tier, last_log_id, agg, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(account_id, tier) DO NOTHING`,
+    )
+    .bind(accountId, tier, lastLogId, JSON.stringify(agg), now)
+    .run()
 }

@@ -137,6 +137,19 @@ interface StatsActions {
 
 export type StatsStore = StatsState & StatsActions
 
+// BUG 2 (2026-08-03): a stale in-flight ensureVGamesAccount refresh could
+// revert a login/account-switch that landed WHILE it was awaiting the
+// network. Bumped by restoreAccount, secureAccount, and any explicit
+// account-clearing path (clearStats) — every place that adopts a NEW
+// identity as authoritative. ensureVGamesAccount captures this BEFORE its
+// `await vgamesQuick(...)` and, at resolve time, discards its own result
+// (never writes, never sets sessionExpired) if the generation moved —
+// returning whatever the store currently holds instead. Deliberately
+// module-level (not store state): it must survive independent of what
+// persist/zustand does to the store's own fields, and nothing outside this
+// file ever needs to read it.
+let authGeneration = 0
+
 function generateFriendCode(): string {
   const digits = Math.floor(1000 + Math.random() * 9000).toString()
   return `VJ-${digits}`
@@ -238,8 +251,22 @@ export const useStatsStore = create<StatsStore>()(
         // fresh/never-claimed guest's first mint (see the catch below too).
         const wasClaimed = get().claimed === true
         const prevAccountId = get().vgamesAccountId
+        // BUG 2: captured BEFORE the await — if restoreAccount/secureAccount/
+        // clearStats lands (and bumps authGeneration) while this call is
+        // in flight, its response is stale and must never be adopted, no
+        // matter what it says (see both branches below).
+        const myGeneration = authGeneration
         try {
           const { token, accountId, status } = await vgamesQuick(secretKey, displayName ?? undefined)
+          if (authGeneration !== myGeneration) {
+            // A login/switch/clear landed while this refresh was in flight.
+            // Never adopt this response — it may belong to an identity
+            // that's no longer current (this is exactly the "reverts an
+            // account switch" bug). Serve whatever the store holds NOW
+            // instead, without writing anything.
+            const cur = get()
+            return cur.vgamesToken && cur.vgamesAccountId ? { token: cur.vgamesToken, accountId: cur.vgamesAccountId } : null
+          }
           // Refuse a silent claimed->ghost/identity-switch downgrade. This
           // used to just adopt whatever the worker returned, which is the
           // "different ghost identity" data-integrity bug: a claimed
@@ -271,6 +298,14 @@ export const useStatsStore = create<StatsStore>()(
           socketService.setAuthToken(token)
           return { token, accountId }
         } catch (e) {
+          if (authGeneration !== myGeneration) {
+            // Same discard rule as the success path above — a failure that
+            // belongs to a since-superseded refresh says nothing about the
+            // identity that's current NOW, so it must not flip
+            // sessionExpired for it either.
+            const cur = get()
+            return cur.vgamesToken && cur.vgamesAccountId ? { token: cur.vgamesToken, accountId: cur.vgamesAccountId } : null
+          }
           console.warn('ensureVGamesAccount failed:', e)
           // Only a PREVIOUSLY-claimed device counts as "signed out" — a
           // guest/ghost's failed first-ever mint was never signed in, and is
@@ -366,6 +401,10 @@ export const useStatsStore = create<StatsStore>()(
           const { secretKey } = get().ensureAccount()
           const result = await vgamesLogin(username, password, secretKey)
           if (result.ok && result.token && result.accountId) {
+            // BUG 2: this is a real, authoritative identity switch — bump
+            // BEFORE adopting it so a stale ensureVGamesAccount refresh still
+            // in flight (started before this login) can never revert it.
+            authGeneration++
             set({
               vgamesToken: result.token,
               vgamesAccountId: result.accountId,
@@ -412,7 +451,9 @@ export const useStatsStore = create<StatsStore>()(
           const ack = await vgamesSetCredentials(account.token, username, password)
           if (ack.ok) {
             // just claimed a username+password; a real login always clears a
-            // stale signed-out flag.
+            // stale signed-out flag. BUG 2: bump generation — same reasoning
+            // as restoreAccount above.
+            authGeneration++
             set({ displayName: username, claimed: true, sessionExpired: false })
           }
           return ack
@@ -496,6 +537,9 @@ export const useStatsStore = create<StatsStore>()(
       },
 
       clearStats: () => {
+        // BUG 2: an explicit account-clearing path — bump so a refresh still
+        // in flight for the OLD identity can't repopulate it after the clear.
+        authGeneration++
         set({
           friendCode: null,
           secretKey: null,

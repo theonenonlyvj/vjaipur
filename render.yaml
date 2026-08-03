@@ -26,6 +26,18 @@ services:
       - type: rewrite
         source: /api/*
         destination: https://vjaipur-worker.theonenonlyvj.workers.dev/*
+      # Same-origin proxy for the VGames Identity worker (BUG 1, 2026-08-03) —
+      # mirrors the /api/* rule above so src/auth/vgamesClient.ts's identity
+      # calls (auth/quick, login, set-credentials — which run FIRST on every
+      # cold boot) get the same blocked-device fallback that game calls
+      # already had via src/net/http.ts. Inactive until this Render Blueprint
+      # is synced (until then /id-api/* just falls into the SPA catch-all
+      # below and returns index.html, which src/net/proxyFallback.ts detects
+      # via its JSON check and safely ignores) — harmless either way.
+      # MUST stay ABOVE the SPA catch-all — routes evaluate in order.
+      - type: rewrite
+        source: /id-api/*
+        destination: https://vgames-identity.theonenonlyvj.workers.dev/*
       - type: rewrite
         source: /*
         destination: /index.html

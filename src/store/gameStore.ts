@@ -48,6 +48,18 @@ export interface GameStore {
   opponentName: string | null
   matchScores: [number, number]
   fairBotTracker: { knownInHand: Card[]; unknownInHand: number } | null
+  /** Monotonic counter bumped every time a vs-ai/local game is (re)started or
+   *  abandoned (BUG 3, 2026-08-03) — startGame's own patch bumps it for
+   *  every mode; disconnectOnline/leaveOnline also bump it when leaving an
+   *  online game, for the same "this game session is over" reasoning even
+   *  though runAi itself only ever fires for vs-ai. runAi captures the
+   *  current value before its async AI-move resolution and re-checks it at
+   *  EVERY resolution path (success/fallback/error-fallback) before
+   *  dispatching — a mismatch means the game this move was computed for is
+   *  gone (the player backed out mid-think and started a fresh one), so the
+   *  stale result is silently discarded instead of being applied to (or
+   *  clobbering aiThinking on) the NEW game. */
+  gameEpoch: number
   /** Per-move play-by-play for the CURRENT vs-ai match only — see
    *  src/store/aiGameLog.ts. Empty/unused for 'local'/'online' modes. Reset
    *  at startGame; sent alongside the match report on match end (see
@@ -340,6 +352,11 @@ function runAi(
   set: (partial: Partial<GameStore>) => void,
   get: () => GameStore,
 ) {
+  // BUG 3: captured up front — every async resolution path below re-checks
+  // this before touching `state`/`aiThinking` (see the field's own docstring
+  // on GameStore).
+  const myEpoch = get().gameEpoch
+
   if (difficulty === 'hard' || difficulty === 'hard2' || difficulty === 'ismcts' || difficulty === 'hard3' || difficulty === 'fair') {
     const bridge =
       difficulty === 'fair' ? getFairBotWorkerBridge() :
@@ -369,6 +386,11 @@ function runAi(
       })
       .catch(() => pickMediumAction(next))
       .then(aiAction => {
+        // BUG 3: the game this move was computed for is gone (a fresh game
+        // started, or this one was abandoned) — discard silently, including
+        // NOT touching aiThinking, which now belongs to whatever game is
+        // current.
+        if (get().gameEpoch !== myEpoch) return
         if (!aiAction) { set({ aiThinking: false }); return }
         const cur = get().state
         if (!cur || cur.phase !== 'playing' || cur.activePlayer !== 1) {
@@ -389,6 +411,10 @@ function runAi(
         // clear the flag and attempt one last-resort move so the game never
         // stalls permanently on the AI's turn.
         console.error('runAi: unrecoverable AI failure', err)
+        // BUG 3: same stale-epoch discard as the success path above — a
+        // failure belonging to an abandoned game must not clobber the new
+        // game's aiThinking or state.
+        if (get().gameEpoch !== myEpoch) return
         set({ aiThinking: false })
         try {
           const cur = get().state
@@ -424,17 +450,80 @@ function runAi(
   set({ state: next, error: null })
 }
 
+// BUG 4 (2026-08-03): `pendingMove` is claimed/released by exactly TWO
+// callers — dispatchOnline (a user move) and onNudge (the drain+sync span,
+// which previously did NOT hold the flag at all, leaving a race window
+// where a move dispatched mid-drain could race the retry). Both callers now
+// go through claimPendingMove/releasePendingMove: whoever sets the flag
+// takes the next token, and a release only actually clears the flag if
+// nothing else has since claimed it (a fresh set() bumps the token) — so a
+// delayed onNudge `finally` can never stomp a DIFFERENT claim (e.g. a
+// dispatchOnline for a game resumed after a leave+rejoin while the old
+// onNudge was still in flight). dispatchOnline's own entry guard (bail if
+// pendingMove is already true) means only one of the two can ever hold the
+// flag at a time — this token just makes "only release what you claimed"
+// an explicit, testable invariant instead of an implicit ordering
+// assumption.
+let pendingMoveToken = 0
+
+function claimPendingMove(set: (partial: Partial<GameStore>) => void): number {
+  const token = ++pendingMoveToken
+  set({ pendingMove: true })
+  return token
+}
+
+function releasePendingMove(
+  token: number,
+  set: (partial: Partial<GameStore>) => void,
+  patch: Partial<GameStore> = {},
+): void {
+  set(pendingMoveToken === token ? { ...patch, pendingMove: false } : patch)
+}
+
 export const useGameStore = create<GameStore>((set, get) => {
   // ---- online singletons (live for the app's lifetime, mirroring the old
   // module-level `socketService` singleton this replaces) ------------------
   let nudgeSocket: NudgeSocket | null = null
   let waitingPollTimer: ReturnType<typeof setInterval> | null = null
+  let playingPollTimer: ReturnType<typeof setInterval> | null = null
 
   function stopWaitingPoll(): void {
     if (waitingPollTimer != null) {
       clearInterval(waitingPollTimer)
       waitingPollTimer = null
     }
+  }
+
+  // BUG 6 (2026-08-03): the nudge WS is "there's news", not the data path —
+  // sync is. A dead/blocked WS while `playing` had NO fallback (only the
+  // waiting room polled). Low-frequency (~10s) background-battery-friendly
+  // fallback: reuses onNudge's own drain+sync path (idempotent via the
+  // since-cursor, so it trivially coexists with a live nudge), gated on the
+  // tab being visible and no move already pending. Same lifecycle as the
+  // nudge socket — started everywhere attachNudge is, stopped everywhere the
+  // nudge socket is torn down (leave/game end).
+  const PLAYING_POLL_INTERVAL_MS = 10_000
+
+  function stopPlayingPoll(): void {
+    if (playingPollTimer != null) {
+      clearInterval(playingPollTimer)
+      playingPollTimer = null
+    }
+  }
+
+  function startPlayingPoll(gameId: string): void {
+    stopPlayingPoll()
+    playingPollTimer = setInterval(() => {
+      const s = get()
+      if (s.mode !== 'online' || s.roomCode !== gameId) {
+        stopPlayingPoll()
+        return
+      }
+      if (s.onlineStatus !== 'playing') return
+      if (s.pendingMove) return
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      void get().onNudge()
+    }, PLAYING_POLL_INTERVAL_MS)
   }
 
   function attachNudge(gameId: string): void {
@@ -451,6 +540,11 @@ export const useGameStore = create<GameStore>((set, get) => {
       // foreground" reconcile cases, not just a fresh nudge frame.
       onAuthOk: () => { void get().onNudge() },
     })
+    // BUG 6: same lifecycle as the nudge socket — see startPlayingPoll's
+    // docstring. Gates on onlineStatus==='playing' internally, so attaching
+    // while still 'waiting' (the create-room case) is harmless; it simply
+    // won't tick anything until the room goes active.
+    startPlayingPoll(gameId)
   }
 
   function startWaitingPoll(gameId: string): void {
@@ -491,6 +585,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     opponentName: null,
     matchScores: [0, 0],
     fairBotTracker: null,
+    gameEpoch: 0,
     aiGameLog: [],
 
     onlineView: null,
@@ -507,6 +602,11 @@ export const useGameStore = create<GameStore>((set, get) => {
       set({
         state: newState, mode, error: null, aiThinking: false, lastMoveDescription: null, matchScores: [0, 0],
         onlineView: null, pendingMove: false, opponentPresent: true, claimWinAvailable: false,
+        // BUG 3: every startGame call (any mode) starts a fresh game session —
+        // bump so any still-in-flight runAi resolution from a PRIOR session
+        // discards itself instead of applying to (or clobbering aiThinking
+        // on) this new one.
+        gameEpoch: get().gameEpoch + 1,
         aiGameLog: [],
       })
       if (mode === 'vs-ai' && get().difficulty === 'fair') {
@@ -595,28 +695,28 @@ export const useGameStore = create<GameStore>((set, get) => {
       const playerDesc = state ? describeAction('YOU', action, state) : null
       const clientMoveId = crypto.randomUUID()
       outbox.save({ gameId: roomCode, seatIndex: mySeat, action, clientMoveId })
-      set({ pendingMove: true, error: null })
+      const myToken = claimPendingMove(set)
+      set({ error: null })
 
       try {
         const result = await onlineApi.move(roomCode, mySeat, action, clientMoveId)
         outbox.clear()
         get().applyServerView(result.view)
-        set({ pendingMove: false, lastMoveDescription: playerDesc })
+        releasePendingMove(myToken, set, { lastMoveDescription: playerDesc })
       } catch (err) {
         if (err instanceof WorkerError && err.status < 500) {
           // A real 4xx from the worker (illegal move, wrong turn, seat
           // conflict, ...) — the move definitely did not commit. Clear the
           // outbox so we don't keep retrying something the server rejected.
           outbox.clear()
-          set({ pendingMove: false, error: { code: err.code, message: onlineErrorMessage(err.code) } })
+          releasePendingMove(myToken, set, { error: { code: err.code, message: onlineErrorMessage(err.code) } })
           return
         }
         // Network failure or an exhausted 5xx retry: we genuinely don't know
         // whether it landed. Keep the outbox — the next sync/reconnect drains
         // it (idempotent via clientMoveId either way) — and surface a
         // reconnecting affordance instead of a hard error.
-        set({
-          pendingMove: false,
+        releasePendingMove(myToken, set, {
           error: { code: 'NETWORK', message: "Connection issue — your move will resend automatically." },
         })
       }
@@ -781,6 +881,7 @@ export const useGameStore = create<GameStore>((set, get) => {
         nudgeSocket?.close()
         nudgeSocket = null
         stopWaitingPoll()
+        stopPlayingPoll()
         void useStatsStore.getState().pullVGamesHistory()
       }
     },
@@ -788,19 +889,37 @@ export const useGameStore = create<GameStore>((set, get) => {
     onNudge: async () => {
       const { roomCode, mode, pendingMove, lastMoveIndex } = get()
       if (mode !== 'online' || !roomCode || pendingMove) return
-      await outbox.drain(roomCode)
+      // BUG 4: claim pendingMove for the WHOLE drain+sync span — previously
+      // this only checked pendingMove on entry and never set it, leaving a
+      // race window where a user move dispatched mid-drain would see
+      // pendingMove still false and race the retry (both hitting the
+      // network, outbox, and applied view concurrently). Claiming it here
+      // means a dispatchOnline call that starts during this span sees
+      // pendingMove=true and bails via its own entry guard, same as if a
+      // move were already in flight — serialized (or safely rejected),
+      // never racing.
+      const myToken = claimPendingMove(set)
       try {
-        const result = await onlineApi.sync(roomCode, lastMoveIndex)
-        if (!('moves' in result)) {
-          set({ onlineStatus: 'waiting' })
-          return
+        await outbox.drain(roomCode)
+        try {
+          const result = await onlineApi.sync(roomCode, lastMoveIndex)
+          if (!('moves' in result)) {
+            set({ onlineStatus: 'waiting' })
+            return
+          }
+          get().applyServerView(result.view)
+          applyMoveDescription(result.moves, get, set)
+          set({ lastMoveIndex: result.moveIndex, onlineStatus: 'playing' })
+        } catch {
+          // Transient network issue — the next nudge, heartbeat-driven wake, or
+          // foreground reconnect will retry. Nothing to surface mid-flight.
         }
-        get().applyServerView(result.view)
-        applyMoveDescription(result.moves, get, set)
-        set({ lastMoveIndex: result.moveIndex, onlineStatus: 'playing' })
-      } catch {
-        // Transient network issue — the next nudge, heartbeat-driven wake, or
-        // foreground reconnect will retry. Nothing to surface mid-flight.
+      } finally {
+        // Only clears the flag if THIS call still owns it (see
+        // releasePendingMove) — never stomps a claim a later caller (e.g. a
+        // dispatchOnline for a game resumed after a leave+rejoin while this
+        // onNudge was still in flight) has since taken.
+        releasePendingMove(myToken, set)
       }
     },
 
@@ -966,6 +1085,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       nudgeSocket?.close()
       nudgeSocket = null
       stopWaitingPoll()
+      stopPlayingPoll()
       session.clear()
       outbox.clear()
 
@@ -974,6 +1094,10 @@ export const useGameStore = create<GameStore>((set, get) => {
         opponentName: null, lastMoveDescription: null, error: null,
         onlineView: null, pendingMove: false, opponentPresent: true, claimWinAvailable: false,
         lastMoveIndex: 0, lastScoredRound: null, matchScores: [0, 0],
+        // BUG 3: leaving/clearing a game bumps the epoch too (see the
+        // field's docstring) — consistent with startGame, even though runAi
+        // itself only ever runs for vs-ai/local.
+        gameEpoch: get().gameEpoch + 1,
       })
     },
 

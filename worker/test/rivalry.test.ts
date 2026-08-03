@@ -225,6 +225,64 @@ describe('getRivalry — no shared games', () => {
 })
 
 // =============================================================================
+// BUG 5 (2026-08-03): sells from an unfinished (resigned-mid-round) trailing
+// round must never pollute the craft accumulators. The old code merged a
+// round's SELL contributions into the cross-match accumulators DURING the
+// per-move loop, before `if (!roundEnd) continue` even ran — a round that
+// never produced a round_end (a mid-round resignation) still permanently
+// counted its sells. Isolated account ids — this fixture is self-contained
+// and does not touch the ME/THEM pair above.
+// =============================================================================
+
+describe('getRivalry — BUG 5: sells from an unfinished trailing round are excluded from craft', () => {
+  const ME5 = 'rv-acct-bug5-me'
+  const THEM5 = 'rv-acct-bug5-them'
+
+  beforeAll(async () => {
+    await seedMatchRow({ gameUuid: 'rv-guuid-bug5', code: 'DDDD55', status: 'resigned', winnerSeat: 0, createdAt: 9000, endedAt: 9500 })
+    await seedSeat('rv-guuid-bug5', 0, ME5, 'Me5')
+    await seedSeat('rv-guuid-bug5', 1, THEM5, 'reks5')
+
+    // Round 1 completes normally — its sells MUST count.
+    await seedMove('rv-guuid-bug5', 1, 0, 'SELL', sell('diamond', 3), 9100) // mine: 7+7+5=19, bonus tier3
+    await seedMove('rv-guuid-bug5', 1, 1, 'SELL', sell('gold', 3), 9110) // theirs: 6+6+5=17, bonus tier3
+    await seedMove('rv-guuid-bug5', 1, -1, 'round_end', roundEnd(null, [50, 45], 0), 9120)
+
+    // Round 2 starts, but the match is RESIGNED mid-round — no round_end for
+    // round 2. These sells must be EXCLUDED from every craft accumulator.
+    await seedMove('rv-guuid-bug5', 2, 0, 'SELL', sell('silver', 5), 9200) // would be mine: 25, bonus tier5 if wrongly counted
+    await seedMove('rv-guuid-bug5', 2, 1, 'SELL', sell('leather', 4), 9210) // would be theirs: 10, bonus tier4 if wrongly counted
+  })
+
+  it("excludes the trailing unfinished round's sells from craft.tokensPerCard while the finished round still counts", async () => {
+    const result = await getRivalry(DB(), ME5, THEM5)
+    if ('error' in result) throw new Error('expected a real rivalry, got no_shared_games')
+    expect(result.craft.tokensPerCard.myCards).toBe(3) // ONLY round 1's 3 — round 2's 5 excluded
+    expect(result.craft.tokensPerCard.theirCards).toBe(3) // ONLY round 1's 3 — round 2's 4 excluded
+    expect(result.craft.tokensPerCard.mine).toBeCloseTo(19 / 3, 5)
+    expect(result.craft.tokensPerCard.theirs).toBeCloseTo(17 / 3, 5)
+  })
+
+  it("excludes the trailing unfinished round's bonus sale from craft.bonusSales", async () => {
+    const result = await getRivalry(DB(), ME5, THEM5)
+    if ('error' in result) throw new Error('expected a real rivalry, got no_shared_games')
+    expect(result.craft.bonusSales).toEqual({
+      mine3: 1, mine4: 0, mine5: 0, // round 2's silver x5 (tier5) must NOT show up here
+      theirs3: 1, theirs4: 0, theirs5: 0, // round 2's leather x4 (tier4) must NOT show up here
+      eligible: false,
+    })
+  })
+
+  it('perGame only lists the finished round — the unfinished trailing round produces no entry', async () => {
+    const result = await getRivalry(DB(), ME5, THEM5)
+    if ('error' in result) throw new Error('expected a real rivalry, got no_shared_games')
+    expect(result.perGame).toEqual([
+      { matchCode: 'DDDD55', gameNumberInMatch: 1, myScore: 50, theirScore: 45, won: true, endedAt: 9500 },
+    ])
+  })
+})
+
+// =============================================================================
 // GET /stats/rivalry — router wiring (auth, param validation, 404 mapping)
 // =============================================================================
 
