@@ -254,3 +254,27 @@ population to pool yet; per-row gates already prevent the harm.
    deltas == sum of per-game deltas (grouping invariance).
 Suites: client 747 / worker 287. Known wall-clock contention flake
 (hardAi2-class) appeared once per full run, green in isolation each time.
+
+## UPDATE 2026-08-02 — ISMCTS deep dive + EVAL V2 shipped (df8b9ac, GATE PASS 60%)
+Vijay: winning 66%+ ("88% last session"), "leaves precious jewels", "how
+intentional is its end game?" — all three CONFIRMED by a 4-miner evidence
+sweep over 71 recent games + code mechanism map. First: exonerated the 07-27
+early stop (search signature identical pre/post deploy — his phone barely
+fires it; phones run ~35k iters vs ~60k desktop, so the mobile bot is
+inherently shallower). The winrate jump = Vijay applying the 07-27 coaching
+(his 5-sales 4x'd) + farming eval blind spots.
+Flaw inventory (all staticEval; generation + terminal-move choice CLEARED):
+precious pass-ups ~14.6 tokens/game gifted (worst on front-loaded gold/
+diamond piles; 140/140 eval losses when the take reached top-3); 30% of
+games end with a sellable stack stranded; zero deck-clock behavior; 73%
+denial miss rate (eval never read opp hand composition).
+EVAL V2 (one __setEvalV2 switch): deck-clock decay on held value; clock-
+scaled stack bonus option value; precious pair momentum (lone precious
+credits pile[1] — front-loaded piles auto-urgent); FAIR denial term (reads
+only the revealedHands-derived determinized hand; fairness proofs green).
+GATE: 60% (36-24) vs deployed eval, 4s +80%, 5s 8x, stranded down, low-deck
+sells up, 0 illegal; vs Medium 10-0; 747 tests. Terminal seal cliff (+-0.9)
+deliberately UNTOUCHED — it encodes the true objective (only the seal
+matters); miner verdict: endgame problem was upstream horizon-blindness.
+Method note kept for the future: subagent miners for EVIDENCE, Fable designs
+the tuning (Vijay's Fable-only rule); numbers gate everything.
