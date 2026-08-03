@@ -1,5 +1,14 @@
 # VJaipur Context Handoff
 
+> ⚠️ **STALE — HISTORICAL ONLY (pre-2026-07-18).** This document describes the
+> old Render-Node/socket.io/Supabase world. On 2026-07-18 online play was
+> REBUILT server-authoritative on vjaipur's own Cloudflare Worker + DO + D1.
+> **The living chronicle is
+> [`docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md`](superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md)**
+> (and its 07-18 sibling for the rebuild itself). Read those first; use this
+> file only for pre-rebuild archaeology. *(Banner added 2026-08-03.)*
+
+
 Last updated: 2026-07-15 (2026-07-15 update appended; body below it is the 2026-07-09 pass)
 
 ## 2026-07-15 Update (read this first)

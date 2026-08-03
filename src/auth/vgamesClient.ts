@@ -30,7 +30,7 @@ export interface VGamesLoginResult {
   status?: VGamesStatus
 }
 
-const DEFAULT_VGAMES_URL = 'https://viota-worker.theonenonlyvj.workers.dev'
+const DEFAULT_VGAMES_URL = 'https://vgames-identity.theonenonlyvj.workers.dev'
 
 export function vgamesBaseUrl(): string {
   return (import.meta.env.VITE_VGAMES_URL as string | undefined) ?? DEFAULT_VGAMES_URL
