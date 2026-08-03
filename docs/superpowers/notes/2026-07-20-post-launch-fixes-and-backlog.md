@@ -278,3 +278,17 @@ deliberately UNTOUCHED — it encodes the true objective (only the seal
 matters); miner verdict: endgame problem was upstream horizon-blindness.
 Method note kept for the future: subagent miners for EVIDENCE, Fable designs
 the tuning (Vijay's Fable-only rule); numbers gate everything.
+
+## UPDATE 2026-08-02 late — throttle discovery + ITERATION FLOOR (f7e78b2, LIVE with eval v2)
+Vijay: "does the bot play poorly if im offline?" -> logs showed his phone
+under Low Power Mode ran the bot at 6-12k iterations/move vs 35-48k at full
+power. Winrate split by bot depth: throttled 3-0 (100%), degraded 5-1 (83%),
+FULL-POWER 38-31 (55%) — his "66-88%" streak was partly vs a lobotomized
+bot; true skill vs the real bot = 55% (still a genuine jump from 40%).
+Lesson recorded: wall-clock AI budgets make device state set the difficulty;
+control for search depth before trusting any winrate trend.
+FIX (Vijay: "i'm open to slightly slower on shitty device"): minIterations
+floor 25,000 (HARD_CAP_MS 8000; early stop can't fire below floor; pinned
+mode untouched; benchmarks pass 0). Bridge timeout 5s->10s. 750 tests.
+Verified live: the deployed worker chunk carries the floor constant —
+eval v2 + floor shipped together in bundle index-CDTnwAIV.
