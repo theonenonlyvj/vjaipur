@@ -17,7 +17,7 @@ import type {
 } from '../src/shared/protocol.js'
 
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*'
-const VGAMES_URL = process.env.VGAMES_URL ?? 'https://viota-worker.theonenonlyvj.workers.dev'
+const VGAMES_URL = process.env.VGAMES_URL ?? 'https://vgames-identity.theonenonlyvj.workers.dev'
 
 const app = express()
 app.use(cors({ origin: ALLOWED_ORIGIN }))

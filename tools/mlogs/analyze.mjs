@@ -332,19 +332,28 @@ export function decisivenessPct(ratios, thresholds = [2, 3, 5, 10]) {
 
 /** Score trajectory (human minus bot) by game-phase quartile, over
  *  `preState`-bearing entries only (an entry can be missing preState if it
- *  was capped off a very long match's oldest entries). Ports analyze.py's
- *  `ph = min(3, int(4*i/n))` bucketing exactly. */
+ *  was capped off a very long match's oldest entries).
+ *
+ *  PATCHED 2026-08-03 (council finding, baseline doc "what to watch"): the
+ *  original port bucketed by position in the FILTERED array (`4*i/n`), which
+ *  silently compresses a cap-trimmed game's surviving tail into "the whole
+ *  game". Buckets now use each entry's own `ply` against the game's true ply
+ *  range — `aiGameLog.ts` designed `ply` to survive cap-trimming for exactly
+ *  this. IDENTICAL output on uncapped games (today's whole corpus, so the
+ *  frozen baseline numbers remain comparable); only capped games differ. */
 export function computeScoreTrajectoryPhases(games) {
   const buckets = { 0: [], 1: [], 2: [], 3: [] }
   for (const g of games) {
     const entries = g.log.filter((e) => e.preState)
-    const n = entries.length
-    if (!n) continue
-    entries.forEach((e, i) => {
-      const ph = Math.min(3, Math.floor((4 * i) / n))
+    if (!entries.length) continue
+    const minPly = g.log[0].ply
+    const maxPly = g.log[g.log.length - 1].ply
+    const span = Math.max(1, maxPly - minPly + 1)
+    for (const e of entries) {
+      const ph = Math.min(3, Math.floor((4 * (e.ply - minPly)) / span))
       const s = e.preState.score
       buckets[ph].push(s[0] - s[1])
-    })
+    }
   }
   return buckets
 }
