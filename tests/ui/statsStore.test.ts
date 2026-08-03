@@ -213,6 +213,89 @@ describe('statsStore', () => {
     })
   })
 
+  // BUG 2 (2026-08-03): ensureVGamesAccount awaits vgamesQuick; if a real
+  // login (restoreAccount) or an explicit clear lands WHILE that await is in
+  // flight, the LATE response used to overwrite the newer identity —
+  // reverting the account switch. authGeneration (captured before the await,
+  // bumped by restoreAccount/secureAccount/clearStats) fixes this.
+  describe('ensureVGamesAccount authGeneration (stale in-flight refresh vs a real identity switch)', () => {
+    it('a login that lands WHILE a refresh is in flight wins — the late refresh response is discarded, not adopted', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({
+        vgamesToken: 'old-tok', vgamesAccountId: 'old-acc',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) - 10, // already expired -> triggers a refresh
+      })
+
+      let resolveStaleRefresh!: (v: { token: string; accountId: string; status?: 'ghost' | 'claimed' }) => void
+      const staleRefresh = new Promise<{ token: string; accountId: string; status?: 'ghost' | 'claimed' }>((res) => { resolveStaleRefresh = res })
+      vi.mocked(vgamesQuick).mockImplementationOnce(() => staleRefresh)
+
+      // Kick off the refresh but don't await it — it's hanging on vgamesQuick.
+      const refreshPromise = useStatsStore.getState().ensureVGamesAccount()
+
+      // A real login lands while that refresh is still in flight.
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: 'login-tok', accountId: 'login-acc', mustChangePassword: false })
+      // restoreAccount's own fire-and-forget upgrade call also mints via
+      // vgamesQuick — give it a harmless resolution so it doesn't hang too.
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'login-tok', accountId: 'login-acc', status: 'claimed' })
+
+      const loginResult = await useStatsStore.getState().restoreAccount('vee', 'hunter2')
+      expect(loginResult.ok).toBe(true)
+      expect(useStatsStore.getState().vgamesAccountId).toBe('login-acc')
+
+      // NOW the stale refresh (started BEFORE the login) finally resolves —
+      // with a DIFFERENT identity than the one that just logged in.
+      resolveStaleRefresh({ token: 'stale-ghost-tok', accountId: 'stale-ghost-acc', status: 'ghost' })
+      const staleResult = await refreshPromise
+
+      // The stale response must never be adopted — the login identity wins.
+      expect(useStatsStore.getState().vgamesAccountId).toBe('login-acc')
+      expect(useStatsStore.getState().vgamesToken).toBe('login-tok')
+      expect(useStatsStore.getState().displayName).toBe('vee')
+      expect(useStatsStore.getState().claimed).toBe(true)
+      // And the stale call itself returns the CURRENT (login) identity
+      // rather than null or the stale one, since the store's current token
+      // is valid.
+      expect(staleResult).toEqual({ token: 'login-tok', accountId: 'login-acc' })
+    })
+
+    it('a stale refresh that fails (after being superseded by a login) does not flip sessionExpired for the new identity', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({
+        vgamesToken: 'old-tok', vgamesAccountId: 'old-acc',
+        vgamesTokenExp: Math.floor(Date.now() / 1000) - 10,
+      })
+
+      let rejectStaleRefresh!: (e: Error) => void
+      const staleRefresh = new Promise<{ token: string; accountId: string }>((_res, rej) => { rejectStaleRefresh = rej })
+      vi.mocked(vgamesQuick).mockImplementationOnce(() => staleRefresh)
+
+      const refreshPromise = useStatsStore.getState().ensureVGamesAccount()
+
+      vi.mocked(vgamesLogin).mockResolvedValueOnce({ ok: true, token: 'login-tok-2', accountId: 'login-acc-2', mustChangePassword: false })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'login-tok-2', accountId: 'login-acc-2', status: 'claimed' })
+      await useStatsStore.getState().restoreAccount('vee2', 'hunter2')
+
+      rejectStaleRefresh(new Error('network down'))
+      const staleResult = await refreshPromise
+
+      expect(staleResult).toEqual({ token: 'login-tok-2', accountId: 'login-acc-2' })
+      expect(useStatsStore.getState().sessionExpired).toBe(false)
+      expect(useStatsStore.getState().vgamesAccountId).toBe('login-acc-2')
+    })
+
+    it('a normal (non-racing) refresh is unaffected: adopts its own result as before', async () => {
+      useStatsStore.getState().ensureAccount()
+      useStatsStore.setState({ vgamesToken: 'old-tok', vgamesAccountId: 'old-acc', vgamesTokenExp: Math.floor(Date.now() / 1000) - 10 })
+      vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'fresh-tok', accountId: 'old-acc', status: 'ghost' })
+
+      const result = await useStatsStore.getState().ensureVGamesAccount()
+
+      expect(result).toEqual({ token: 'fresh-tok', accountId: 'old-acc' })
+      expect(useStatsStore.getState().vgamesToken).toBe('fresh-tok')
+    })
+  })
+
   describe('addMatch', () => {
     const matchData = {
       opponent_type: 'ai-easy',

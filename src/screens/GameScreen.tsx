@@ -177,7 +177,14 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
           .filter(idx => idx !== -1)
         setSelHandCardIds(sameTypeIndices.map(idx => myPlayer.hand[idx].id))
       } else {
-        // Exchange mode: just add this one
+        // Exchange mode: just add this one — but never past what the market
+        // selection needs. BUG 7 (2026-08-03): nothing clamped this, so
+        // over-clicking hand cards during an exchange made selHandCount
+        // exceed selMarketCount, and ActionBar's `need = selMarketCount -
+        // selHandCount` went negative ("Exchange (need -1 more)"). Ignore
+        // the click once we're already at parity; deselection (the branch
+        // above) is always still allowed.
+        if (selHand.length >= selMarket.length) return
         setSelHandCardIds([...selHandReal, i].map(idx => myPlayer.hand[idx].id))
       }
     }
@@ -185,7 +192,12 @@ export function GameScreen({ frozen = false }: GameScreenProps) {
 
   function handleUseHerdCamel() {
     if (frozen) return
-    setCamelsFromHerd(p => Math.min(p + 1, myPlayer.herd))
+    // BUG 7: clamp to whatever the market selection still needs, not just
+    // the herd's own size — otherwise offering herd camels past parity hits
+    // the same negative-"need" display as the hand-click over-selection
+    // above. Deselection (handleRemoveCamel) is never clamped.
+    const stillNeeded = Math.max(0, selMarket.length - selHandReal.length)
+    setCamelsFromHerd(p => Math.min(p + 1, myPlayer.herd, stillNeeded))
   }
 
   function handleRemoveCamel() {

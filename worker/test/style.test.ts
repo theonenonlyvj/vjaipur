@@ -202,6 +202,79 @@ describe('getMyStyle', () => {
     expect(result.availableTiers).toEqual([{ tier: 'easy', games: 1 }]) // still counted as "a log exists"
   })
 
+  // BUG 9 (2026-08-03): the cache write is now a CONDITIONAL UPDATE (WHERE
+  // last_log_id = the value this request read at the start) — a stale
+  // writer's own attempt affects 0 rows and must never regress a newer
+  // write, per do/style.ts#writeCache's docstring.
+  describe('conditional cache write under a concurrent stale writer (BUG 9)', () => {
+    it('a stale writer\'s conditional UPDATE bound to an old last_log_id is a no-op — never regresses a newer write', async () => {
+      const a = acct('style-stale-writer')
+      const t1 = Date.now()
+      await seedMatchLog(a, 'medium', t1, gameOneLog())
+      await seedMatch(a, 'medium', t1, true)
+
+      // Prime the cache normally.
+      await getMyStyle(DB(), a, 'medium')
+      const primed = await getCacheRow(a, 'medium')
+      const staleSinceLogId = primed!.last_log_id
+
+      // A "faster" concurrent writer already advanced the cache past what a
+      // slower request (still holding `staleSinceLogId` from its own
+      // earlier read) knows about.
+      const fasterWriterLogId = staleSinceLogId + 1000
+      await DB()
+        .prepare(`UPDATE style_cache SET last_log_id = ?, agg = ?, updated_at = ? WHERE account_id = ? AND tier = ?`)
+        .bind(fasterWriterLogId, primed!.agg, Date.now(), a, 'medium')
+        .run()
+
+      // The slower request's own conditional UPDATE — bound to the STALE
+      // sinceLogId it read before the faster writer landed — is exactly the
+      // SQL do/style.ts#writeCache now issues for an existing row.
+      const staleWrite = await DB()
+        .prepare(
+          `UPDATE style_cache SET last_log_id = ?, agg = ?, updated_at = ?
+           WHERE account_id = ? AND tier = ? AND last_log_id = ?`,
+        )
+        .bind(staleSinceLogId, '{"fake":"stale-agg"}', Date.now(), a, 'medium', staleSinceLogId)
+        .run()
+
+      expect(staleWrite.meta.changes).toBe(0) // the WHERE guard rejected the stale write
+
+      const finalCache = await getCacheRow(a, 'medium')
+      expect(finalCache!.last_log_id).toBe(fasterWriterLogId) // untouched by the stale writer
+      expect(finalCache!.agg).not.toContain('stale-agg') // never clobbered
+    })
+
+    it('two concurrent first-ever writers for the same (account,tier) never both insert — the loser skips cleanly and the read still succeeds', async () => {
+      const a = acct('style-race-insert')
+      const t1 = Date.now()
+      const t2 = t1 + 1000
+      await seedMatchLog(a, 'ismcts', t1, gameOneLog())
+      await seedMatch(a, 'ismcts', t1, true)
+      await seedMatchLog(a, 'ismcts', t2, gameTwoLog())
+      await seedMatch(a, 'ismcts', t2, false)
+
+      // Fire two concurrent FIRST-ever getMyStyle calls — both may read
+      // cacheRow=null before either writes.
+      const [resultA, resultB] = await Promise.all([
+        getMyStyle(DB(), a, 'ismcts'),
+        getMyStyle(DB(), a, 'ismcts'),
+      ])
+
+      // Both requests still serve the correct, fully-folded result — a
+      // losing writer never blocks (or corrupts) its own read.
+      expect(resultA.games).toBe(2)
+      expect(resultB.games).toBe(2)
+      expect(resultA.style).toEqual(resultB.style)
+
+      // Exactly one cache row exists (no crash/duplicate-key error from the
+      // race), reflecting a fully-folded state.
+      const cache = await getCacheRow(a, 'ismcts')
+      expect(cache).toBeTruthy()
+      expect(JSON.parse(cache!.agg).games).toBe(2)
+    })
+  })
+
   it('tier isolation: two tiers for the same account never mix, and availableTiers reports both with correct counts', async () => {
     const a = acct('style-tier-isolation')
     const t1 = Date.now()

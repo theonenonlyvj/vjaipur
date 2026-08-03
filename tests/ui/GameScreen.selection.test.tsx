@@ -225,6 +225,66 @@ describe('GameScreen selection — Group B: same-turn ambiguity (local, activePl
     expect(exchangeBtn).toBeInTheDocument()
     expect(exchangeBtn.closest('button')).toBeEnabled()
   })
+
+  // BUG 7 (2026-08-03): nothing clamped selHandCount to selMarketCount, so
+  // over-clicking during a multi-good Exchange made ActionBar's
+  // `need = selMarketCount - selHandCount` go negative ("need -1 more").
+  it('B3: over-clicking hand cards during a 2-good exchange is clamped — a 3rd click is ignored, never producing a negative need', () => {
+    const market: Card[] = [
+      { id: 1, type: 'gold' },
+      { id: 2, type: 'silver' },
+      { id: 3, type: 'leather' },
+      { id: 4, type: 'camel' },
+      { id: 5, type: 'diamond' },
+    ]
+    const hand: Card[] = [
+      { id: 10, type: 'cloth' },
+      { id: 11, type: 'spice' },
+      { id: 12, type: 'spice' },
+    ]
+    setState(makeState(market, hand, { activePlayer: 0 }))
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+
+    fireEvent.click(screen.getAllByText('GOLD')[0])
+    fireEvent.click(screen.getAllByText('SILVER')[0])
+    fireEvent.click(screen.getAllByText('CLOTH')[0])
+    fireEvent.click(screen.getAllByText('SPICE')[0])
+
+    expect(screen.getByText('Exchange 2↔2')).toBeInTheDocument()
+
+    // A 3rd hand click (the second spice card) must be IGNORED — still
+    // 2<->2, never 2<->3, and no negative-need label ever appears.
+    fireEvent.click(screen.getAllByText('SPICE')[1])
+
+    expect(screen.getByText('Exchange 2↔2')).toBeInTheDocument()
+    expect(screen.queryByText(/need -/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/remove/i)).not.toBeInTheDocument()
+  })
+
+  it('B4: offering herd camels during an exchange is clamped to what the market selection still needs, even with a bigger herd available', () => {
+    const market: Card[] = [
+      { id: 1, type: 'gold' },
+      { id: 2, type: 'silver' },
+      { id: 3, type: 'leather' },
+      { id: 4, type: 'camel' },
+      { id: 5, type: 'diamond' },
+    ]
+    const hand: Card[] = [{ id: 10, type: 'cloth' }]
+    const base = makeState(market, hand, { activePlayer: 0 })
+    setState({ ...base, players: [{ ...base.players[0], herd: 3 }, base.players[1]] })
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+
+    fireEvent.click(screen.getAllByText('GOLD')[0])
+    fireEvent.click(screen.getAllByText('SILVER')[0])
+
+    // Exchange needs 2; offer herd camels only (no hand cards selected).
+    fireEvent.click(screen.getByTestId('camel-stack')) // 1 camel offered
+    fireEvent.click(screen.getByTestId('camel-stack')) // 2 camels offered -> parity
+    fireEvent.click(screen.getByTestId('camel-stack')) // 3rd click ignored: herd has 3, but market only needs 2
+
+    expect(screen.getByText('Exchange 2↔2')).toBeInTheDocument()
+    expect(screen.queryByText(/need -/)).not.toBeInTheDocument()
+  })
 })
 
 describe('GameScreen selection — Group C: herd-camel -1 sentinel integrity (local, activePlayer 0)', () => {

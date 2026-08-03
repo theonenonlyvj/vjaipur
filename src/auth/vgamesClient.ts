@@ -2,6 +2,7 @@
 // vgames-platform/docs/superpowers/plans/2026-07-09-vgames-p1.md, Phase A) for
 // device-bound ghost accounts + username/password auth. Replaces vjaipur's old
 // plaintext-secret Socket.IO SECURE_ACCOUNT/RESTORE_ACCOUNT flow (see Task C4).
+import { createProxyFallbackFetcher } from '../net/proxyFallback'
 
 // Account claim state as reported by the VGames worker's auth responses.
 // 'ghost' = device-bound, never claimed; 'claimed' = has a username+password.
@@ -36,10 +37,34 @@ export function vgamesBaseUrl(): string {
   return (import.meta.env.VITE_VGAMES_URL as string | undefined) ?? DEFAULT_VGAMES_URL
 }
 
+// Same-origin proxy fallback (BUG 1, 2026-08-03): identity calls run FIRST on
+// every cold boot (nothing online can happen without a token), so before this
+// they were the one call site that COULDN'T benefit from src/net/http.ts's
+// blocked-device resilience (see src/net/proxyFallback.ts for the shared
+// mechanics). render.yaml's matching `/id-api/*` rewrite is inactive until
+// the Render Blueprint is synced — harmless (a non-JSON proxy response just
+// rethrows the original network error, same as http.ts). An explicit
+// VITE_VGAMES_URL (staging override) disables the fallback entirely, same
+// rule as http.ts's VITE_VJAIPUR_WORKER_URL.
+const ID_PROXY_BASE = '/id-api'
+
+const proxyFallback = createProxyFallbackFetcher({
+  directBase: vgamesBaseUrl,
+  proxyBase: () => {
+    if (!import.meta.env.PROD) return null
+    if (import.meta.env.VITE_VGAMES_URL) return null
+    if (typeof window === 'undefined') return null
+    return ID_PROXY_BASE
+  },
+})
+
+/** Tests only — force/disable the proxy base and reset stickiness. */
+export const __setIdProxyBaseForTests = proxyFallback.setProxyBaseForTests
+
 async function postJson(path: string, body: unknown, token?: string): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (token) headers.authorization = `Bearer ${token}`
-  return fetch(`${vgamesBaseUrl()}${path}`, {
+  return proxyFallback.fetchWithFallback(path, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

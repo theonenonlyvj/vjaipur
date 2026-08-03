@@ -4,6 +4,7 @@ const move = vi.fn()
 vi.mock('../../src/net/online', () => ({ move: (...args: unknown[]) => move(...args) }))
 
 import * as outbox from '../../src/net/outbox'
+import { WorkerError } from '../../src/net/http'
 
 const ACTION = { type: 'TAKE_CAMELS' as const }
 
@@ -69,6 +70,50 @@ describe('net/outbox', () => {
   it('drain(gameId) leaves the entry queued when the repost itself fails (still offline)', async () => {
     outbox.save({ gameId: 'ABC', seatIndex: 0, action: ACTION, clientMoveId: 'uuid-1' })
     move.mockRejectedValueOnce(new TypeError('network down'))
+
+    const result = await outbox.drain('ABC')
+
+    expect(result).toBeNull()
+    expect(outbox.load()).not.toBeNull()
+  })
+
+  // BUG 8+10 (2026-08-03): a 4xx means the worker definitively rejected the
+  // move — it's moot, not transient, so drain must clear it (same rule
+  // dispatchOnline already applies to a fresh 4xx) rather than retrying it
+  // forever on every future nudge/sync.
+  it('drain(gameId) CLEARS the entry on a 409 (definitively rejected — never retried)', async () => {
+    outbox.save({ gameId: 'ABC', seatIndex: 0, action: ACTION, clientMoveId: 'uuid-1' })
+    move.mockRejectedValueOnce(new WorkerError(409, 'not_your_turn', {}))
+
+    const result = await outbox.drain('ABC')
+
+    expect(result).toBeNull()
+    expect(outbox.load()).toBeNull()
+  })
+
+  it('drain(gameId) CLEARS the entry on a 404 (definitively rejected — never retried)', async () => {
+    outbox.save({ gameId: 'ABC', seatIndex: 0, action: ACTION, clientMoveId: 'uuid-1' })
+    move.mockRejectedValueOnce(new WorkerError(404, 'game_not_found', {}))
+
+    const result = await outbox.drain('ABC')
+
+    expect(result).toBeNull()
+    expect(outbox.load()).toBeNull()
+  })
+
+  it('drain(gameId) RETAINS the entry on a 5xx WorkerError (genuinely unknown outcome — kept for retry)', async () => {
+    outbox.save({ gameId: 'ABC', seatIndex: 0, action: ACTION, clientMoveId: 'uuid-1' })
+    move.mockRejectedValueOnce(new WorkerError(500, 'http_500', {}))
+
+    const result = await outbox.drain('ABC')
+
+    expect(result).toBeNull()
+    expect(outbox.load()).not.toBeNull()
+  })
+
+  it('drain(gameId) RETAINS the entry on a plain network error (not a WorkerError at all)', async () => {
+    outbox.save({ gameId: 'ABC', seatIndex: 0, action: ACTION, clientMoveId: 'uuid-1' })
+    move.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const result = await outbox.drain('ABC')
 
