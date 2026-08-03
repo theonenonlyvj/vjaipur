@@ -26,6 +26,16 @@ more specific guidance for this app.
 - If a screenshot or log reveals a service-role key, assume it is compromised
   and document that it must be rotated.
 
+> ⚠️ **STALE — HISTORICAL ONLY (pre-2026-07-18).** The priority ordering below
+> describes an old stabilization phase. Since then: online play was REBUILT
+> server-authoritative on vjaipur's own Cloudflare Worker + Durable Object +
+> D1 (no more Socket.IO relay); accounts moved to VGames Identity; Hard
+> II/III and an ISMCTS eval pass have shipped. The living chronicle is
+> [`docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md`](docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md)
+> — read that (and its 07-18 sibling) for what's actually current; treat this
+> section as historical only, same as the "Historical Docs" note below
+> already asks for `docs/superpowers/`. *(Banner added 2026-08-03.)*
+
 ## Current Work Priority
 
 Before Hard II polish, prioritize stabilization:

@@ -9,8 +9,12 @@ dist/
 .env
 .env.*
 !.env.example
+.env.development
 
 reference/*.zip
+
+# Wrangler's local dev state (D1/DO sqlite, cache) — machine-local, never shared.
+worker/.wrangler/
 
 # generated stats-migration artifacts (contain account ids)
 worker/scripts/out/
