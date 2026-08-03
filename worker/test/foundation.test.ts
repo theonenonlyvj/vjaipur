@@ -3,7 +3,8 @@ import { it, expect } from 'vitest'
 import { setupRound, type GameState } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
 import { encodeState, decodeState } from '../src/do/state-codec'
-import { runMigrations, MIGRATIONS, GameRepository, type SqlLike, type MetaRow, type SeatRow } from '../src/do/storage'
+import { runMigrations, MIGRATIONS, GameRepository, type SqlLike } from '../src/do/storage'
+import { baseMeta, baseSeat } from './helpers'
 
 function stubFor(name: string) {
   return env.GAME_DO.get(env.GAME_DO.idFromName(name))
@@ -79,40 +80,6 @@ it('creates every Wave-1 table and stamps schema_version', async () => {
 
 // ---- (3) GameRepository CRUD --------------------------------------------
 
-function baseMeta(overrides: Partial<MetaRow> = {}): MetaRow {
-  return {
-    game_uuid: 'uuid-xyz',
-    code: null,
-    status: 'active',
-    player_count: 2,
-    match_length: 3,
-    seals0: 0,
-    seals1: 0,
-    round: 1,
-    phase: 'playing',
-    current_seat: 0,
-    move_index: 0,
-    winner_seat: null,
-    engine_version: 'engine-test',
-    last_processed_at: null,
-    ...overrides,
-  }
-}
-
-function baseSeat(overrides: Partial<SeatRow> = {}): SeatRow {
-  return {
-    seat_index: 0,
-    owner_type: 'human',
-    owner_account_id: 'acct-0',
-    display_name: 'P0',
-    controlled_by_ai: false,
-    ai_difficulty: null,
-    last_seen_at: null,
-    disconnected_at: null,
-    ...overrides,
-  }
-}
-
 it('GameRepository round-trips meta, snapshot, rounds, seats, moves', async () => {
   await runInDurableObject(stubFor('repo-crud'), (_instance, state) => {
     const sql = state.storage.sql as unknown as SqlLike
@@ -120,7 +87,7 @@ it('GameRepository round-trips meta, snapshot, rounds, seats, moves', async () =
     const repo = new GameRepository(sql)
 
     // meta
-    repo.putMeta(baseMeta())
+    repo.putMeta(baseMeta({ game_uuid: 'uuid-xyz' }))
     expect(repo.getMeta()).toMatchObject({
       game_uuid: 'uuid-xyz',
       player_count: 2,

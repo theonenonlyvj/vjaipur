@@ -21,6 +21,8 @@
  * so every multi-line `CREATE` below is collapsed to one line before exec.
  */
 
+import type { MetaRow, SeatRow } from '../src/do/storage'
+
 const SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS games (
      game_uuid        TEXT PRIMARY KEY,
@@ -132,4 +134,174 @@ export async function applyD1Schema(db: D1Database): Promise<void> {
   // Migration 0004 — per-match GAME split (worker/migrations/0004_match_game_split.sql).
   await addColumnIfMissing(db, 'matches', 'games_won', 'ALTER TABLE matches ADD COLUMN games_won INTEGER')
   await addColumnIfMissing(db, 'matches', 'games_lost', 'ALTER TABLE matches ADD COLUMN games_lost INTEGER')
+}
+
+// =============================================================================
+// Shared D1 fixture helpers — consolidated from near-identical copies that
+// used to live in stats.test.ts, rivalry.test.ts (as `seedMatchRow`), and
+// style.test.ts. D1 storage (and, separately, each `it()`'s DO-local SQLite)
+// is shared across test FILES in this run (vitest.config.ts's
+// `fileParallelism:false`/`isolate:false`), so every seeded row needs an
+// identifier that can't collide with another file's fixtures.
+// =============================================================================
+
+let acctCtr = 0
+
+/** A globally-unique account id per call, so assertions never collide with
+ *  rows other test files (or other `it`s in this shared-D1 run) may have
+ *  written. */
+export function acct(prefix: string): string {
+  return `${prefix}-${Date.now()}-${acctCtr++}`
+}
+
+export interface SeedMatch {
+  accountId: string
+  opponentType?: string
+  opponentAccountId?: string | null
+  /** Defaults to 10 (style.test.ts's original convenience default) — every
+   *  other call site (stats.test.ts's) always passes both scores explicitly. */
+  playerScore?: number
+  /** Defaults to 5 — see `playerScore`. */
+  opponentScore?: number
+  won: boolean
+  source?: string
+  aiCovered?: boolean
+  gameUuid?: string | null
+  timestamp: number
+  /** Migration 0004's per-match GAME split — omitted (both stay NULL) mirrors
+   *  every legacy row that predates the migration; a test seeding a fresh
+   *  vs-AI report with an explicit split passes both. */
+  gamesWon?: number | null
+  gamesLost?: number | null
+}
+
+/** Seeds a `matches` row. */
+export async function seedMatch(db: D1Database, m: SeedMatch): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO matches
+         (account_id, opponent_type, opponent_account_id, player_score, opponent_score,
+          won, source, ai_covered, game_uuid, timestamp, created_at, games_won, games_lost)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      m.accountId,
+      m.opponentType ?? 'online',
+      m.opponentAccountId ?? null,
+      m.playerScore ?? 10,
+      m.opponentScore ?? 5,
+      m.won ? 1 : 0,
+      m.source ?? 'online_authoritative',
+      m.aiCovered ? 1 : 0,
+      m.gameUuid ?? null,
+      m.timestamp,
+      m.timestamp,
+      m.gamesWon ?? null,
+      m.gamesLost ?? null,
+    )
+    .run()
+}
+
+export interface SeedGame {
+  gameUuid: string
+  code?: string | null
+  status?: string
+  /** Required — `null` (an unresolved/abandoned game) is a meaningfully
+   *  different value from "omitted", so this can't default via `??`. */
+  winnerSeat: number | null
+  seals0?: number
+  seals1?: number
+  createdAt?: number
+  endedAt?: number
+}
+
+/** Seeds a `games` row (the online-match archive, keyed by `game_uuid`). */
+export async function seedGame(db: D1Database, opts: SeedGame): Promise<void> {
+  const now = Date.now()
+  const createdAt = opts.createdAt ?? now
+  await db
+    .prepare(
+      `INSERT INTO games (game_uuid, code, status, match_length, seals0, seals1, winner_seat, source, engine_version, created_at, last_activity_at, ended_at)
+       VALUES (?, ?, ?, 3, ?, ?, ?, 'online_authoritative', 'v1', ?, ?, ?)`,
+    )
+    .bind(
+      opts.gameUuid,
+      opts.code ?? null,
+      opts.status ?? 'completed',
+      opts.seals0 ?? 0,
+      opts.seals1 ?? 0,
+      opts.winnerSeat,
+      createdAt,
+      createdAt, // last_activity_at mirrors created_at — no fixture here ever needs them to differ.
+      opts.endedAt ?? now,
+    )
+    .run()
+}
+
+/** Seeds a `game_players` seat row for `seedGame`'s `games` row. */
+export async function seedSeat(
+  db: D1Database,
+  gameUuid: string,
+  seatIndex: number,
+  accountId: string,
+  displayName = 'Seated Player',
+): Promise<void> {
+  await db
+    .prepare(`INSERT INTO game_players (game_uuid, seat_index, account_id, display_name) VALUES (?, ?, ?, ?)`)
+    .bind(gameUuid, seatIndex, accountId, displayName)
+    .run()
+}
+
+/** Seeds/updates a `players` row (upserts `display_name` on conflict). */
+export async function seedPlayer(db: D1Database, accountId: string, displayName: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO players (account_id, display_name, last_seen_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET display_name = excluded.display_name`,
+    )
+    .bind(accountId, displayName, Date.now())
+    .run()
+}
+
+// =============================================================================
+// GameRepository fixture defaults — consolidated from near-identical copies
+// in foundation.test.ts and archive.test.ts (its `game_uuid` used
+// `crypto.randomUUID()` rather than a fixed literal, since archive.test.ts's
+// rows also land in shared D1 tables; foundation.test.ts's one call site that
+// relied on a fixed default now passes `{ game_uuid: 'uuid-xyz' }` explicitly).
+// =============================================================================
+
+export function baseMeta(overrides: Partial<MetaRow> = {}): MetaRow {
+  return {
+    game_uuid: crypto.randomUUID(),
+    code: null,
+    status: 'active',
+    player_count: 2,
+    match_length: 3,
+    seals0: 0,
+    seals1: 0,
+    round: 1,
+    phase: 'playing',
+    current_seat: 0,
+    move_index: 0,
+    winner_seat: null,
+    engine_version: 'engine-test',
+    last_processed_at: null,
+    ...overrides,
+  }
+}
+
+export function baseSeat(overrides: Partial<SeatRow> = {}): SeatRow {
+  return {
+    seat_index: 0,
+    owner_type: 'human',
+    owner_account_id: 'acct-0',
+    display_name: 'P0',
+    controlled_by_ai: false,
+    ai_difficulty: null,
+    last_seen_at: null,
+    disconnected_at: null,
+    ...overrides,
+  }
 }

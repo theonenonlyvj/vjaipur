@@ -7,7 +7,6 @@ function topValue(state: GameState, good: Good): number {
   return state.tokens[good]?.[0] ?? 0
 }
 
-const PRECIOUS_GOODS: ReadonlySet<Good> = new Set(['diamond', 'gold', 'silver'])
 const MIN_SELL: Record<Good, number> = {
   diamond: 2, gold: 2, silver: 2, cloth: 1, spice: 1, leather: 1,
 }

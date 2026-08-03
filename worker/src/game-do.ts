@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { json, generateCode } from './shared'
 import { scoreRound, setupRound } from '../../src/engine'
 import { mulberry32 } from '../../src/shared/rng'
 import { archiveGameCreate, archiveSeats, archiveTick } from './do/archive'
@@ -10,11 +11,9 @@ import { runMigrations, GameRepository, type MatchLength, type SqlLike } from '.
 import { buildClientView, buildWaitingRoomView, toClientMove } from './do/view'
 import { driveIfAI, type DriveDeps } from './do/drive'
 import {
-  autoCover,
   isAnyHumanPresent,
   seatIndexPresent,
   maxLastSeen,
-  type CoverDeps,
 } from './do/presence'
 import { setTimer, clearTimer, hasTimer, dueTimers, minFireAt, rearmAlarm, creditEvictionGap } from './do/timers'
 import { floorMove } from './do/floor'
@@ -43,20 +42,6 @@ export interface Env {
   /** The exact browser origin allowed by CORS (the Render static-site URL).
    *  Unset only in local dev, where CORS falls back to a permissive `*`. */
   CLIENT_ORIGIN?: string
-}
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
-/** Room-code alphabet (viota's — excludes visually-ambiguous chars: no I/O/0/1). */
-const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-function generateCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(6))
-  return [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('')
 }
 
 /** Map an applyAndPersist error string to a 4xx status (never a 500) — port
@@ -199,11 +184,6 @@ export class GameDO extends DurableObject<Env> {
   /** Deps for the drive loop (the ONLY code path that produces AI moves). */
   private driveDeps(): DriveDeps {
     return { ctx: this.ctx, nudge: (i: number) => this.nudge(i) }
-  }
-
-  /** Deps for auto-cover (broadcast the dismissible ai_cover toast). */
-  private coverDeps(): CoverDeps {
-    return { broadcast: (p: unknown) => this.broadcast(p) }
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {

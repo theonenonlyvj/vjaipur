@@ -1,4 +1,5 @@
 import { GameDO, type Env } from './game-do'
+import { json, generateCode } from './shared'
 import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
@@ -9,13 +10,6 @@ import { getRivalry } from './do/rivalry'
 // Cloudflare resolves the Durable Object class from the entry module's exports.
 export { GameDO }
 export type { Env }
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-}
 
 /**
  * Resolve the DO stub for a game. THE ROUTING KEY IS THE ROOM CODE, not a
@@ -41,16 +35,6 @@ function authHeadersFrom(request: Request): Record<string, string> {
   const auth = request.headers.get('Authorization')
   if (auth) h.Authorization = auth
   return h
-}
-
-/** A short, human room code (lobby registry key) — viota's alphabet, excludes
- *  visually-ambiguous glyphs (no I/O/0/1). Doubles as the `gameId` (see
- *  `stubFor`'s docstring) — always uppercase, so `normalizeGameId` below
- *  keeps every `:id` lookup case-insensitive at the door. */
-function generateCode(): string {
-  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-  const bytes = crypto.getRandomValues(new Uint8Array(6))
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
 }
 
 function normalizeGameId(raw: string): string {

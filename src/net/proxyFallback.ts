@@ -26,6 +26,18 @@ export function isJsonResponse(res: Response): boolean {
   return (res.headers.get('content-type') ?? '').includes('json')
 }
 
+/** Parse a response body as JSON, swallowing failure (e.g. an empty body or
+ *  non-JSON error page) — callers get `{}` instead of a thrown SyntaxError.
+ *  Shared by src/net/http.ts and src/auth/vgamesClient.ts (previously two
+ *  byte-identical copies). */
+export async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+
 export interface ProxyFallbackConfig {
   /** Resolves the direct backend base URL for this call (http.ts's
    *  workerBaseUrl / vgamesClient's vgamesBaseUrl — read fresh per call,

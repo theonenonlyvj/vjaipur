@@ -4,7 +4,7 @@
 // <vgamesToken>`; the worker introspects it (worker/src/do/authctx.ts) — this
 // client never verifies anything locally, it just carries the token.
 import { useStatsStore } from '../store/statsStore'
-import { createProxyFallbackFetcher } from './proxyFallback'
+import { createProxyFallbackFetcher, safeJson } from './proxyFallback'
 
 // The live worker (deployed 2026-07-18). An explicit VITE_VJAIPUR_WORKER_URL
 // always wins; otherwise production builds bake the prod worker and local dev
@@ -52,14 +52,6 @@ const RETRY_BASE_DELAY_MS = 300
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function safeJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  } catch {
-    return {}
-  }
 }
 
 // Same-origin proxy fallback (2026-07-27, "Sureka's phone" failure class) —

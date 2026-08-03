@@ -24,11 +24,6 @@ const ICON_URLS: Record<CardType, string> = {
   camel:   '/assets/cards/1F42A.svg',
 }
 
-const ACCENT: Record<CardType, string> = {
-  diamond: '#ff4060', gold: '#f0c030', silver: '#c0d0e0',
-  cloth: '#c060e0', spice: '#60c040', leather: '#c08040', camel: '#d0a860',
-}
-
 interface Props {
   card: Card
   selected?: boolean

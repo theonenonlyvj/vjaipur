@@ -1,8 +1,8 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { archiveGameCreate, archiveMatchEnd, archiveSeats, archiveTick } from '../src/do/archive'
-import { GameRepository, type MetaRow, type MoveRow, type SeatRow, type SqlLike } from '../src/do/storage'
-import { applyD1Schema } from './helpers'
+import { GameRepository, type MoveRow, type SqlLike } from '../src/do/storage'
+import { applyD1Schema, baseMeta, baseSeat } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
 
@@ -15,40 +15,6 @@ function stubFor(name: string) {
   // A fresh DO id per call keeps every `it()` isolated (foundation.test.ts's
   // pattern), even across tests reusing the same literal name prefix.
   return env.GAME_DO.get(env.GAME_DO.idFromName(`${name}-${counter++}`))
-}
-
-function baseMeta(overrides: Partial<MetaRow> = {}): MetaRow {
-  return {
-    game_uuid: crypto.randomUUID(),
-    code: null,
-    status: 'active',
-    player_count: 2,
-    match_length: 3,
-    seals0: 0,
-    seals1: 0,
-    round: 1,
-    phase: 'playing',
-    current_seat: 0,
-    move_index: 0,
-    winner_seat: null,
-    engine_version: 'archive-test-engine',
-    last_processed_at: null,
-    ...overrides,
-  }
-}
-
-function baseSeat(overrides: Partial<SeatRow> = {}): SeatRow {
-  return {
-    seat_index: 0,
-    owner_type: 'human',
-    owner_account_id: 'acct-0',
-    display_name: 'P0',
-    controlled_by_ai: false,
-    ai_difficulty: null,
-    last_seen_at: null,
-    disconnected_at: null,
-    ...overrides,
-  }
 }
 
 /** A server-minted `round_end` move row (do/apply.ts's shape) carrying a
@@ -566,14 +532,12 @@ describe('archiveMatchEnd', () => {
     const stub = stubFor('archive-match-end-last-seen')
     const code = `LS${crypto.randomUUID().slice(0, 4)}`
     const t0 = Date.now()
-    let gameUuid = ''
 
     await runInDurableObject(stub, async (_instance, state) => {
       const repo = new GameRepository(state.storage.sql as unknown as SqlLike)
       repo.putMeta(baseMeta({ code, status: 'active' }))
       repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: 'acct-ls-alice', display_name: 'Alice' }))
       repo.putSeat(baseSeat({ seat_index: 1, owner_account_id: 'acct-ls-bob', display_name: 'Bob' }))
-      gameUuid = repo.getMeta()!.game_uuid
       await archiveGameCreate(DB(), repo, t0, code) // already stamps last_seen_at = t0 at CREATE time
 
       repo.putMeta({ ...repo.getMeta()!, status: 'completed', phase: 'match_over', winner_seat: 0 })

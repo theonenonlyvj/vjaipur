@@ -11,7 +11,11 @@ dist/
 !.env.example
 .env.development
 
-reference/*.zip
+# local-only third-party rulebook/art reference — never ship or track
+reference/
+
+# owner's untracked screenshot stash — same class as reference/, local-only
+ref/
 
 # Wrangler's local dev state (D1/DO sqlite, cache) — machine-local, never shared.
 worker/.wrangler/

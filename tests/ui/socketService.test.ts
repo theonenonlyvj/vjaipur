@@ -76,7 +76,7 @@ describe('SocketService', () => {
 
   it('createRoom emits CREATE_ROOM event', async () => {
     svc.connect('http://localhost:3001')
-    mockEmit.mockImplementation((event, ml, cb) => {
+    mockEmit.mockImplementation((event, _ml, cb) => {
       if (event === EVENTS.CREATE_ROOM) cb('ROOM123')
     })
     const code = await svc.createRoom(3)

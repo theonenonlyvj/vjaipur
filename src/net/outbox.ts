@@ -6,6 +6,7 @@ import type { Action } from '../engine'
 import * as onlineApi from './online'
 import { WorkerError } from './http'
 import type { ClientView } from './types'
+import { safeGetJson, safeSetJson, safeRemove } from './safeStorage'
 
 const KEY = 'vjaipur-outbox'
 
@@ -17,31 +18,18 @@ export interface OutboxMove {
 }
 
 export function save(entry: OutboxMove): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(entry))
-  } catch {
-    // localStorage unavailable (private mode / quota) — the move still went
-    // out over the wire; losing the retry-on-reload safety net is the worst
-    // case, not a hard failure.
-  }
+  // localStorage unavailable (private mode / quota) — the move still went
+  // out over the wire; losing the retry-on-reload safety net is the worst
+  // case, not a hard failure.
+  safeSetJson(KEY, entry)
 }
 
 export function load(): OutboxMove | null {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as OutboxMove
-  } catch {
-    return null
-  }
+  return safeGetJson<OutboxMove>(KEY)
 }
 
 export function clear(): void {
-  try {
-    localStorage.removeItem(KEY)
-  } catch {
-    // no-op
-  }
+  safeRemove(KEY)
 }
 
 /**
