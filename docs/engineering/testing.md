@@ -28,31 +28,14 @@ code.
 
 ## Known Failing Areas
 
-### Disconnect Timeout
-
-The UI component, UI test, server timeout, and server test disagree about the
-forfeit grace period.
-
-Current observed values:
-
-- UI component starts at 60 seconds.
-- UI test expects 180 seconds.
-- Server uses 180 seconds.
-- Server test advances 60 seconds.
-
-Resolution: define one reconnect grace constant and use it consistently.
-
-### Server DB Tests
-
-`tests/server/db.test.ts` mocks an older Supabase chain:
-
-- Current code calls `.limit(1)`.
-- Tests still seed `.single()` results.
-- `getPlayerMatches` orders by `timestamp`, while the test expects
-  `created_at`.
-
-Resolution: update the fake Supabase query builder and expectations to match
-current code.
+*(2026-08-03: this section previously described a Disconnect Timeout
+mismatch and Server DB mock drift from the 2026-07-09 audit. Neither
+reproduces today — all suites, including the legacy server's 48 tests, pass
+green — and the disconnect model itself was replaced by the 2026-07-18
+server-authoritative rebuild (no auto-forfeit; pause/claim-win instead). No
+known failing areas at present; the one recurring non-failure is the heavy
+AI wall-clock tests flaking under full-suite CPU contention — always green
+in isolation, documented in docs/STATE.md.)*
 
 ## Warning Noise
 

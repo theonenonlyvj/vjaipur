@@ -8,10 +8,12 @@ account/history/leaderboard features.
 > pre-2026-07-18 and misdescribe today.** Online play was REBUILT
 > server-authoritative on vjaipur's own Cloudflare Worker + Durable Object +
 > D1 (no more Socket.IO relay, no more forfeit-on-disconnect), and accounts
-> moved from Supabase to VGames Identity. The living chronicle is
+> moved from Supabase to VGames Identity. **Start at
+> [`docs/STATE.md`](docs/STATE.md)** for current architecture/state; the
+> full history is the living chronicle,
 > [`docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md`](docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md)
-> (and its 07-18 sibling for the rebuild itself) — read those first; treat
-> this section as historical only. *(Banner added 2026-08-03.)*
+> (and its 07-18 sibling for the rebuild itself). Treat this section as
+> historical only. *(Banner added 2026-08-03, updated for docs/STATE.md.)*
 
 ## Current Status
 
@@ -78,8 +80,9 @@ npm run test:all     # client plus server test suites
 > Future Work" below are also pre-2026-07-18.** `.env.example` at the repo
 > root is the current source of truth for env vars (client AND server —
 > including the VGames Identity/worker URLs this section omits entirely);
-> Hard II/III and an ISMCTS eval pass have long since shipped. See the same
-> living chronicle linked above. *(Banner added 2026-08-03.)*
+> Hard II/III and an ISMCTS eval pass have long since shipped. See
+> [`docs/STATE.md`](docs/STATE.md) first, then the same living chronicle
+> linked above. *(Banner added 2026-08-03, updated for docs/STATE.md.)*
 
 ## Environment Variables
 

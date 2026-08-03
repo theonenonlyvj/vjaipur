@@ -1,5 +1,14 @@
 # vjaipur — post-launch fixes + backlog (2026-07-20 → 07-21)
 
+> **This is the append-only HISTORY log** — every fix, investigation, and
+> decision since the 2026-07-18 rebuild, in the order it happened. It is
+> kept at this path and never rewritten/compressed because external docs
+> (this project's own memory file, the `vgames-platform` estate docs) point
+> at it directly.
+>
+> - **Current state** → [`../../STATE.md`](../../STATE.md)
+> - **Live backlog** → [`../../BACKLOG.md`](../../BACKLOG.md)
+
 Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
 (Chandy, Sureka/reks) playing; fixes driven by their reports.
 
