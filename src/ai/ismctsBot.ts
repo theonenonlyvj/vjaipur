@@ -461,6 +461,18 @@ export interface IsmctsOptions {
    */
   maxIterations?: number
   /**
+   * MINIMUM iterations regardless of wall-clock (default 25,000; wall-clock
+   * mode only — pinned maxIterations ignores it). 2026-08-02 finding: the
+   * bot's strength is iterations-completed, and Vijay's phone under Low
+   * Power Mode ran moves at 6-12k iterations vs 35-48k at full power — he
+   * went 8-1 vs the throttled bot vs 55% vs the real one. "Hard" should be
+   * the same opponent on a dying phone as on a desktop, so the search now
+   * runs until BOTH the time budget is spent AND this floor is reached,
+   * bounded by HARD_CAP_MS (Vijay: "i'm open to slightly slower on shitty
+   * device"). Benchmarks/tests pass 0 to keep pure-time semantics.
+   */
+  minIterations?: number
+  /**
    * Unconditional-winner early stop (default true; wall-clock mode only —
    * ignored whenever maxIterations pins the count). Stops the search once the
    * top child's visit lead is bigger than every iteration the remaining
@@ -482,6 +494,10 @@ const DEFAULT_USE_ROLLOUT = false // see PROFILING NOTES in the module doc comme
 const EARLY_STOP_CHECK_EVERY = 512
 const EARLY_STOP_MIN_MS = 600
 const EARLY_STOP_SAFETY = 1.25
+// Iteration floor (see IsmctsOptions.minIterations) + the absolute wall-clock
+// ceiling a throttled device is allowed to spend reaching it.
+const DEFAULT_MIN_ITERATIONS = 25_000
+const HARD_CAP_MS = 8000
 
 /**
  * One selection+expansion+simulation+backprop pass through a freshly sampled
@@ -628,16 +644,23 @@ export function pickIsmctsAction(state: GameState, options: IsmctsOptions = {}):
   // Pinned-iteration mode (fairness proofs, benchmarks) never early-stops:
   // iteration count IS the contract there.
   const earlyStopEnabled = options.earlyStop ?? true
+  const minIters = options.minIterations ?? DEFAULT_MIN_ITERATIONS
   let earlyStopped = false
   let iterations = 0
   const start = Date.now()
-  while (fixedIterations !== undefined ? iterations < fixedIterations : Date.now() < deadline) {
+  const hardCap = start + HARD_CAP_MS
+  while (
+    fixedIterations !== undefined
+      ? iterations < fixedIterations
+      : (Date.now() < deadline || iterations < minIters) && Date.now() < hardCap
+  ) {
     const world = fairifyState(state, observerIndex)
     runIteration(root, world, observerIndex, c, useRollout)
     iterations++
     if (
       earlyStopEnabled &&
       fixedIterations === undefined &&
+      iterations >= minIters &&
       iterations % EARLY_STOP_CHECK_EVERY === 0
     ) {
       const now = Date.now()

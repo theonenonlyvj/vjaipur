@@ -120,9 +120,11 @@ export function getIsmctsWorkerBridge(): WorkerBridge {
     _bridgeIsmcts = new WorkerBridge(
       // @ts-ignore
       () => new Worker(new URL('./ismctsWorker.ts', import.meta.url), { type: 'module' }),
-      5000,  // ismctsBot's own think budget is 3000ms (DEFAULT_BUDGET_MS in ismctsBot.ts) —
-             // 5000ms leaves comfortable headroom for worker spin-up/postMessage overhead so
-             // a legitimate in-budget move is never killed by this timeout.
+      10000, // ismctsBot's think budget is 3000ms (DEFAULT_BUDGET_MS) but the
+             // 2026-08-02 iteration floor lets a THROTTLED device run up to
+             // HARD_CAP_MS=8000 to reach 25k iterations (consistent strength
+             // on slow phones — Vijay approved the extra wait). 10s leaves
+             // spin-up/postMessage headroom above that worst case.
     )
   }
   return _bridgeIsmcts
