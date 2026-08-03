@@ -9,100 +9,13 @@ import {
   isValidOpponentTypeFilter,
   reportMatch,
 } from '../src/do/stats'
-import { applyD1Schema } from './helpers'
+import { applyD1Schema, acct, seedMatch, seedGame, seedSeat, seedPlayer } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
 
 beforeAll(async () => {
   await applyD1Schema(DB())
 })
-
-let ctr = 0
-/** A globally-unique account id per call, so assertions never collide with
- *  rows other test files (or other `it`s in this shared-D1 run — see
- *  vitest.config.ts's `fileParallelism:false`/`isolate:false`) may have
- *  written. */
-function acct(prefix: string): string {
-  return `${prefix}-${Date.now()}-${ctr++}`
-}
-
-type SeedMatch = {
-  accountId: string
-  opponentType?: string
-  opponentAccountId?: string | null
-  playerScore: number
-  opponentScore: number
-  won: boolean
-  source?: string
-  aiCovered?: boolean
-  gameUuid?: string | null
-  timestamp: number
-  /** Migration 0004's per-match GAME split — omitted (both stay NULL) mirrors
-   *  every legacy row that predates the migration; a test seeding a fresh
-   *  vs-AI report with an explicit split passes both. */
-  gamesWon?: number | null
-  gamesLost?: number | null
-}
-
-async function seedMatch(m: SeedMatch): Promise<void> {
-  await DB()
-    .prepare(
-      `INSERT INTO matches
-         (account_id, opponent_type, opponent_account_id, player_score, opponent_score,
-          won, source, ai_covered, game_uuid, timestamp, created_at, games_won, games_lost)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      m.accountId,
-      m.opponentType ?? 'online',
-      m.opponentAccountId ?? null,
-      m.playerScore,
-      m.opponentScore,
-      m.won ? 1 : 0,
-      m.source ?? 'online_authoritative',
-      m.aiCovered ? 1 : 0,
-      m.gameUuid ?? null,
-      m.timestamp,
-      m.timestamp,
-      m.gamesWon ?? null,
-      m.gamesLost ?? null,
-    )
-    .run()
-}
-
-/** Seeds an ONLINE match's `games` archive row (game_uuid + the archive's own
- *  seals0/seals1 — the EXACT per-game split source, per GAMES_WON_EXPR/
- *  GAMES_LOST_EXPR in worker/src/do/stats.ts) plus its two `game_players`
- *  seat rows. Mirrors rivalry.test.ts's seedMatchRow/seedSeat pattern, but
- *  trimmed to just the columns stats.ts's games-split resolution actually
- *  reads (no `moves` rows needed here — stats.ts never replays moves). */
-async function seedGame(opts: { gameUuid: string; seals0: number; seals1: number }): Promise<void> {
-  await DB()
-    .prepare(
-      `INSERT INTO games (game_uuid, code, status, match_length, seals0, seals1, winner_seat, source, engine_version, created_at, last_activity_at, ended_at)
-       VALUES (?, NULL, 'completed', 3, ?, ?, 0, 'online_authoritative', 'v1', ?, ?, ?)`,
-    )
-    .bind(opts.gameUuid, opts.seals0, opts.seals1, Date.now(), Date.now(), Date.now())
-    .run()
-}
-
-async function seedSeat(gameUuid: string, seatIndex: number, accountId: string): Promise<void> {
-  await DB()
-    .prepare(`INSERT INTO game_players (game_uuid, seat_index, account_id, display_name) VALUES (?, ?, ?, ?)`)
-    .bind(gameUuid, seatIndex, accountId, 'Seated Player')
-    .run()
-}
-
-async function seedPlayer(accountId: string, displayName: string): Promise<void> {
-  await DB()
-    .prepare(
-      `INSERT INTO players (account_id, display_name, last_seen_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(account_id) DO UPDATE SET display_name = excluded.display_name`,
-    )
-    .bind(accountId, displayName, Date.now())
-    .run()
-}
 
 // =============================================================================
 // getLeaderboard
@@ -112,13 +25,13 @@ describe('getLeaderboard', () => {
   it('keys rows by account_id, NEVER display_name: two accounts sharing a display name stay TWO rows', async () => {
     const a = acct('alice-twin')
     const b = acct('bob-twin')
-    await seedPlayer(a, 'Same Name')
-    await seedPlayer(b, 'Same Name')
+    await seedPlayer(DB(), a, 'Same Name')
+    await seedPlayer(DB(), b, 'Same Name')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, playerScore: 100, opponentScore: 50, won: true, timestamp: Date.now() + i })
+      await seedMatch(DB(), { accountId: a, playerScore: 100, opponentScore: 50, won: true, timestamp: Date.now() + i })
     }
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: b, playerScore: 40, opponentScore: 100, won: false, timestamp: Date.now() + 1000 + i })
+      await seedMatch(DB(), { accountId: b, playerScore: 40, opponentScore: 100, won: false, timestamp: Date.now() + 1000 + i })
     }
 
     const { overall } = await getLeaderboard(DB())
@@ -139,8 +52,8 @@ describe('getLeaderboard', () => {
 
   it('splits overall (all sources) vs verified (online_authoritative only)', async () => {
     const a = acct('split-account')
-    await seedPlayer(a, 'Splitter')
-    await seedMatch({
+    await seedPlayer(DB(), a, 'Splitter')
+    await seedMatch(DB(), {
       accountId: a,
       playerScore: 100,
       opponentScore: 10,
@@ -149,7 +62,7 @@ describe('getLeaderboard', () => {
       opponentType: 'online',
       timestamp: Date.now(),
     })
-    await seedMatch({
+    await seedMatch(DB(), {
       accountId: a,
       playerScore: 90,
       opponentScore: 80,
@@ -169,16 +82,16 @@ describe('getLeaderboard', () => {
   it(`applies the ${MIN_GAMES_FOR_RANK}-game qualification floor: a qualified lower-win-rate account outranks an unqualified higher-win-rate one`, async () => {
     const qualified = acct('qualified')
     const unqualified = acct('unqualified')
-    await seedPlayer(qualified, 'Qualified')
-    await seedPlayer(unqualified, 'Unqualified')
+    await seedPlayer(DB(), qualified, 'Qualified')
+    await seedPlayer(DB(), unqualified, 'Unqualified')
 
     // Qualified: MIN_GAMES_FOR_RANK games, only 1 win (low win rate).
     for (let i = 0; i < MIN_GAMES_FOR_RANK; i++) {
-      await seedMatch({ accountId: qualified, playerScore: 50, opponentScore: 90, won: i === 0, timestamp: Date.now() + 2000 + i })
+      await seedMatch(DB(), { accountId: qualified, playerScore: 50, opponentScore: 90, won: i === 0, timestamp: Date.now() + 2000 + i })
     }
     // Unqualified: fewer than the floor, but a perfect win rate.
     for (let i = 0; i < MIN_GAMES_FOR_RANK - 1; i++) {
-      await seedMatch({ accountId: unqualified, playerScore: 100, opponentScore: 10, won: true, timestamp: Date.now() + 3000 + i })
+      await seedMatch(DB(), { accountId: unqualified, playerScore: 100, opponentScore: 10, won: true, timestamp: Date.now() + 3000 + i })
     }
 
     const { overall } = await getLeaderboard(DB())
@@ -192,18 +105,18 @@ describe('getLeaderboard', () => {
   it('filters by opponentType: only that tier\'s matches are aggregated/ranked, and two same-name accounts stay separate', async () => {
     const a = acct('filter-alice-twin')
     const b = acct('filter-bob-twin')
-    await seedPlayer(a, 'Filter Twin')
-    await seedPlayer(b, 'Filter Twin')
+    await seedPlayer(DB(), a, 'Filter Twin')
+    await seedPlayer(DB(), b, 'Filter Twin')
     // a: 3 games vs 'medium', 2 vs 'online'.
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 100, opponentScore: 50, won: true, timestamp: Date.now() + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 100, opponentScore: 50, won: true, timestamp: Date.now() + i })
     }
     for (let i = 0; i < 2; i++) {
-      await seedMatch({ accountId: a, opponentType: 'online', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 100 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'online', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 100 + i })
     }
     // b: 3 games vs 'medium' only, same display name as a.
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: b, opponentType: 'medium', source: 'client_reported', playerScore: 20, opponentScore: 80, won: false, timestamp: Date.now() + 200 + i })
+      await seedMatch(DB(), { accountId: b, opponentType: 'medium', source: 'client_reported', playerScore: 20, opponentScore: 80, won: false, timestamp: Date.now() + 200 + i })
     }
 
     const { overall } = await getLeaderboard(DB(), 'medium')
@@ -218,9 +131,9 @@ describe('getLeaderboard', () => {
 
   it("a filter by an AI tier yields an empty 'verified' (online_authoritative rows are always opponent_type='online')", async () => {
     const a = acct('filter-verified-ai')
-    await seedPlayer(a, 'AI Filter')
+    await seedPlayer(DB(), a, 'AI Filter')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 60, opponentScore: 40, won: true, timestamp: Date.now() + 300 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 60, opponentScore: 40, won: true, timestamp: Date.now() + 300 + i })
     }
 
     const { overall, verified } = await getLeaderboard(DB(), 'easy')
@@ -230,9 +143,9 @@ describe('getLeaderboard', () => {
 
   it("a filter by 'online' makes 'verified' equal 'overall' (every online match is online_authoritative)", async () => {
     const a = acct('filter-verified-online')
-    await seedPlayer(a, 'Online Filter')
+    await seedPlayer(DB(), a, 'Online Filter')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'online', source: 'online_authoritative', playerScore: 70, opponentScore: 30, won: true, timestamp: Date.now() + 400 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'online', source: 'online_authoritative', playerScore: 70, opponentScore: 30, won: true, timestamp: Date.now() + 400 + i })
     }
 
     const { overall, verified } = await getLeaderboard(DB(), 'online')
@@ -263,16 +176,16 @@ describe('getLeaderboard', () => {
 
   it('aggregates matches across a LIST of opponentTypes: rows are the union of matches for every listed type, GROUP BY account_id', async () => {
     const a = acct('family-agg')
-    await seedPlayer(a, 'Family Aggregator')
+    await seedPlayer(DB(), a, 'Family Aggregator')
     for (let i = 0; i < 2; i++) {
-      await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 90, opponentScore: 40, won: true, timestamp: Date.now() + 700 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 90, opponentScore: 40, won: true, timestamp: Date.now() + 700 + i })
     }
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 80, opponentScore: 50, won: true, timestamp: Date.now() + 800 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 80, opponentScore: 50, won: true, timestamp: Date.now() + 800 + i })
     }
     // A 'medium' match for the same account must NOT be swept into the
     // ['hard2','ismcts'] aggregate.
-    await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 900 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 10, opponentScore: 90, won: false, timestamp: Date.now() + 900 })
 
     const { overall } = await getLeaderboard(DB(), ['hard2', 'ismcts'])
     const row = overall.find((r) => r.accountId === a)
@@ -282,10 +195,10 @@ describe('getLeaderboard', () => {
 
   it('aggregates across the full retired-inclusive "Hard family" list (hard2, ismcts, hard, fair)', async () => {
     const a = acct('family-agg-full')
-    await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1000 })
-    await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1001 })
-    await seedMatch({ accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1002 })
-    await seedMatch({ accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1003 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1000 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() + 1001 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1002 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 10, opponentScore: 5, won: false, timestamp: Date.now() + 1003 })
 
     const { overall } = await getLeaderboard(DB(), ['hard2', 'ismcts', 'hard', 'fair'])
     const row = overall.find((r) => r.accountId === a)
@@ -296,7 +209,7 @@ describe('getLeaderboard', () => {
   it('a single-element list behaves identically to passing that id as a plain string', async () => {
     const a = acct('family-agg-single')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 60, opponentScore: 20, won: true, timestamp: Date.now() + 1100 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 60, opponentScore: 20, won: true, timestamp: Date.now() + 1100 + i })
     }
 
     const asString = await getLeaderboard(DB(), 'medium')
@@ -323,15 +236,15 @@ describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)'
   it('resolves games_won/games_lost per-branch and sums them correctly across a mixed fixture, while the compat games/wins fields stay MATCH totals', async () => {
     const a = acct('games-mixed')
     const opponent = acct('games-mixed-opp')
-    await seedPlayer(a, 'Mixed Fixture')
+    await seedPlayer(DB(), a, 'Mixed Fixture')
 
     // Branch 1: an ONLINE 3-game match, EXACT split via games.seals0/seals1 —
     // this account sits in seat 0 (2 seals) vs the opponent's seat 1 (1 seal).
     const gameUuid = `guuid-mixed-${a}`
-    await seedGame({ gameUuid, seals0: 2, seals1: 1 })
-    await seedSeat(gameUuid, 0, a)
-    await seedSeat(gameUuid, 1, opponent)
-    await seedMatch({
+    await seedGame(DB(), { gameUuid, seals0: 2, seals1: 1, winnerSeat: 0 })
+    await seedSeat(DB(), gameUuid, 0, a)
+    await seedSeat(DB(), gameUuid, 1, opponent)
+    await seedMatch(DB(), {
       accountId: a, opponentType: 'online', opponentAccountId: opponent, source: 'online_authoritative',
       gameUuid, playerScore: 150, opponentScore: 90, won: true, timestamp: Date.now(),
     })
@@ -339,13 +252,13 @@ describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)'
     // Branch 2: a LEGACY vs-AI row — no game_uuid, no stored split (both
     // NULL, exactly like every row that predates migration 0004) — falls
     // back to 1-0 by `won`.
-    await seedMatch({
+    await seedMatch(DB(), {
       accountId: a, opponentType: 'medium', source: 'client_reported',
       playerScore: 80, opponentScore: 40, won: true, timestamp: Date.now() + 1,
     })
 
     // Branch 3: a NEW vs-AI row with an EXPLICIT 2-1 split (migration 0004).
-    await seedMatch({
+    await seedMatch(DB(), {
       accountId: a, opponentType: 'hard2', source: 'client_reported',
       playerScore: 200, opponentScore: 140, won: true, timestamp: Date.now() + 2,
       gamesWon: 2, gamesLost: 1,
@@ -374,10 +287,10 @@ describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)'
     const sweeper = acct('games-rank-sweeper')
     const sweeperOpp = acct('games-rank-sweeper-opp')
     const sweepUuid = `guuid-sweep-${sweeper}`
-    await seedGame({ gameUuid: sweepUuid, seals0: 3, seals1: 0 })
-    await seedSeat(sweepUuid, 0, sweeper)
-    await seedSeat(sweepUuid, 1, sweeperOpp)
-    await seedMatch({
+    await seedGame(DB(), { gameUuid: sweepUuid, seals0: 3, seals1: 0, winnerSeat: 0 })
+    await seedSeat(DB(), sweepUuid, 0, sweeper)
+    await seedSeat(DB(), sweepUuid, 1, sweeperOpp)
+    await seedMatch(DB(), {
       accountId: sweeper, opponentType: 'online', opponentAccountId: sweeperOpp, source: 'online_authoritative',
       gameUuid: sweepUuid, playerScore: 210, opponentScore: 100, won: true, timestamp: Date.now() + 10,
     })
@@ -387,7 +300,7 @@ describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)'
     // way (matches count == games count here).
     const grinder = acct('games-rank-grinder')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({
+      await seedMatch(DB(), {
         accountId: grinder, opponentType: 'medium', source: 'client_reported',
         playerScore: i === 0 ? 60 : 20, opponentScore: i === 0 ? 40 : 80, won: i === 0, timestamp: Date.now() + 20 + i,
       })
@@ -423,7 +336,7 @@ describe('getLeaderboard — GAMES-first per-row resolution (2026-07-28 ruling)'
 describe('getAvailableOpponentTypes', () => {
   it('lists DISTINCT opponent_types with at least one match, and nothing else', async () => {
     const a = acct('avail-types')
-    await seedMatch({ accountId: a, opponentType: 'hard3', source: 'client_reported', playerScore: 5, opponentScore: 1, won: true, timestamp: Date.now() + 500 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard3', source: 'client_reported', playerScore: 5, opponentScore: 1, won: true, timestamp: Date.now() + 500 })
 
     const types = await getAvailableOpponentTypes(DB())
     expect(types).toContain('hard3') // present: this test just seeded one
@@ -465,9 +378,9 @@ describe('GET /stats/leaderboard router', () => {
 
   it('with a valid ?opponentType= filters through to getLeaderboard', async () => {
     const a = acct('router-filter')
-    await seedPlayer(a, 'Router Filter')
+    await seedPlayer(DB(), a, 'Router Filter')
     for (let i = 0; i < 3; i++) {
-      await seedMatch({ accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 600 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'medium', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 600 + i })
     }
 
     const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=medium'))
@@ -484,10 +397,10 @@ describe('GET /stats/leaderboard router', () => {
 
   it('with a comma-separated ?opponentType= list, aggregates matches across every listed type', async () => {
     const a = acct('router-family')
-    await seedMatch({ accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1200 })
-    await seedMatch({ accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1201 })
-    await seedMatch({ accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1202 })
-    await seedMatch({ accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1203 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard2', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1200 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1201 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1202 })
+    await seedMatch(DB(), { accountId: a, opponentType: 'fair', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1203 })
 
     const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=hard2,ismcts,hard,fair'))
     expect(res.status).toBe(200)
@@ -499,7 +412,7 @@ describe('GET /stats/leaderboard router', () => {
   it('a single id passed with no comma behaves exactly as before (single-id path unchanged)', async () => {
     const a = acct('router-single-unchanged')
     for (let i = 0; i < 2; i++) {
-      await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1300 + i })
+      await seedMatch(DB(), { accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 1, opponentScore: 0, won: true, timestamp: Date.now() + 1300 + i })
     }
 
     const res = await SELF.fetch(new Request('https://worker/stats/leaderboard?opponentType=easy'))
@@ -529,9 +442,9 @@ describe('getHistory', () => {
   it("returns the account's own matches, newest first", async () => {
     const a = acct('history-account')
     const t0 = Date.now()
-    await seedMatch({ accountId: a, playerScore: 10, opponentScore: 20, won: false, timestamp: t0 })
-    await seedMatch({ accountId: a, playerScore: 30, opponentScore: 20, won: true, timestamp: t0 + 10 })
-    await seedMatch({ accountId: a, playerScore: 50, opponentScore: 10, won: true, timestamp: t0 + 20 })
+    await seedMatch(DB(), { accountId: a, playerScore: 10, opponentScore: 20, won: false, timestamp: t0 })
+    await seedMatch(DB(), { accountId: a, playerScore: 30, opponentScore: 20, won: true, timestamp: t0 + 10 })
+    await seedMatch(DB(), { accountId: a, playerScore: 50, opponentScore: 10, won: true, timestamp: t0 + 20 })
 
     const rows = await getHistory(DB(), a)
     expect(rows.length).toBe(3)
@@ -542,8 +455,8 @@ describe('getHistory', () => {
   it('never returns another account\'s matches', async () => {
     const a = acct('history-mine')
     const other = acct('history-theirs')
-    await seedMatch({ accountId: a, playerScore: 1, opponentScore: 2, won: false, timestamp: Date.now() })
-    await seedMatch({ accountId: other, playerScore: 3, opponentScore: 4, won: false, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: a, playerScore: 1, opponentScore: 2, won: false, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: other, playerScore: 3, opponentScore: 4, won: false, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows.every((r) => r.playerScore !== 3)).toBe(true) // the other account's row never leaks in
@@ -556,8 +469,8 @@ describe('getHistory', () => {
   it('resolves the opponent\'s display name via a players LEFT JOIN on opponent_account_id', async () => {
     const a = acct('history-with-rival')
     const rival = acct('history-rival')
-    await seedPlayer(rival, 'Sureka')
-    await seedMatch({ accountId: a, opponentAccountId: rival, playerScore: 40, opponentScore: 33, won: true, timestamp: Date.now() })
+    await seedPlayer(DB(), rival, 'Sureka')
+    await seedMatch(DB(), { accountId: a, opponentAccountId: rival, playerScore: 40, opponentScore: 33, won: true, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows.length).toBe(1)
@@ -568,7 +481,7 @@ describe('getHistory', () => {
   it('opponentName is null (never the raw UUID) when the opponent has no players row yet', async () => {
     const a = acct('history-unresolved-rival')
     const neverSeenRival = acct('history-never-seen-rival')
-    await seedMatch({ accountId: a, opponentAccountId: neverSeenRival, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: a, opponentAccountId: neverSeenRival, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows[0]!.opponentAccountId).toBe(neverSeenRival) // still returned — LEFT, not INNER, join
@@ -577,7 +490,7 @@ describe('getHistory', () => {
 
   it('opponentName is null for a local vs-AI report (no opponent_account_id at all)', async () => {
     const a = acct('history-vs-ai')
-    await seedMatch({ accountId: a, opponentType: 'medium', opponentAccountId: null, source: 'client_reported', playerScore: 100, opponentScore: 80, won: true, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: a, opponentType: 'medium', opponentAccountId: null, source: 'client_reported', playerScore: 100, opponentScore: 80, won: true, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows[0]!.opponentAccountId).toBeNull()
@@ -588,11 +501,11 @@ describe('getHistory', () => {
     const a = acct('history-two-rivals')
     const rival1 = acct('history-rival-1')
     const rival2 = acct('history-rival-2')
-    await seedPlayer(a, 'MyOwnName') // never leaks into an opponentName column
-    await seedPlayer(rival1, 'Alice')
-    await seedPlayer(rival2, 'Bob')
-    await seedMatch({ accountId: a, opponentAccountId: rival1, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
-    await seedMatch({ accountId: a, opponentAccountId: rival2, playerScore: 5, opponentScore: 10, won: false, timestamp: Date.now() + 1 })
+    await seedPlayer(DB(), a, 'MyOwnName') // never leaks into an opponentName column
+    await seedPlayer(DB(), rival1, 'Alice')
+    await seedPlayer(DB(), rival2, 'Bob')
+    await seedMatch(DB(), { accountId: a, opponentAccountId: rival1, playerScore: 10, opponentScore: 5, won: true, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: a, opponentAccountId: rival2, playerScore: 5, opponentScore: 10, won: false, timestamp: Date.now() + 1 })
 
     const rows = await getHistory(DB(), a)
     const byOpponent = new Map(rows.map((r) => [r.opponentAccountId, r.opponentName]))
@@ -612,10 +525,10 @@ describe('getHistory', () => {
     const gameUuid = `guuid-hist-online-${a}`
     // Caller sits in seat 1 this time (seat mapping is per-match, never a
     // constant) — seals1 is "mine", seals0 is "theirs".
-    await seedGame({ gameUuid, seals0: 1, seals1: 2 })
-    await seedSeat(gameUuid, 0, opponent)
-    await seedSeat(gameUuid, 1, a)
-    await seedMatch({
+    await seedGame(DB(), { gameUuid, seals0: 1, seals1: 2, winnerSeat: 0 })
+    await seedSeat(DB(), gameUuid, 0, opponent)
+    await seedSeat(DB(), gameUuid, 1, a)
+    await seedMatch(DB(), {
       accountId: a, opponentType: 'online', opponentAccountId: opponent, source: 'online_authoritative',
       gameUuid, playerScore: 130, opponentScore: 90, won: true, timestamp: Date.now(),
     })
@@ -627,7 +540,7 @@ describe('getHistory', () => {
 
   it('falls back to a 1-0/0-1 approximation by `won` for a LEGACY vs-AI row with no stored split', async () => {
     const a = acct('history-games-legacy')
-    await seedMatch({ accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 20, opponentScore: 45, won: false, timestamp: Date.now() })
+    await seedMatch(DB(), { accountId: a, opponentType: 'easy', source: 'client_reported', playerScore: 20, opponentScore: 45, won: false, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows[0]!.gamesWon).toBe(0)
@@ -636,7 +549,7 @@ describe('getHistory', () => {
 
   it('resolves the EXACT stored split for a vs-AI row reported with an explicit games_won/games_lost (migration 0004)', async () => {
     const a = acct('history-games-explicit')
-    await seedMatch({
+    await seedMatch(DB(), {
       accountId: a, opponentType: 'hard3', source: 'client_reported',
       playerScore: 300, opponentScore: 210, won: true, timestamp: Date.now(),
       gamesWon: 3, gamesLost: 2,
@@ -989,10 +902,10 @@ describe('reportMatch — players.last_seen_at stamp', () => {
 describe('getRollup', () => {
   it('a known account returns real totals with epoch-ms lastPlayedAt', async () => {
     const a = acct('rollup-known')
-    await seedPlayer(a, 'Rolly')
+    await seedPlayer(DB(), a, 'Rolly')
     const t0 = Date.now()
-    await seedMatch({ accountId: a, playerScore: 10, opponentScore: 20, won: false, timestamp: t0 })
-    await seedMatch({ accountId: a, playerScore: 30, opponentScore: 20, won: true, timestamp: t0 + 50 })
+    await seedMatch(DB(), { accountId: a, playerScore: 10, opponentScore: 20, won: false, timestamp: t0 })
+    await seedMatch(DB(), { accountId: a, playerScore: 30, opponentScore: 20, won: true, timestamp: t0 + 50 })
 
     const rollup = await getRollup(DB(), a)
     expect(rollup).toEqual({

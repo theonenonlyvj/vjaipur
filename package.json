@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:quick": "vitest run --config vitest.quick.config.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "server:dev": "tsx watch server/index.ts",
     "test:server": "vitest run --config vitest.server.config.ts",
-    "test:all": "npm run test && npm run test:server",
+    "test:all": "npm run test && npm run test:server && (cd worker && npm test)",
+    "test:all:quick": "npm run test:quick && npm run test:server && (cd worker && npm run test:quick)",
     "server:start": "npx tsx server/index.ts"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 import { env, SELF } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getMyStyle } from '../src/do/style'
-import { applyD1Schema } from './helpers'
+import { applyD1Schema, acct, seedMatch } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
 
@@ -9,28 +9,9 @@ beforeAll(async () => {
   await applyD1Schema(DB())
 })
 
-let ctr = 0
-/** A globally-unique account id per call — see worker/test/stats.test.ts's
- *  identical helper for why (shared D1 across this file's tests). */
-function acct(prefix: string): string {
-  return `${prefix}-${Date.now()}-${ctr++}`
-}
-
 function tok(overrides: Record<string, number[]>): number[][] {
   const GOOD_ORDER = ['diamond', 'gold', 'silver', 'cloth', 'spice', 'leather']
   return GOOD_ORDER.map((g) => overrides[g] ?? [1, 1, 1])
-}
-
-async function seedMatch(accountId: string, opponentType: string, timestamp: number, won: boolean, playerScore = 10, opponentScore = 5): Promise<void> {
-  await DB()
-    .prepare(
-      `INSERT INTO matches
-         (account_id, opponent_type, opponent_account_id, player_score, opponent_score,
-          won, source, ai_covered, game_uuid, timestamp, created_at)
-       VALUES (?, ?, NULL, ?, ?, ?, 'client_reported', 0, NULL, ?, ?)`,
-    )
-    .bind(accountId, opponentType, playerScore, opponentScore, won ? 1 : 0, timestamp, timestamp)
-    .run()
 }
 
 async function seedMatchLog(accountId: string, opponentType: string, timestamp: number, log: unknown[]): Promise<number> {
@@ -92,9 +73,9 @@ describe('getMyStyle', () => {
     const t1 = Date.now()
     const t2 = t1 + 1000
     await seedMatchLog(a, 'ismcts', t1, gameOneLog())
-    await seedMatch(a, 'ismcts', t1, true)
+    await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', timestamp: t1, won: true, source: 'client_reported' })
     await seedMatchLog(a, 'ismcts', t2, gameTwoLog())
-    await seedMatch(a, 'ismcts', t2, false)
+    await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', timestamp: t2, won: false, source: 'client_reported' })
 
     const result = await getMyStyle(DB(), a, 'ismcts')
 
@@ -121,7 +102,7 @@ describe('getMyStyle', () => {
     const a = acct('style-no-new-rows')
     const t1 = Date.now()
     await seedMatchLog(a, 'medium', t1, gameOneLog())
-    await seedMatch(a, 'medium', t1, true)
+    await seedMatch(DB(), { accountId: a, opponentType: 'medium', timestamp: t1, won: true, source: 'client_reported' })
 
     const first = await getMyStyle(DB(), a, 'medium')
     const cacheAfterFirst = await getCacheRow(a, 'medium')
@@ -151,9 +132,9 @@ describe('getMyStyle', () => {
     const t3 = t1 + 2000
 
     const id1 = await seedMatchLog(a, 'hard2', t1, gameOneLog())
-    await seedMatch(a, 'hard2', t1, true)
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard2', timestamp: t1, won: true, source: 'client_reported' })
     const id2 = await seedMatchLog(a, 'hard2', t2, gameTwoLog())
-    await seedMatch(a, 'hard2', t2, false)
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard2', timestamp: t2, won: false, source: 'client_reported' })
 
     const afterTwo = await getMyStyle(DB(), a, 'hard2')
     expect(afterTwo.games).toBe(2)
@@ -171,7 +152,7 @@ describe('getMyStyle', () => {
 
     // Add a 3rd game and re-request.
     await seedMatchLog(a, 'hard2', t3, gameThreeLog())
-    await seedMatch(a, 'hard2', t3, true)
+    await seedMatch(DB(), { accountId: a, opponentType: 'hard2', timestamp: t3, won: true, source: 'client_reported' })
 
     const afterThree = await getMyStyle(DB(), a, 'hard2')
     expect(afterThree.games).toBe(3)
@@ -211,7 +192,7 @@ describe('getMyStyle', () => {
       const a = acct('style-stale-writer')
       const t1 = Date.now()
       await seedMatchLog(a, 'medium', t1, gameOneLog())
-      await seedMatch(a, 'medium', t1, true)
+      await seedMatch(DB(), { accountId: a, opponentType: 'medium', timestamp: t1, won: true, source: 'client_reported' })
 
       // Prime the cache normally.
       await getMyStyle(DB(), a, 'medium')
@@ -250,9 +231,9 @@ describe('getMyStyle', () => {
       const t1 = Date.now()
       const t2 = t1 + 1000
       await seedMatchLog(a, 'ismcts', t1, gameOneLog())
-      await seedMatch(a, 'ismcts', t1, true)
+      await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', timestamp: t1, won: true, source: 'client_reported' })
       await seedMatchLog(a, 'ismcts', t2, gameTwoLog())
-      await seedMatch(a, 'ismcts', t2, false)
+      await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', timestamp: t2, won: false, source: 'client_reported' })
 
       // Fire two concurrent FIRST-ever getMyStyle calls — both may read
       // cacheRow=null before either writes.
@@ -280,9 +261,9 @@ describe('getMyStyle', () => {
     const t1 = Date.now()
     const t2 = t1 + 1000
     await seedMatchLog(a, 'medium', t1, gameOneLog())
-    await seedMatch(a, 'medium', t1, true)
+    await seedMatch(DB(), { accountId: a, opponentType: 'medium', timestamp: t1, won: true, source: 'client_reported' })
     await seedMatchLog(a, 'ismcts', t2, gameTwoLog())
-    await seedMatch(a, 'ismcts', t2, false)
+    await seedMatch(DB(), { accountId: a, opponentType: 'ismcts', timestamp: t2, won: false, source: 'client_reported' })
 
     const mediumResult = await getMyStyle(DB(), a, 'medium')
     expect(mediumResult.games).toBe(1)

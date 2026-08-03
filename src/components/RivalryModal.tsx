@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { RivalryPerGameEntry, RivalryResponse } from '../net/online'
+import { closeBtnStyle, sectionHeaderStyle, closePrimaryBtnStyle, tugTrackStyle, tugClineStyle, tugPullBaseStyle } from './hallStyles'
 
 /**
  * "YOU vs <NAME>" head-to-head modal (StatsDashboard.tsx: click an Online
@@ -268,32 +269,11 @@ const modalStyle: CSSProperties = {
   borderRadius: 16, border: '2px solid #f0c030',
   padding: '24px 24px 32px 24px', position: 'relative',
 }
-const closeBtnStyle: CSSProperties = {
-  background: 'none', border: 'none', color: '#888',
-  fontSize: 24, cursor: 'pointer', padding: 4,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-}
-const sectionHeaderStyle: CSSProperties = {
-  fontSize: 11, fontWeight: 900, color: '#f0c030', letterSpacing: 1.5,
-  marginBottom: 12, borderBottom: '1px solid #333', paddingBottom: 6,
-}
-const closePrimaryBtnStyle: CSSProperties = {
-  background: '#f0c030', color: '#000', border: 'none',
-  padding: '12px 32px', borderRadius: 8, fontWeight: 900,
-  cursor: 'pointer', fontSize: 14, letterSpacing: 1,
-}
-
 // Tug-of-war track — same visual language as StatsDashboard.tsx's MY STYLE
 // tab (gold = me, purple #7a68a8 = the other side).
-const tugTrackStyle: CSSProperties = {
-  position: 'relative', height: 14, background: '#221609', borderRadius: 7, overflow: 'hidden',
-}
-const tugClineStyle: CSSProperties = {
-  position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, background: '#554', zIndex: 2,
-}
-const tugPullBaseStyle: CSSProperties = {
-  position: 'absolute', top: 2, bottom: 2, borderRadius: 6,
-}
+// (closeBtnStyle/sectionHeaderStyle/closePrimaryBtnStyle/tugTrackStyle/
+// tugClineStyle/tugPullBaseStyle now live in ./hallStyles — shared verbatim
+// with StatsDashboard.tsx.)
 
 const edgeFinderStyle: CSSProperties = {
   background: 'rgba(240,192,48,.10)', border: '1px solid rgba(240,192,48,.35)', borderRadius: 12,

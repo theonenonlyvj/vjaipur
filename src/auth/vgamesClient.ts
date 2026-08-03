@@ -2,7 +2,7 @@
 // vgames-platform/docs/superpowers/plans/2026-07-09-vgames-p1.md, Phase A) for
 // device-bound ghost accounts + username/password auth. Replaces vjaipur's old
 // plaintext-secret Socket.IO SECURE_ACCOUNT/RESTORE_ACCOUNT flow (see Task C4).
-import { createProxyFallbackFetcher } from '../net/proxyFallback'
+import { createProxyFallbackFetcher, safeJson } from '../net/proxyFallback'
 
 // Account claim state as reported by the VGames worker's auth responses.
 // 'ghost' = device-bound, never claimed; 'claimed' = has a username+password.
@@ -71,14 +71,6 @@ async function postJson(path: string, body: unknown, token?: string): Promise<Re
   })
 }
 
-async function safeJson(res: Response): Promise<any> {
-  try {
-    return await res.json()
-  } catch {
-    return {}
-  }
-}
-
 /** POST /auth/quick — device-bound ghost mint/re-auth. Works for ghosts and migrated users alike.
  *  `game: 'jaipur'` labels a NEWLY-minted account's origin_game correctly on the
  *  worker (Fix M3); it's purely additive/cosmetic and ignored on re-auth of an
@@ -86,7 +78,7 @@ async function safeJson(res: Response): Promise<any> {
 export async function vgamesQuick(deviceCredential: string, displayName?: string): Promise<VGamesQuickResult> {
   const res = await postJson('/auth/quick', { deviceCredential, displayName, game: 'jaipur' })
   if (!res.ok) throw new Error(`vgamesQuick failed: ${res.status}`)
-  const data = await safeJson(res)
+  const data = (await safeJson(res)) as any
   return { token: data.token, accountId: data.accountId, status: data.status }
 }
 
@@ -97,7 +89,7 @@ export async function vgamesSetCredentials(
   password: string,
 ): Promise<VGamesSetCredentialsResult> {
   const res = await postJson('/auth/set-credentials', { username, password }, token)
-  const data = await safeJson(res)
+  const data = (await safeJson(res)) as any
   if (res.ok) return { ok: true, status: data.status }
   return { ok: false, error: data.error ?? `http_${res.status}` }
 }
@@ -109,7 +101,7 @@ export async function vgamesLogin(
   deviceCredential: string,
 ): Promise<VGamesLoginResult> {
   const res = await postJson('/auth/login', { username, password, deviceCredential })
-  const data = await safeJson(res)
+  const data = (await safeJson(res)) as any
   if (!res.ok) return { ok: false, error: data.error ?? `http_${res.status}` }
   return { ok: true, token: data.token, accountId: data.accountId, mustChangePassword: data.mustChangePassword, status: data.status }
 }

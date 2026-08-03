@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { pickMediumAction, getProfitableExchanges } from '../../src/ai/mediumAi'
-import { setupRound, applyAction, getLegalActions } from '../../src/engine'
+import { setupRound, applyAction } from '../../src/engine'
 import type { GameState } from '../../src/engine'
 
 function freshState(): GameState {

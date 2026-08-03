@@ -1,12 +1,22 @@
-import { useState, type CSSProperties } from 'react'
+import { useState, lazy, Suspense, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGameStore } from '../store/gameStore'
 import { ProfileIcon } from '../components/ProfileIcon'
 import { ProfileOverlay } from '../components/ProfileOverlay'
-import { StatsDashboard } from '../components/StatsDashboard'
 import { StatsStrip } from '../components/StatsStrip'
 import type { Difficulty } from '../store/gameStore'
 import { ACTIVE_TIERS } from '../ai/tiers'
+
+// Lazy: the Hall of Records (StatsDashboard + everything it pulls in —
+// RivalryModal, styleAgg, etc.) is a big, click-to-open overlay, not part of
+// the initial Home render — splitting it into its own chunk keeps it out of
+// the main bundle. StatsDashboard.tsx itself stays a plain named export (its
+// own tests import it directly and must stay sync); this just adapts the
+// dynamic import's namespace object to the default-export shape React.lazy
+// requires.
+const StatsDashboard = lazy(() =>
+  import('../components/StatsDashboard').then((m) => ({ default: m.StatsDashboard })),
+)
 
 export function HomeScreen() {
   const navigate = useNavigate()
@@ -110,7 +120,11 @@ export function HomeScreen() {
         </>
       )}
 
-      {showStats && <StatsDashboard onClose={() => setShowStats(false)} />}
+      {showStats && (
+        <Suspense fallback={null}>
+          <StatsDashboard onClose={() => setShowStats(false)} />
+        </Suspense>
+      )}
       {showProfile && <ProfileOverlay onClose={() => setShowProfile(false)} />}
       <StatsStrip onClick={() => setShowStats(true)} />
 

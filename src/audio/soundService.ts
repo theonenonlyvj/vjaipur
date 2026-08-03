@@ -1,4 +1,5 @@
 import { Howl } from 'howler'
+import { safeGetJson, safeSetJson } from '../net/safeStorage'
 
 const sounds = {
   take:      new Howl({ src: ['/sounds/take.wav'],       volume: 0.6, preload: false }),
@@ -11,14 +12,7 @@ const sounds = {
 
 type SoundName = keyof typeof sounds
 
-function safeGetItem(key: string): string | null {
-  try { return localStorage.getItem(key) } catch { return null }
-}
-function safeSetItem(key: string, value: string): void {
-  try { localStorage.setItem(key, value) } catch { /* noop */ }
-}
-
-let _muted = safeGetItem('vjaipur-muted') === 'true'
+let _muted = safeGetJson<boolean>('vjaipur-muted') === true
 
 export const soundService = {
   play(name: SoundName) {
@@ -26,7 +20,7 @@ export const soundService = {
   },
   setMuted(muted: boolean) {
     _muted = muted
-    safeSetItem('vjaipur-muted', String(muted))
+    safeSetJson('vjaipur-muted', muted)
   },
   get muted(): boolean { return _muted },
 }

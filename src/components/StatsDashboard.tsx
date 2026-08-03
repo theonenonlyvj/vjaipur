@@ -6,6 +6,7 @@ import type { TugRow, TugRowFormat } from '../shared/styleAgg'
 import { TIERS, FAMILIES, getTierLabel, getTierFamily, getFamilyMembers, getFamilyPrimary, getFamilyLabel, type TierFamily } from '../ai/tiers'
 import { ProfileOverlay } from './ProfileOverlay'
 import { RivalryModal } from './RivalryModal'
+import { closeBtnStyle, sectionHeaderStyle, closePrimaryBtnStyle, tugTrackStyle, tugClineStyle, tugPullBaseStyle } from './hallStyles'
 
 interface StatsDashboardProps {
   onClose: () => void
@@ -982,11 +983,7 @@ const modalStyle: CSSProperties = {
   borderRadius: 16, border: '2px solid #f0c030',
   padding: '24px 24px 32px 24px', position: 'relative',
 }
-const closeBtnStyle: CSSProperties = {
-  background: 'none', border: 'none', color: '#888',
-  fontSize: 24, cursor: 'pointer', padding: 4,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-}
+// closeBtnStyle lives in ./hallStyles — shared verbatim with RivalryModal.tsx.
 const viewToggleStyle: CSSProperties = {
   display: 'flex', gap: 0, marginBottom: 20,
   border: '1.5px solid #444', borderRadius: 8, overflow: 'hidden',
@@ -999,10 +996,7 @@ const viewBtnStyle: CSSProperties = {
 const activeViewBtnStyle: CSSProperties = {
   ...viewBtnStyle, background: '#f0c030', color: '#000',
 }
-const sectionHeaderStyle: CSSProperties = {
-  fontSize: 11, fontWeight: 900, color: '#f0c030', letterSpacing: 1.5,
-  marginBottom: 12, borderBottom: '1px solid #333', paddingBottom: 6,
-}
+// sectionHeaderStyle lives in ./hallStyles — shared verbatim with RivalryModal.tsx.
 // Owner's 2026-07-28 GAMES-first ruling — one small italic caption per
 // games-primary table, spelling out the unit ONCE per section rather than
 // relabeling every "W"/"L" header cell (which stay unit-agnostic, same as
@@ -1044,25 +1038,14 @@ const tableHeaderRowStyle: CSSProperties = { textAlign: 'left', borderBottom: '1
 const thStyle: CSSProperties = { padding: '6px 8px', color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }
 const trStyle: CSSProperties = { borderBottom: '1px solid #222' }
 const tdStyle: CSSProperties = { padding: '11px 8px', color: '#ddd', fontSize: 13 }
-const closePrimaryBtnStyle: CSSProperties = {
-  background: '#f0c030', color: '#000', border: 'none',
-  padding: '12px 32px', borderRadius: 8, fontWeight: 900,
-  cursor: 'pointer', fontSize: 14, letterSpacing: 1,
-}
+// closePrimaryBtnStyle lives in ./hallStyles — shared verbatim with RivalryModal.tsx.
 
 // ── MY STYLE (You vs the Bot) — Variant A tug-of-war, per
 // docs/mockups/you-vs-bot-panel.html. Same gold/purple pull palette as the
 // rest of the modal's #f0c030 gold; the bot's purple (#7a68a8) is new here
 // (nothing else in this modal needed a second series color).
-const tugTrackStyle: CSSProperties = {
-  position: 'relative', height: 14, background: '#221609', borderRadius: 7, overflow: 'hidden',
-}
-const tugClineStyle: CSSProperties = {
-  position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, background: '#554', zIndex: 2,
-}
-const tugPullBaseStyle: CSSProperties = {
-  position: 'absolute', top: 2, bottom: 2, borderRadius: 6,
-}
+// tugTrackStyle/tugClineStyle/tugPullBaseStyle live in ./hallStyles — shared
+// verbatim with RivalryModal.tsx.
 // Neutral tag for "biggest gap" — deliberately ONE style for both sides (no
 // red/green editorializing; see src/shared/styleAgg.ts's TugRowTag
 // docstring for the "why" — the design council's item 10).

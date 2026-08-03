@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { EVENTS } from '../shared/protocol'
 import type { Action, GameState } from '../engine'
-import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, ActionPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload, PullHistoryPayload, PullHistoryAck } from '../shared/protocol'
+import type { RoomReadyPayload, JoinRoomAck, RejoinPayload, RejoinAck, OpponentNamePayload, SyncMatchPayload, OpponentActionPayload, OpponentDisconnectedPayload, LeaderboardAck, UpdateProfilePayload, PullHistoryPayload, PullHistoryAck } from '../shared/protocol'
 
 export class SocketService {
   private socket: Socket | null = null

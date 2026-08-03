@@ -3,6 +3,7 @@
 // top-level interval (not a per-screen useEffect), so a player sitting on
 // RoundEndScreen still keeps the server's presence window alive.
 import * as onlineApi from './online'
+import { safeGetJson, safeSetJson, safeRemove } from './safeStorage'
 
 const KEY = 'vjaipur-online-session'
 const HEARTBEAT_INTERVAL_MS = 20_000
@@ -14,32 +15,19 @@ export interface OnlineSession {
 }
 
 export function save(session: OnlineSession): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(session))
-  } catch {
-    // no-op — losing session persistence only affects reload-resume
-  }
+  // no-op on failure — losing session persistence only affects reload-resume
+  safeSetJson(KEY, session)
 }
 
 export function load(): OnlineSession | null {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed.gameId !== 'string' || typeof parsed.mySeat !== 'number') return null
-    return parsed as OnlineSession
-  } catch {
-    return null
-  }
+  const parsed = safeGetJson<OnlineSession>(KEY)
+  if (!parsed || typeof parsed.gameId !== 'string' || typeof parsed.mySeat !== 'number') return null
+  return parsed
 }
 
 export function clear(): void {
   stopHeartbeat()
-  try {
-    localStorage.removeItem(KEY)
-  } catch {
-    // no-op
-  }
+  safeRemove(KEY)
 }
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null

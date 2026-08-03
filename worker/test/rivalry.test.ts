@@ -1,7 +1,7 @@
 import { env, SELF } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { computeEdgeFinder, getRivalry, type RivalryTokensPerCard, type RivalryBonusSales } from '../src/do/rivalry'
-import { applyD1Schema } from './helpers'
+import { applyD1Schema, seedGame, seedSeat } from './helpers'
 
 const DB = () => (env as unknown as { DB: D1Database }).DB
 
@@ -9,33 +9,11 @@ beforeAll(async () => {
   await applyD1Schema(DB())
 })
 
-// ---- seed helpers (direct D1 inserts — mirrors stats.test.ts's seedMatch/
-// seedPlayer pattern; no DO/GameRepository machinery needed since this
-// module reads the archive tables straight, exactly like production). -----
-
-async function seedMatchRow(opts: {
-  gameUuid: string
-  code: string
-  status: string
-  winnerSeat: number | null
-  createdAt: number
-  endedAt: number | null
-}): Promise<void> {
-  await DB()
-    .prepare(
-      `INSERT INTO games (game_uuid, code, status, match_length, seals0, seals1, winner_seat, source, engine_version, created_at, last_activity_at, ended_at)
-       VALUES (?, ?, ?, 3, 0, 0, ?, 'online_authoritative', 'v1', ?, ?, ?)`,
-    )
-    .bind(opts.gameUuid, opts.code, opts.status, opts.winnerSeat, opts.createdAt, opts.createdAt, opts.endedAt)
-    .run()
-}
-
-async function seedSeat(gameUuid: string, seatIndex: number, accountId: string, displayName: string): Promise<void> {
-  await DB()
-    .prepare(`INSERT INTO game_players (game_uuid, seat_index, account_id, display_name) VALUES (?, ?, ?, ?)`)
-    .bind(gameUuid, seatIndex, accountId, displayName)
-    .run()
-}
+// ---- seed helpers (direct D1 inserts — no DO/GameRepository machinery
+// needed since this module reads the archive tables straight, exactly like
+// production). seedGame/seedSeat are shared with stats.test.ts (this file's
+// seals0/seals1 are always 0 — rivalry.ts's game-level split isn't exercised
+// here, only stats.ts's is). -----------------------------------------------
 
 let moveCtr = 0
 async function seedMove(gameUuid: string, round: number, seatIndex: number, type: string, payload: unknown, createdAt: number): Promise<void> {
@@ -104,9 +82,9 @@ const THEM = 'rv-acct-them'
 
 describe('getRivalry — seat-swap correctness + full aggregate fixture', () => {
   beforeAll(async () => {
-    await seedMatchRow({ gameUuid: 'rv-guuid-1', code: 'AAAA11', status: 'completed', winnerSeat: 0, createdAt: 1000, endedAt: 2000 })
-    await seedSeat('rv-guuid-1', 0, ME, 'Me')
-    await seedSeat('rv-guuid-1', 1, THEM, 'reks')
+    await seedGame(DB(), { gameUuid: 'rv-guuid-1', code: 'AAAA11', status: 'completed', winnerSeat: 0, createdAt: 1000, endedAt: 2000 })
+    await seedSeat(DB(), 'rv-guuid-1', 0, ME, 'Me')
+    await seedSeat(DB(), 'rv-guuid-1', 1, THEM, 'reks')
     await seedMove('rv-guuid-1', 1, 0, 'SELL', sell('diamond', 2), 1100)
     await seedMove('rv-guuid-1', 1, 1, 'SELL', sell('gold', 3), 1110)
     await seedMove('rv-guuid-1', 1, 0, 'TAKE_CAMELS', { type: 'TAKE_CAMELS', count: 2 }, 1120)
@@ -118,9 +96,9 @@ describe('getRivalry — seat-swap correctness + full aggregate fixture', () => 
     await seedMove('rv-guuid-1', 2, -1, 'round_end', roundEnd(1, [40, 55], 1), 1230)
 
     // SWAPPED seats: me=seat1, them=seat0.
-    await seedMatchRow({ gameUuid: 'rv-guuid-2', code: 'BBBB22', status: 'completed', winnerSeat: 0, createdAt: 3000, endedAt: 4000 })
-    await seedSeat('rv-guuid-2', 0, THEM, 'reks')
-    await seedSeat('rv-guuid-2', 1, ME, 'Me')
+    await seedGame(DB(), { gameUuid: 'rv-guuid-2', code: 'BBBB22', status: 'completed', winnerSeat: 0, createdAt: 3000, endedAt: 4000 })
+    await seedSeat(DB(), 'rv-guuid-2', 0, THEM, 'reks')
+    await seedSeat(DB(), 'rv-guuid-2', 1, ME, 'Me')
     await seedMove('rv-guuid-2', 1, 1, 'SELL', sell('diamond', 2), 3100)
     await seedMove('rv-guuid-2', 1, 0, 'SELL', sell('spice', 3), 3110)
     await seedMove('rv-guuid-2', 1, -1, 'round_end', roundEnd(1, [30, 85], 1), 3120)
@@ -215,9 +193,9 @@ describe('getRivalry — no shared games', () => {
   })
 
   it('a match that never resolved a winner (should be unreachable for completed/resigned, but defensively excluded) does not count', async () => {
-    await seedMatchRow({ gameUuid: 'rv-guuid-unresolved', code: 'CCCC33', status: 'completed', winnerSeat: null, createdAt: 5000, endedAt: 6000 })
-    await seedSeat('rv-guuid-unresolved', 0, 'rv-acct-unresolved-me', 'Me')
-    await seedSeat('rv-guuid-unresolved', 1, 'rv-acct-unresolved-them', 'Them')
+    await seedGame(DB(), { gameUuid: 'rv-guuid-unresolved', code: 'CCCC33', status: 'completed', winnerSeat: null, createdAt: 5000, endedAt: 6000 })
+    await seedSeat(DB(), 'rv-guuid-unresolved', 0, 'rv-acct-unresolved-me', 'Me')
+    await seedSeat(DB(), 'rv-guuid-unresolved', 1, 'rv-acct-unresolved-them', 'Them')
 
     const result = await getRivalry(DB(), 'rv-acct-unresolved-me', 'rv-acct-unresolved-them')
     expect(result).toEqual({ error: 'no_shared_games' })
@@ -239,9 +217,9 @@ describe('getRivalry — BUG 5: sells from an unfinished trailing round are excl
   const THEM5 = 'rv-acct-bug5-them'
 
   beforeAll(async () => {
-    await seedMatchRow({ gameUuid: 'rv-guuid-bug5', code: 'DDDD55', status: 'resigned', winnerSeat: 0, createdAt: 9000, endedAt: 9500 })
-    await seedSeat('rv-guuid-bug5', 0, ME5, 'Me5')
-    await seedSeat('rv-guuid-bug5', 1, THEM5, 'reks5')
+    await seedGame(DB(), { gameUuid: 'rv-guuid-bug5', code: 'DDDD55', status: 'resigned', winnerSeat: 0, createdAt: 9000, endedAt: 9500 })
+    await seedSeat(DB(), 'rv-guuid-bug5', 0, ME5, 'Me5')
+    await seedSeat(DB(), 'rv-guuid-bug5', 1, THEM5, 'reks5')
 
     // Round 1 completes normally — its sells MUST count.
     await seedMove('rv-guuid-bug5', 1, 0, 'SELL', sell('diamond', 3), 9100) // mine: 7+7+5=19, bonus tier3
