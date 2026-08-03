@@ -142,3 +142,17 @@ was patched 2026-08-03 — also closed, not open.
 If you find something genuinely open that isn't listed above, add it here
 with a status tag rather than back into the chronicle — the chronicle is
 history-only now (see its header).
+
+## Recorded, deliberately DECLINED (2026-08-03 quality sweep — don't re-litigate without new evidence)
+- **gameStore online-slice split** — the sweep itself rated it "a bet, not a
+  clear win": ~1,700 lines of timer-sensitive whitebox tests must survive
+  byte-for-byte; the file already reads in labeled sections and ~29% is
+  load-bearing dated postmortem comments.
+- **StatsDashboard 3-way split** — absorbed three features the same week it
+  was assessed; let it settle. Extraction seams are documented in the sweep.
+- **Zustand selector idiom refactor** (8 whole-store subscribers) — real
+  anti-pattern, negligible cost at ~10 users; revisit only with a measured
+  render-perf complaint.
+- **Rollout-policy removal from ismctsBot.ts** — not dead code; it is the
+  A/B tuning surface for the next ISMCTS iteration (Fable-only work).
+- **howler → native Audio** — working audio on mobile Safari is worth 30kB.
