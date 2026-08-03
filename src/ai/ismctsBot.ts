@@ -202,6 +202,18 @@ function actionKey(a: Action): string {
 // heavier deck-heat / hate-drafting scans that aren't needed at MCTS's call
 // volume.
 // ---------------------------------------------------------------------------
+// Benchmark A/B switch for the EVAL V2 term package (2026-08-02 deep dive —
+// stack bonus option value, deck-clock decay, precious pair momentum, and the
+// fair denial term; each documented at its site inside staticEval).
+// Production always runs true; the seeded v2-vs-v1 gate flips it per player
+// via __setEvalV2. Module-level (not threaded through options) because
+// staticEval sits several frames deep in the iteration path and the search is
+// strictly single-threaded per call.
+let EVAL_V2 = true
+export function __setEvalV2(on: boolean): void {
+  EVAL_V2 = on
+}
+
 function staticEval(state: GameState, observerIndex: 0 | 1): number {
   const me = state.players[observerIndex]
   const oppIndex = observerIndex === 0 ? 1 : 0
@@ -218,6 +230,12 @@ function staticEval(state: GameState, observerIndex: 0 | 1): number {
   const oppBonus = opp.bonusTokens.reduce((s, t) => s + bonusVal(t), 0)
   score += (myBonus - oppBonus) * 1.5
 
+  // Deck-clock (v2): 1.0 with 8+ cards left, fading to 0 as the deck (the
+  // round's primary end-trigger) empties. Both the option-value and momentum
+  // terms scale with it, and held-stack value decays against it.
+  const clock = EVAL_V2 ? Math.min(1, state.deck.length / 8) : 1
+  const heldDecay = EVAL_V2 ? 0.7 + 0.3 * clock : 1
+
   for (const good of GOOD_ORDER) {
     const pile = state.tokens[good] as readonly number[]
     const top = pile[0] ?? 0
@@ -226,9 +244,53 @@ function staticEval(state: GameState, observerIndex: 0 | 1): number {
     const precious = PRECIOUS.has(good)
     const myCount = goodCount(me.hand, good)
     if (myCount >= minSell) {
-      score += sumTopN(pile, myCount) * (precious ? 1.3 : 1.0)
+      // heldDecay (v2): held value fades as the deck-clock runs out — the
+      // corpus showed the bot stranding sellable stacks (a full precious
+      // pair unsold at round end in 30% of games) and showing ZERO sell-rate
+      // shift at deck<=4 while Vijay's jumped +15pp. Realized tokens (2.0x)
+      // don't decay, so cashing out dominates late. Round-end reachability
+      // is otherwise invisible to a mid-round eval (no terminal in horizon).
+      score += sumTopN(pile, myCount) * (precious ? 1.3 : 1.0) * heldDecay
+      // Option value of the bonus tier this stack could ALREADY bank
+      // (2026-08-02: bot cashed quick 3s ~6x more often than 4s+5s combined
+      // while Vijay farmed 4/5-bonuses — held stacks were valued ONLY by
+      // goods tokens, so the "wait for the 4th card" line washed out under
+      // per-iteration determinization). 0.8x of the bankable tier (missing
+      // 0.2 = tempo/risk), scaled by the clock: building needs time, and a
+      // stack you cannot finish before round end is a trap, not an option.
+      if (myCount >= 3 && EVAL_V2) {
+        score += (myCount >= 5 ? 9 : myCount === 4 ? 5 : 2) * 1.5 * 0.8 * clock
+      }
     } else if (myCount > 0) {
-      score += top * myCount * (precious ? 0.7 : 0.35)
+      score += top * myCount * (precious ? 0.7 : 0.35) * heldDecay
+      // Pair momentum (v2): a lone precious was a flat 0.7x with no signal
+      // that it is PROGRESS toward the pair that unlocks selling — the
+      // 0->1->2 version of the same horizon-blindness as the 3->4->5 term
+      // above. Credit part of the SECOND pile token (the pair's completion
+      // payoff): front-loaded piles (diamond 7,7 / gold 6,6) automatically
+      // make this urgent where urgency is real — the corpus gap was gold
+      // (-20.5pp take-rate vs Vijay, z=-4.6) and diamond (-13.1pp), while
+      // flat-piled silver showed NO gap. Clock-scaled: no pair-chasing at
+      // round end.
+      if (EVAL_V2 && precious) {
+        score += (pile[1] ?? 0) * 0.35 * clock
+      }
+    }
+    // Fair denial term (v2): states where the OPPONENT builds a sellable
+    // stack are bad, priced at the pile value their stack would harvest.
+    // This creates in-tree denial gradients (take the card they need — their
+    // determinized hand stays smaller two plies later — and pile-racing:
+    // selling first drops `top`, shrinking their stack's worth). FAIR:
+    // `opp.hand` here is the DETERMINIZED hand fairifyState built from
+    // public info only — revealedHands (cards they took face-up, which the
+    // bot legitimately saw) plus uniform random fill that averages out
+    // across iterations. The corpus showed a 73% denial miss rate, and
+    // Vijay's un-denied stacks became his biggest payoffs.
+    if (EVAL_V2) {
+      const oppCount = goodCount(opp.hand, good)
+      if (oppCount >= minSell) {
+        score -= (oppCount - 1) * top * 0.25
+      }
     }
   }
 
