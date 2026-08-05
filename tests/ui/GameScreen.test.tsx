@@ -135,3 +135,13 @@ describe('Deck count warning color', () => {
     expect(screen.getByText('Deck: 10')).toHaveStyle({ color: '#888' })
   })
 })
+
+describe('Hand row 5-slot cap (matches the market + phone layout)', () => {
+  it('caps the hand container at exactly five md card widths so slots 6+/camels wrap to row 2', () => {
+    render(<MemoryRouter><GameScreen /></MemoryRouter>)
+    const row = screen.getByTestId('hand-row')
+    // 5 cards x 75px + 4 gaps x 12px = 423 — one market-width row.
+    expect(row).toHaveStyle({ maxWidth: '423px' })
+    expect(row).toHaveStyle({ flexWrap: 'wrap' })
+  })
+})

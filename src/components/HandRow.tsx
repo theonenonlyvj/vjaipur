@@ -34,7 +34,12 @@ export function HandRow({ hand, inExchange, selectedIndices, camelsUsed, herd, o
   }
 
   return (
-    <div style={{ display: 'flex', gap: isMobile ? 8 : 12, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 0', minHeight: 116, alignItems: 'center' }}>
+    // maxWidth caps the row at exactly FIVE md cards (5x75 + 4x12 = 423px) so
+    // the hand wraps after slot 5 on EVERY viewport — matching the market's
+    // 5 slots above and the layout a phone's width already forces (Vijay
+    // 2026-08-05: "5 on row 1 to match the market, 6+7+camels on row 2").
+    // Cards 6-7 and the herd stack flow onto row 2 via the existing wrap.
+    <div data-testid="hand-row" style={{ display: 'flex', gap: isMobile ? 8 : 12, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 0', minHeight: 116, alignItems: 'center', maxWidth: 423, marginInline: 'auto' }}>
       <AnimatePresence mode="popLayout">
         {hand.map((card, i) => {
           const selected = selectedIndices.includes(i)
