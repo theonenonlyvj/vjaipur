@@ -20,13 +20,14 @@ export interface GameScreenProps {
   frozen?: boolean
 }
 
-/** Deck-count warning color (a round ends the instant the deck empties, so a
- *  shrinking deck is a real "wrap it up" signal): amber at <=6 remaining,
- *  red+bold at <=3, unchanged otherwise. Same weight (800) for both warning
- *  tiers — only the color escalates. */
+/** Deck-count warning (a round ends the instant the deck empties, so a
+ *  shrinking deck is a real "wrap it up" signal). Vijay 2026-08-05: escalate
+ *  earlier and GROW the text, "slight when <10 then more <5" — so: a slight
+ *  amber bump under 10 remaining, a bigger red alarm under 5. em-based so it
+ *  scales with the label's own size. */
 function deckCountStyle(remaining: number): CSSProperties {
-  if (remaining <= 3) return { color: '#e05050', fontWeight: 800 }
-  if (remaining <= 6) return { color: '#f09030', fontWeight: 800 }
+  if (remaining <= 4) return { color: '#e05050', fontWeight: 800, fontSize: '1.2em' }
+  if (remaining <= 9) return { color: '#f09030', fontWeight: 800, fontSize: '1.07em' }
   return {}
 }
 

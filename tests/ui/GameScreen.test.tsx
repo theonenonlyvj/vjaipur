@@ -115,21 +115,23 @@ describe('Deck count warning color', () => {
     useGameStore.setState({ state: { ...s, deck: s.deck.slice(0, n) } })
   }
 
-  it.each([6, 5, 4])('renders amber (#f09030, bold) at %i cards left', (n) => {
+  // Vijay 2026-08-05: escalate earlier + grow the text — slight under 10,
+  // more under 5.
+  it.each([9, 7, 5])('renders amber, bold, slightly grown (1.07em) at %i cards left', (n) => {
     setDeckLength(n)
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#f09030', fontWeight: 800 })
+    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#f09030', fontWeight: 800, fontSize: '1.07em' })
   })
 
-  it.each([3, 2, 1, 0])('renders red (#e05050, bold) at %i cards left', (n) => {
+  it.each([4, 3, 1, 0])('renders red, bold, grown (1.2em) at %i cards left', (n) => {
     setDeckLength(n)
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#e05050', fontWeight: 800 })
+    expect(screen.getByText(`Deck: ${n}`)).toHaveStyle({ color: '#e05050', fontWeight: 800, fontSize: '1.2em' })
   })
 
-  it('renders the normal (unstyled) color at 7+ cards left', () => {
-    setDeckLength(7)
+  it('renders the normal (unstyled) color at 10+ cards left', () => {
+    setDeckLength(10)
     render(<MemoryRouter><GameScreen /></MemoryRouter>)
-    expect(screen.getByText('Deck: 7')).toHaveStyle({ color: '#888' })
+    expect(screen.getByText('Deck: 10')).toHaveStyle({ color: '#888' })
   })
 })
