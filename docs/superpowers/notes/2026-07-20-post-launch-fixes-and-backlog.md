@@ -324,3 +324,26 @@ clean it up. make sure we don't have any standing bugs."
    .env.example completed, testing.md live-pointer. server/ + socketService
    left for Vijay's held decommission.
 Client 776 / worker 292 tests. Repo state: main=a6602cc + cleanup commit.
+
+## UPDATE 2026-08-04/05 — v2 field verdict + coaching + two UI polish items (2f777f2, 259c738)
+1. **Eval v2 field data (34 depth-controlled games, the WATCH item): Vijay
+   10W-24L (29%) vs v2** — the bot overshot its 60% gate prediction against
+   the only opponent that matters. Iteration floor working (median 41.7k
+   visits, no throttled asterisks). Loss anatomy: avg margin +1.6 but MEDIAN
+   -1 — his wins are +11..+40 blowouts, his losses are coin-flips (11 of 24
+   by <=2 pts incl. THREE at margin 0 = tiebreak losses). Camel war ceded:
+   his take-rate fell 17%->11% while the bot holds 22% and takes end-of-round
+   majority 24-10; bot held majority in 11 of his 14 close losses. His engine
+   still superior (tokens/card 3.67 vs 3.38; 4/5-sales 0.97/g vs 0.65).
+   COACHING DELIVERED: re-enter the camel war; near round end w/ close score
+   prefer the 3-sale NOW (tiebreak = bonus-token COUNT — engine verified
+   scoring.ts: bonus count then goods count — his fewer-bigger style
+   structurally loses ties); v2's deck-clock ended the free endgame gifts.
+   NO retune needed — v2 stands.
+2. **Deck warning escalation (2f777f2)**: tiers 6/3 -> 9/4 with em growth —
+   amber bold 1.07em at <=9, red bold 1.2em at <=4 (his ask: "slight <10,
+   more <5").
+3. **Hand row 5-slot cap (259c738)**: maxWidth = exactly five md cards
+   (423px) on the wrapping flex container — desktop now lays out like his
+   iPhone by construction (5 on row 1 under the market; 6/7/camels row 2;
+   small hands + camels still share a row when they fit).
