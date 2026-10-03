@@ -1,67 +1,29 @@
 # Testing And Verification
 
-## Commands
+## Required Commands
 
 ```bash
-npm run build
 npm run test
-npm run test:server
+npm run build
 npm run test:all
 ```
 
-## Current Fresh Results
+- `npm run test` runs client, engine, UI, and root tooling tests.
+- `npm run build` typechecks the client/tests and builds the Vite bundle.
+- `npm run test:all` runs the root suite followed by `worker` tests.
 
-Pass/fail counts drift too fast to hardcode here reliably (2026-08-03: this
-line was still reading "1 failed, 254 passed" from 2026-07-09 long after the
-real suite had grown past 750 client tests). Run the commands below and read
-their own summary line — that output is always the source of truth, not this
-doc:
+The Worker has its own dependency tree. Install it with `npm install` from
+`worker/` before running the combined gate in a fresh checkout.
 
-- Client/engine/UI: `npm run test` (from the project root).
-- Worker: `cd worker && npm test`.
-- Legacy server (see "Server DB Tests" below): `npm run test:server`.
-
-tsconfig.json's `include` is `["src", "tests"]` — it does not cover
-`server/`, so `npm run build`'s `tsc` step never typechecks the legacy
-server; `npm run test:server` (vitest, not tsc) is the only gate on that
-code.
-
-## Known Failing Areas
-
-*(2026-08-03: this section previously described a Disconnect Timeout
-mismatch and Server DB mock drift from the 2026-07-09 audit. Neither
-reproduces today — all suites, including the legacy server's 48 tests, pass
-green — and the disconnect model itself was replaced by the 2026-07-18
-server-authoritative rebuild (no auto-forfeit; pause/claim-win instead). No
-known failing areas at present; the one recurring non-failure is the heavy
-AI wall-clock tests flaking under full-suite CPU contention — always green
-in isolation, documented in docs/STATE.md.)*
-
-## Warning Noise
-
-Passing UI tests emit:
-
-- React ref warnings from animated `CardView` with Framer Motion `popLayout`.
-- React Router future-flag warnings.
-
-Resolution: use `forwardRef` for animated cards and consciously configure or
-accept Router future flags.
-
-## Slow Tests
-
-Fair Bot tests dominate runtime because they call production search budgets.
-
-Resolution: inject test budgets or depth caps for normal tests, and keep any
-expensive search test as a separate smoke test.
-
-## Release Gate
-
-Do not claim release readiness until:
+## Focused Commands
 
 ```bash
-npm run build
-npm run test
-npm run test:server
+npm test -- tests/net/online.test.ts tests/ui/statsStore.test.ts
+cd worker && npm test -- test/stats.test.ts
 ```
 
-all exit with status 0.
+Passing UI tests may emit React Router future-flag warnings. Search-budget
+tests can be sensitive to heavy machine contention; a failure must reproduce
+in isolation before it is classified as a product regression.
+
+Do not record fixed test counts here. Command output is the source of truth.

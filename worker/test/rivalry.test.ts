@@ -84,7 +84,7 @@ describe('getRivalry — seat-swap correctness + full aggregate fixture', () => 
   beforeAll(async () => {
     await seedGame(DB(), { gameUuid: 'rv-guuid-1', code: 'AAAA11', status: 'completed', winnerSeat: 0, createdAt: 1000, endedAt: 2000 })
     await seedSeat(DB(), 'rv-guuid-1', 0, ME, 'Me')
-    await seedSeat(DB(), 'rv-guuid-1', 1, THEM, 'reks')
+    await seedSeat(DB(), 'rv-guuid-1', 1, THEM, 'Alice')
     await seedMove('rv-guuid-1', 1, 0, 'SELL', sell('diamond', 2), 1100)
     await seedMove('rv-guuid-1', 1, 1, 'SELL', sell('gold', 3), 1110)
     await seedMove('rv-guuid-1', 1, 0, 'TAKE_CAMELS', { type: 'TAKE_CAMELS', count: 2 }, 1120)
@@ -97,7 +97,7 @@ describe('getRivalry — seat-swap correctness + full aggregate fixture', () => 
 
     // SWAPPED seats: me=seat1, them=seat0.
     await seedGame(DB(), { gameUuid: 'rv-guuid-2', code: 'BBBB22', status: 'completed', winnerSeat: 0, createdAt: 3000, endedAt: 4000 })
-    await seedSeat(DB(), 'rv-guuid-2', 0, THEM, 'reks')
+    await seedSeat(DB(), 'rv-guuid-2', 0, THEM, 'Alice')
     await seedSeat(DB(), 'rv-guuid-2', 1, ME, 'Me')
     await seedMove('rv-guuid-2', 1, 1, 'SELL', sell('diamond', 2), 3100)
     await seedMove('rv-guuid-2', 1, 0, 'SELL', sell('spice', 3), 3110)
@@ -107,7 +107,7 @@ describe('getRivalry — seat-swap correctness + full aggregate fixture', () => 
   it('resolves opponentName from the NEWEST shared match', async () => {
     const result = await getRivalry(DB(), ME, THEM)
     if ('error' in result) throw new Error('expected a real rivalry, got no_shared_games')
-    expect(result.opponentName).toBe('reks')
+    expect(result.opponentName).toBe('Alice')
   })
 
   it('record.matches: match-level wins/losses from games.winner_seat, per-match seat mapping honored', async () => {
@@ -292,7 +292,7 @@ describe('GET /stats/rivalry router', () => {
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { opponentName: string; record: { games: { wins: number } } }
-    expect(body.opponentName).toBe('reks')
+    expect(body.opponentName).toBe('Alice')
     expect(body.record.games.wins).toBe(2)
   })
 })
@@ -319,13 +319,13 @@ function ineligibleBonusSales(): RivalryBonusSales {
 
 describe('computeEdgeFinder', () => {
   it('nothing clears its floor -> "play a few more games to unlock"', () => {
-    const msg = computeEdgeFinder('reks', ineligibleTokensPerCard(), ineligibleBonusSales(), 0, 0, 3)
+    const msg = computeEdgeFinder('Alice', ineligibleTokensPerCard(), ineligibleBonusSales(), 0, 0, 3)
     expect(msg).toBe('Edge finder: play a few more games to unlock.')
   })
 
   it('the viewer leads (or ties) on every eligible row -> "no edge to give"', () => {
     const msg = computeEdgeFinder(
-      'reks',
+      'Alice',
       eligibleTokensPerCard(4.0, 3.0), // I lead
       eligibleBonusSales({ theirs3: 1, theirs4: 1, theirs5: 0, mine3: 2, mine4: 2, mine5: 1 }), // I lead every tier
       5, // my camel games
@@ -338,31 +338,31 @@ describe('computeEdgeFinder', () => {
   it('picks a real, fact-grounded edge in the opponent\'s favor and cites the exact numbers from the payload', () => {
     // Only tokensPerCard is eligible, and the opponent leads it — this must
     // be the picked row with no other eligible candidate to compete with.
-    const msg = computeEdgeFinder('reks', eligibleTokensPerCard(3.0, 4.5), ineligibleBonusSales(), 0, 0, 3)
+    const msg = computeEdgeFinder('Alice', eligibleTokensPerCard(3.0, 4.5), ineligibleBonusSales(), 0, 0, 3)
     expect(msg).toBe(
-      "Edge finder: reks earns more per card sold than you (4.50 vs your 3.00) — selling earlier in a pile is the usual explanation for a gap like this.",
+      "Edge finder: Alice earns more per card sold than you (4.50 vs your 3.00) — selling earlier in a pile is the usual explanation for a gap like this.",
     )
   })
 
   it('camel-majority requires >=6 games played even when the gap itself is large', () => {
     // Opponent leads camel majority hugely, but only 5 games played (< the
     // 6-game floor) — must NOT be picked; nothing else eligible either.
-    const msg = computeEdgeFinder('reks', ineligibleTokensPerCard(), ineligibleBonusSales(), 0, 5, 5)
+    const msg = computeEdgeFinder('Alice', ineligibleTokensPerCard(), ineligibleBonusSales(), 0, 5, 5)
     expect(msg).toBe('Edge finder: play a few more games to unlock.')
   })
 
   it('camel-majority clears its floor at exactly 6 games played and gets picked when it is the only opponent-favored eligible row', () => {
-    const msg = computeEdgeFinder('reks', ineligibleTokensPerCard(), ineligibleBonusSales(), 2, 4, 6)
-    expect(msg).toBe('Edge finder: reks takes the camel majority in 4 of your 6 games — contest the herd earlier.')
+    const msg = computeEdgeFinder('Alice', ineligibleTokensPerCard(), ineligibleBonusSales(), 2, 4, 6)
+    expect(msg).toBe('Edge finder: Alice takes the camel majority in 4 of your 6 games — contest the herd earlier.')
   })
 
   it('among several opponent-favored eligible rows, picks the largest relative gap (bonus4 dominates a modest tokensPerCard gap)', () => {
     const msg = computeEdgeFinder(
-      'reks',
+      'Alice',
       eligibleTokensPerCard(3.0, 3.3), // opponent favor, but a small ~10% relative gap
       eligibleBonusSales({ mine4: 2, theirs4: 8, mine3: 2, theirs3: 2, mine5: 1, theirs5: 1 }), // opponent favor, a 300% relative gap
       0, 0, 3,
     )
-    expect(msg).toBe("Edge finder: reks converts more 3+ sales into 4s (8 vs your 2) — hold a beat longer.")
+    expect(msg).toBe("Edge finder: Alice converts more 3+ sales into 4s (8 vs your 2) — hold a beat longer.")
   })
 })

@@ -83,7 +83,7 @@ export const TIERS: Tier[] = [
     // round-ending sell while ahead, avoiding one while behind, camel-majority
     // swings, selling before a known opponent threat drains a pile).
     id: 'hard2',
-    label: 'Hard (αβ)', // Vijay's naming call 2026-07-21 — the alpha-beta fair
+    label: 'Hard (αβ)', // Distinguishes the alpha-beta fair
     // bot, disambiguated from Hard (ISMCTS); the family umbrella stays "Hard"
     // via FAMILY_LABELS.
     tagline: 'No peeking. Reads the odds. Genuinely tough.',
@@ -125,7 +125,7 @@ export const TIERS: Tier[] = [
     tagline: '',
     pickerOrder: null,
     retired: true,
-    // DEMOTED to the medium family 2026-07-21 (Vijay's call, data-backed):
+    // DEMOTED to the medium family after a data-backed review:
     // benchmarked only 70% vs Medium — the real hard family (hard2/ismcts)
     // runs ~100%. It keeps its historical label; it just files under Medium.
     family: 'medium',
@@ -141,7 +141,7 @@ export const TIERS: Tier[] = [
     tagline: '',
     pickerOrder: null,
     retired: true,
-    // DEMOTED to the medium family 2026-07-21 (Vijay's call, data-backed):
+    // DEMOTED to the medium family after a data-backed review:
     // benchmarked only 73% vs Medium. Label keeps its history; placement
     // tells the truth.
     family: 'medium',

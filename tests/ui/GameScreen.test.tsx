@@ -115,7 +115,7 @@ describe('Deck count warning color', () => {
     useGameStore.setState({ state: { ...s, deck: s.deck.slice(0, n) } })
   }
 
-  // Vijay 2026-08-05: escalate earlier + grow the text — slight under 10,
+  // playtest requirement: escalate earlier + grow the text — slight under 10,
   // more under 5.
   it.each([9, 7, 5])('renders amber, bold, slightly grown (1.07em) at %i cards left', (n) => {
     setDeckLength(n)

@@ -1,9 +1,8 @@
 # vjaipur Online Migration Plan — trust-relay → server-authoritative
 
-**Author:** Claude (review + planning pass, 2026-07-16)
-**Status:** Proposal for Vijay's decision. Nothing here is built. See the
+**Status:** Proposal for the maintainer's decision. Nothing here is built. See the
 "Decisions needed" section — this plan has open architectural forks that are
-Vijay's call, not mine.
+the maintainer's call, not mine.
 
 Companion reading (already exists, do not duplicate):
 - `../../../../vgames-platform/docs/P2-REFRAME-two-rings.md` — the Ring model.
@@ -106,7 +105,7 @@ one-page `/stats/rollup` contract for the future cross-game player card.
 3. **P4 — stats to own D1**, leaderboard re-keyed on `accountId`, Supabase
    decommissioned, `/stats/rollup` exposed.
 
-Each phase ends green + reviewed; no push/deploy/live-DB mutation without Vijay.
+Each phase ends green + reviewed; no push/deploy/live-DB mutation without the maintainer.
 There ARE active users (~10) → dual-run and a gated cutover, like the P1 auth
 migration. History carries over (matches already keyed to `accountId`).
 
@@ -121,7 +120,7 @@ safety now; they are not a substitute for the migration. The score-forgery and
 hand-leak holes CANNOT be closed inside the relay and are intentionally left for
 P3.
 
-## 7. Decisions needed from Vijay
+## 7. Decisions needed from the maintainer
 
 1. **Extract a shared "Ring A" now, or port viota's DO into a vjaipur worker
    directly?** `P2-REFRAME` says extract Ring A *later, from real duplication*.

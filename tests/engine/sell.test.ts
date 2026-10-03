@@ -94,7 +94,7 @@ describe('SELL', () => {
   })
 
   it('sells 4 into a 3-token pile: takes only the 3 available BUT still earns the FOUR-tier bonus', () => {
-    // Official rule + Vijay's 2026-07-26 question: the bonus tier is decided by
+    // Official rule: the bonus tier is decided by
     // how many CARDS you sold, never by how many goods tokens the pile could
     // still pay out. Selling 4 when only 3 tokens remain yields 3 tokens (the
     // 4th card earns nothing) and a FOUR-tier bonus — not a three-tier one.

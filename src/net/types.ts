@@ -245,6 +245,8 @@ export interface ReportMatchBody {
 
 export type ReportMatchResult = { ok: true; duplicate?: true }
 
+export type UpdateProfileResult = { ok: true }
+
 // ---- my-style (worker/src/do/style.ts) -------------------------------------
 
 export interface MyStyleAvailableTier {

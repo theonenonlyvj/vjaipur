@@ -3,13 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { StatsStrip } from '../../src/components/StatsStrip'
 import { useStatsStore } from '../../src/store/statsStore'
 
-// Mock socket service as it's used in statsStore
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    syncMatch: vi.fn(),
-  },
-}))
-
 describe('StatsStrip', () => {
   it('renders record and delta correctly', () => {
     // Setup some matches

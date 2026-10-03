@@ -1,78 +1,36 @@
 # Admin Runbook
 
-## Common Incidents
+## Worker Or Identity Failure
 
-### Supabase Project Paused
+1. Determine whether the failing request targets the game Worker or VGames
+   Identity; record only sanitized status/error codes.
+2. Check the relevant Worker logs without printing bearer tokens or account
+   records.
+3. Verify the `IDENTITY` service binding and the public fallback URL.
+4. Confirm D1 migrations have been applied before treating schema errors as
+   application bugs.
 
-Impact:
+## Online Game Incident
 
-- Account restore fails.
-- Stats sync fails.
-- Global leaderboard fails.
+1. Record an approximate time and a synthetic/reported room code only when it
+   is necessary for lookup.
+2. Inspect Durable Object and Worker logs for request status, move index, and
+   sanitized error codes.
+3. Verify redaction and idempotency before replaying any action.
+4. Never paste raw tokens, account ids, private hands, or production rows into
+   public issues or documentation.
 
-Action:
+## Profile Or Stats Incident
 
-1. Resume the Supabase project in Supabase Studio.
-2. Confirm the project URL resolves.
-3. Restart the Render server.
-4. Verify leaderboard and restore flows.
+- Profile renames use authenticated `POST /stats/profile` and update D1.
+- Stats/history/leaderboard reads are Worker routes backed by D1.
+- Supabase remains available to the retained legacy server and older clients.
 
-### Service Role Key Exposed
+## Legacy Service Retirement
 
-Impact:
-
-- Anyone with the key can bypass row-level policies through server-side API
-  access.
-
-Action:
-
-1. Rotate the service-role key in Supabase.
-2. Update `SUPABASE_SERVICE_ROLE_KEY` on `vjaipur-server`.
-3. Restart/redeploy the server.
-4. Search logs/screenshots/docs for the old key and remove visible copies.
-
-### Online Game Incorrectly Forfeits
-
-Impact:
-
-- Players can lose a match while both believe they are active.
-
-Action:
-
-1. Capture approximate time, room code if known, and both players' connection
-   context.
-2. Check server logs for disconnect/reconnect events.
-3. Do not assume a timeout tweak is enough. The online subsystem needs session
-   tokens, heartbeats, and server-side state ownership.
-
-## Account Model Notes
-
-The current model is not a complete production auth system. It was built for
-frictionless play and stat recovery.
-
-Do:
-
-- Keep anonymous play available.
-- Treat recovery/account security as optional.
-- Require proof of current guest secret before securing a guest account.
-- Avoid printing account secrets in logs.
-
-Do not:
-
-- Require a password to open or play the site.
-- Use short friend codes as proof of account ownership.
-- Return stored passwords/secrets unless a migration explicitly requires it.
-
-## Useful Commands
-
-```bash
-npm run build
-npm run test
-npm run test:server
-npm run test:all
-```
-
-## Data Checks
-
-Use read-only Supabase checks when diagnosing production data. Print counts and
-sanitized error codes only. Do not print service-role keys or raw secrets.
+The updated client uses the Worker for profile changes. The Node/Socket.IO
+server, its dependencies, tests, Supabase integration, and Render definition
+remain available for older deployed clients. Repository inspection alone does
+not prove production traffic has stopped using them. Retire them only after
+Worker-first deployment, client smoke tests, and observed legacy traffic and
+dependency checks. Keep the Render static site.

@@ -1,66 +1,45 @@
 # Render Deployment
 
-## Services
+`render.yaml` retains the `vjaipur-server` compatibility service and the
+`vjaipur-client` static Vite site. The static site defines ordered same-origin
+proxy routes:
 
-`render.yaml` defines two services:
+- `/api/*` → the VJaipur game Worker
+- `/id-api/*` → VGames Identity
+- `/*` → `/index.html` for SPA navigation
 
-- `vjaipur-server`: Node web service for Socket.IO and Supabase-backed data.
-- `vjaipur-client`: static Vite client.
+The API routes must remain above the SPA catch-all. Cache headers keep
+`index.html` revalidated while allowing hashed assets to be immutable.
 
-## Required Environment Variables
+## Client Environment
 
-Server service:
+- `VITE_VJAIPUR_WORKER_URL`: game Worker base URL.
+- `VITE_VGAMES_URL`: VGames Identity base URL.
 
-- `NODE_ENV=production`
-- `CLIENT_ORIGIN`: exact allowed client origin.
-- `SUPABASE_URL`: Supabase project URL.
-- `SUPABASE_SERVICE_ROLE_KEY`: server-only service role key.
+These are public endpoints, not credentials. Never add Worker secrets or
+production account data to the static site's environment.
 
-Client service:
+## Legacy server environment
 
-- `VITE_SERVER_URL`: public URL of `vjaipur-server`.
+The compatibility server retains `npm run server:start`. Keep `VGAMES_URL`
+pointing at VGames Identity; `SUPABASE_URL` and the server-only
+`SUPABASE_SERVICE_ROLE_KEY` configure its legacy store. `CLIENT_ORIGIN`
+limits browser origins, and `PORT` configures its listener. Never expose the
+service-role key in client variables or commit its value. See `.env.example`.
 
-## Important Boundaries
-
-- Do not put `SUPABASE_SERVICE_ROLE_KEY` on the static client service.
-- Do not expose service-role keys in screenshots, logs, browser bundles, or docs.
-- Rotate the service-role key if it is ever exposed.
-
-## Supabase Pause Failure Mode
-
-If the Supabase project is paused, account restore, stats sync, and global
-leaderboard can fail even when the Render server itself is healthy.
-
-Symptoms:
-
-- Global leaderboard shows "Could not load leaderboard."
-- Restore/login fails.
-- Server logs show Supabase fetch/query failures.
-
-Recovery:
-
-1. Resume the Supabase project.
-2. Rotate exposed keys if needed.
-3. Update Render server env vars if keys changed.
-4. Restart `vjaipur-server`.
-5. Test `/health`, then account restore and leaderboard.
-
-## Deployment Risk
-
-The current production server start command uses `npx tsx server/index.ts`.
-This is convenient but fragile for production because it relies on TypeScript
-runtime tooling. A stabilization task should either precompile the server or
-make the runtime dependency explicit.
-
-## Pre-Deploy Checks
-
-Run locally:
+## Deployment Checks
 
 ```bash
+npm run test:all
 npm run build
-npm run test
-npm run test:server
 ```
 
-Known current state: these test gates are not green yet. See
-`docs/engineering/testing.md`.
+After deployment, verify the served bundle changed, then smoke-test online
+create/join, authenticated profile rename, stats, and both same-origin proxy
+paths.
+
+## Blueprint Sync Required
+
+A normal Render auto-deploy rebuilds the static site but may not apply changes
+to Blueprint service definitions, routes, or headers. The legacy web service remains in `render.yaml` until its retirement gate is met.
+Do not remove it merely because the new client no longer imports Socket.IO.

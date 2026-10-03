@@ -1,13 +1,13 @@
 # Overnight online rebuild — running notes (2026-07-18)
 
-Vijay's brief (2026-07-18 ~01:00): make vjaipur actually function online — fun and
+the reference player's brief (2026-07-18 ~01:00): make vjaipur actually function online — fun and
 solid. Migrate what needs migrating, push what works, checkpoint for regression.
 No disclosure labels on AI — rename instead (Hard III → "Omniscient Bot" or
 similar); need a fair hard player; good easy/medium too ("all my friends are
 nerds"). Keep stats, cut them over, keep them tied to the tier they were played
 against. Councils + cheap subagents at discretion. Ship by morning.
 
-Decisions (Vijay, 2026-07-18):
+Decisions (the reference player, 2026-07-18):
 1. Architecture: **own worker + own D1** (standalone vjaipur CF Worker, DO-per-game,
    its own D1; identity stays the shared vgames-identity service).
 2. Cutover: **tonight**, if tests + live e2e on real Cloudflare are green.
@@ -88,7 +88,7 @@ Decisions (Vijay, 2026-07-18):
   routing decision — code is the idFromName key). Launched a 3-lens
   adversarial integration review of the assembled worker.
 - ~03:05 — **machine slept mid-review; woke ~09:11** and the review workflow
-  auto-resumed (3 reviewers re-running). Vijay is back ("continue").
+  auto-resumed (3 reviewers re-running). the reference player is back ("continue").
 - 09:15 — Committed the green worker as `a09ba1e`. **Launched the client 2C
   rewrite in parallel** with the review (disjoint files): new src/net/* layer
   (http/online/nudge/outbox/session+heartbeat), view-driven gameStore online
@@ -122,24 +122,23 @@ Decisions (Vijay, 2026-07-18):
   oracle 45 matches/6830 moves vs independent scorer = 0 divergences; races 9/9
   no bugs; redaction 32 games/6315 steps = 0 leaks.
 - 10:30–10:38 — **DEPLOYED + LIVE-VERIFIED ON CLOUDFLARE:**
-  - D1 `vjaipur` created (`f363488e-1672-4104-851c-ccba73573820`), schema applied.
+  - D1 `vjaipur` created and schema applied.
   - `CLIENT_ORIGIN` secret = https://vjaipur-game.onrender.com; `wrangler deploy`
-    → **https://vjaipur-worker.theonenonlyvj.workers.dev** (version 94385877),
+    → the configured public Worker endpoint,
     cron active, GAME_DO + DB + VGAMES_URL bound.
   - **Live e2e ALL PASS** (2 real ghost tokens, full match to match_over):
     create/join/redaction/foreign-seat-403/idempotency/winnerSeat + 2 D1 matches
     rows (one per seat, opponent_type='online', source='online_authoritative').
     Wiped the e2e rows after.
-  - **Stats migration DONE:** 77 Supabase matches (0 skipped) + 3 player names
-    → D1. Live `/stats/leaderboard` shows `theonenonlyvj` (37g, 10.8% — the
-    Omniscient Bot has been wrecking him) + `reks` (2-0); ranking floor works.
+  - **Stats migration DONE:** migrated rows reached D1 and the leaderboard
+    ranking floor worked.
 - 10:39 — **CUTOVER PUSHED** (`85b5b66`, 8 commits f8a5ebf→85b5b66 to origin/main).
   Client default worker URL baked (`src/net/http.ts`, prod builds only), so no
   Render env var needed. Render auto-deploying the static client. Polling for the
   new bundle. **ROLLBACK: `git push origin checkpoint-2026-07-18-pre-online-worker^{}:main --force-with-lease`** (client returns to the Socket.IO relay, still running).
 
 ## 2026-07-18 (later) — post-cutover: no-AI-takeover, claim-win/resume-later, cosmetics, presence
-Vijay's feedback: 60s AI-takeover too quick; for 1:1 an AI finishing wearing a
+the reference player's feedback: 60s AI-takeover too quick; for 1:1 an AI finishing wearing a
 friend's name is weird. His idea: "claim win OR resume later."
 - **AI takeover REMOVED for 1:1** (`cf03cba`): silent absence just PAUSES on that
   seat (never auto-moves/flips to AI). Present player never touched. driveIfAI/
@@ -165,5 +164,5 @@ friend's name is weird. His idea: "claim win OR resume later."
   presence probe all pass on prod. D1 cleaned (77 migrated matches + real names
   kept). Tests: worker 207 / client 465 / server 48.
 - **Follow-up:** /my-games returns no opponent name → resume list shows code/status
-  not "vs Reks" (small worker join to add it). **STILL HOLDING** the old Render
-  Node backend + Supabase decommission until Vijay plays + confirms.
+  not "vs another player" (small worker join to add it). **STILL HOLDING** the old Render
+  Node backend + Supabase decommission until the reference player plays + confirms.

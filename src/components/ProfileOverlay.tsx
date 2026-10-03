@@ -1,17 +1,11 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useStatsStore, useStatsAggregates } from '../store/statsStore'
-import { socketService } from '../socket/socketService'
 
 interface ProfileOverlayProps {
   onClose: () => void
 }
 
 export function ProfileOverlay({ onClose }: ProfileOverlayProps) {
-  useEffect(() => {
-    const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-    socketService.connect(url, useStatsStore.getState().vgamesToken ?? undefined)
-  }, [])
-
   const { displayName, friendCode, claimed, sessionExpired, secureAccount, restoreAccount, clearStats } = useStatsStore()
   // Owner's 2026-07-28 GAMES-first ruling — CAREER STATS is GAMES-primary
   // (gamesWon/gamesLost/totalGames/winRate), with the match totals demoted

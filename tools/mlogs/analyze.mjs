@@ -3,7 +3,7 @@
 //
 // Re-runnable ISMCTS / match_logs analyzer, ported (metric-for-metric) from a
 // one-off Python script run over the vjaipur `match_logs` D1 table
-// (2026-07-27, corpus: 87 Vijay-vs-ISMCTS games). See
+// (baseline corpus: 87 anonymized player-vs-ISMCTS games). See
 // docs/ai/2026-07-27-ismcts-baseline-eval.md for the frozen baseline this
 // script's output is compared against.
 //

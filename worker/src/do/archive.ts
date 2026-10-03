@@ -20,7 +20,8 @@ import type { GameRepository, MoveRow, SeatRow } from './storage'
 /** Upsert the `players` display-name cache for every HUMAN seat (design spec
  *  §2: "every authenticated touch upserts players(...)"). Shared by
  *  `archiveGameCreate` and `archiveSeats` — both are "a seat roster changed"
- *  moments. */
+ *  moments. Existing profile names belong to POST /stats/profile; an older
+ *  identity/seat snapshot may seed an empty cache but must not overwrite them. */
 async function upsertPlayers(db: D1Database, seats: SeatRow[], now: number): Promise<void> {
   const stmts = seats
     .filter((s): s is SeatRow & { owner_account_id: string } => s.owner_type === 'human' && !!s.owner_account_id)
@@ -30,7 +31,7 @@ async function upsertPlayers(db: D1Database, seats: SeatRow[], now: number): Pro
           `INSERT INTO players (account_id, display_name, last_seen_at)
            VALUES (?, ?, ?)
            ON CONFLICT(account_id) DO UPDATE SET
-             display_name = excluded.display_name,
+             display_name = COALESCE(players.display_name, excluded.display_name),
              last_seen_at = excluded.last_seen_at`,
         )
         .bind(s.owner_account_id, s.display_name, now),

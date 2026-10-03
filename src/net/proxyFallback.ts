@@ -1,5 +1,5 @@
-// Shared same-origin proxy fallback core (2026-07-27, "Reks's phone"
-// failure class; factored out 2026-08-03 — BUG 1). Originally lived only in
+// Shared same-origin proxy fallback core for mobile content-blocker failures.
+// Originally lived only in
 // src/net/http.ts, which meant only GAME calls (`/games/*`) got the
 // resilience; src/auth/vgamesClient.ts's identity calls had none. Since
 // identity auth runs FIRST on every cold boot (an app can't do anything

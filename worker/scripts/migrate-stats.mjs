@@ -12,8 +12,7 @@
 //      worker/scripts/out/. NEVER invoked by the test suite; NEVER run
 //      without explicit `--live` + real env creds.
 //
-// Real Supabase columns (discovered from server/db.ts + server/index.ts,
-// the actual read/write path, not just docs/operations/supabase-schema.md):
+// Historical Supabase columns captured from the retired read/write path:
 //   players: id, friend_code, display_name, secret_key, created_at,
 //            vgames_account_id (nullable dual-run bridge column)
 //   matches: player_id, opponent_type, opponent_id, player_score,

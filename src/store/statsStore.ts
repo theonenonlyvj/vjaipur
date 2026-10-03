@@ -1,9 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { socketService } from '../socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../auth/vgamesClient'
 import { decodeJwtExp } from '../auth/tokenExpiry'
-import { history as fetchHistory, reportMatch as reportMatchToWorker } from '../net/online'
+import { history as fetchHistory, reportMatch as reportMatchToWorker, updateProfile as updateWorkerProfile } from '../net/online'
 import { WorkerError } from '../net/http'
 import { capLogForReport, type AiLogEntry } from './aiGameLog'
 
@@ -161,28 +160,6 @@ function generateSecretKey(): string {
   ).join('')
 }
 
-async function waitForConnection(): Promise<void> {
-  if (socketService.connected) return
-  
-  // Try to trigger a connection if it's not even started
-  const url = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
-  socketService.connect(url)
-
-  return new Promise((resolve, reject) => {
-    let attempts = 0
-    const interval = setInterval(() => {
-      attempts++
-      if (socketService.connected) {
-        clearInterval(interval)
-        resolve()
-      } else if (attempts > 100) { // 10 seconds
-        clearInterval(interval)
-        reject(new Error('Connection timeout'))
-      }
-    }, 100)
-  })
-}
-
 export const useStatsStore = create<StatsStore>()(
   persist(
     (set, get) => ({
@@ -295,7 +272,6 @@ export const useStatsStore = create<StatsStore>()(
           if (status === 'claimed') patch.claimed = true
           else if (status === 'ghost') patch.claimed = false
           set(patch)
-          socketService.setAuthToken(token)
           return { token, accountId }
         } catch (e) {
           if (authGeneration !== myGeneration) {
@@ -413,7 +389,6 @@ export const useStatsStore = create<StatsStore>()(
               claimed: true, // logged into an existing username+password account
               sessionExpired: false, // a real login always clears a stale signed-out flag
             })
-            socketService.setAuthToken(result.token)
             // Pull this account's match history so the career-stats panel
             // populates on a new device right after login. Fire-and-forget:
             // the store updates reactively; login itself returns immediately.
@@ -464,17 +439,16 @@ export const useStatsStore = create<StatsStore>()(
 
       setDisplayName: async (name) => {
         set({ displayName: name })
-        // VGames-token-gated, same bridge as addMatch/secureAccount — no
-        // plaintext secret round-trips to the game server for this.
+        // VGames-token-gated, same worker-owned path as the rest of the live
+        // stats system — no plaintext secret round-trips to a game server.
         // (ensureVGamesAccount calls ensureAccount() internally, minting a
         // friendCode/secretKey device credential first if needed.)
         const account = await get().ensureVGamesAccount()
         if (!account) return // fail-closed: no verified identity, don't sync
         try {
-          await waitForConnection()
-          socketService.updateProfile({ vgamesToken: account.token, displayName: name })
+          await updateWorkerProfile(name)
         } catch (e) {
-          console.warn('Could not sync profile name: connection timeout')
+          console.warn('Could not sync profile name:', e)
         }
       },
 

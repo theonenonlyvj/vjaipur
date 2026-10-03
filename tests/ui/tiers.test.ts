@@ -104,7 +104,7 @@ describe('tiers: retired tiers stay resolvable but out of the picker', () => {
 })
 
 describe('tier families (leaderboard "Hard"/"Medium" drill-down grouping)', () => {
-  // 2026-07-21 REASSIGNMENT (Vijay's data-backed call, do not revert): the
+  // 2026-07-21 REASSIGNMENT (the data-backed reassignment, do not revert): the
   // two retired Classic tiers ('hard', 'fair') moved from `family: 'hard'`
   // to `family: 'medium'` — each benchmarked only ~70%/73% vs Medium, not
   // the ~100% the real hard family (hard2/ismcts) runs. 'medium' itself now

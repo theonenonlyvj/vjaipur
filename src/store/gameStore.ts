@@ -299,8 +299,7 @@ function releasePendingMove(
 }
 
 export const useGameStore = create<GameStore>((set, get) => {
-  // ---- online singletons (live for the app's lifetime, mirroring the old
-  // module-level `socketService` singleton this replaces) ------------------
+  // ---- online singletons (live for the app's lifetime) -------------------
   let nudgeSocket: NudgeSocket | null = null
   let waitingPollTimer: ReturnType<typeof setInterval> | null = null
   let playingPollTimer: ReturnType<typeof setInterval> | null = null

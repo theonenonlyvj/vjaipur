@@ -107,7 +107,7 @@ Actually, the better approach: use `MotionConfig reducedMotion="always"` in the 
 - [ ] **Step 1.5** Run tests and fix any failures
 
 ```bash
-cd /Users/vijayram/Cursor/vjaipur && npm test 2>&1 | tail -20
+npm test 2>&1 | tail -20
 ```
 
 - [ ] **Step 1.6** Commit: `feat: add layout animations to Card, MarketRow, HandRow`
@@ -239,6 +239,6 @@ export function BonusReveal({ show, onDone }: { show: boolean; onDone: () => voi
 
 ## Done
 
-Run full suite: `cd /Users/vijayram/Cursor/vjaipur && npm test`
+Run full suite: `npm test`
 
 Then `superpowers:finishing-a-development-branch` to push.

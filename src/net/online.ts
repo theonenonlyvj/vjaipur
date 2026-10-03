@@ -20,6 +20,7 @@ import type {
   ReclaimResponse,
   ReportMatchBody,
   ReportMatchResult,
+  UpdateProfileResult,
   ResignResponse,
   ResolveResponse,
   RivalryResponse,
@@ -149,6 +150,15 @@ export async function history(): Promise<HistoryResponse> {
 
 export async function reportMatch(body: ReportMatchBody): Promise<ReportMatchResult> {
   return workerFetch<ReportMatchResult>('/stats/report', { method: 'POST', body, token: authToken() })
+}
+
+/** Authenticated display-name update for the worker-owned D1 player cache. */
+export async function updateProfile(displayName: string): Promise<UpdateProfileResult> {
+  return workerFetch<UpdateProfileResult>('/stats/profile', {
+    method: 'POST',
+    body: { displayName },
+    token: authToken(),
+  })
 }
 
 /** GET /stats/my-style?tier= (authed) — the "MY STYLE" (You vs the Bot) tab's

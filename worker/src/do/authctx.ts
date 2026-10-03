@@ -2,8 +2,7 @@
  * Per-request authentication context — introspect-only (design spec §2,
  * ADDENDUM O/P). Unlike viota's worker (which co-hosts identity and verifies
  * JWTs locally), vjaipur-worker has NO local secret: every Bearer token is
- * verified by calling out to `${env.VGAMES_URL}/auth/introspect`, modeled on
- * `server/vgamesAuth.ts`'s `introspect`/`resolveSocketIdentity` (fail-closed:
+ * verified by calling out to `${env.VGAMES_URL}/auth/introspect` (fail-closed:
  * invalid / network error / `status==='merged'` all resolve to null/401).
  *
  * The acting account is ALWAYS token-derived (viota rule) — the caller never

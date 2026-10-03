@@ -82,8 +82,8 @@ export const PAUSE_ABANDON_MS = 7 * 24 * 60 * 60 * 1000
  *  ceremony (design spec §3.8) but an unclaimed room can still go stale. */
 export const WAITING_ABANDON_MS = 2 * 60 * 60 * 1000
 
-/** NEW (owner's decision, 2026-07-18): "opponent ghosted" resolution grace.
- *  Vijay does NOT want an AI ever taking over a seat and finishing a match
+/** "Opponent ghosted" resolution grace.
+ *  Product rule: an AI must never take over a seat and finish a match
  *  wearing the absent player's name (muddies stats, reads as them still
  *  "playing") — see `game-do.ts`'s `handleClaimWin`. A genuinely absent
  *  player's turn now simply PAUSES the game (no AI takeover, no auto-move);

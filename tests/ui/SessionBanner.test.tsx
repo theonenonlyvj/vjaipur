@@ -1,22 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SessionBanner } from '../../src/components/SessionBanner'
 import { useStatsStore } from '../../src/store/statsStore'
-
-// ProfileOverlay (rendered by SessionBanner's own Log In button) transitively
-// pulls in socketService — mirrors ProfileOverlay.test.tsx/StatsDashboard.
-// test.tsx's own mock.
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connect: vi.fn(),
-    connected: false,
-    setAuthToken: vi.fn(),
-    updateProfile: vi.fn(),
-    secureAccount: vi.fn(),
-    restoreAccount: vi.fn(),
-    pullHistory: vi.fn(),
-  },
-}))
 
 beforeEach(() => {
   useStatsStore.getState().clearStats()

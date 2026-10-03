@@ -244,7 +244,7 @@ matches have forced forfeits while both players believed they were active.
 
 - [ ] **Step 3: User review**
 
-Ask Vijay to review the spec before implementation.
+Ask the maintainer to review the spec before implementation.
 
 ### Task 6: Deployment Hardening
 

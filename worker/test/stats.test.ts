@@ -435,6 +435,65 @@ describe('GET /stats/leaderboard router', () => {
 })
 
 // =============================================================================
+// POST /stats/profile
+// =============================================================================
+
+describe('POST /stats/profile router', () => {
+  it('rejects unauthenticated changes before processing the payload', async () => {
+    const res = await SELF.fetch(new Request('https://worker/stats/profile', { method: 'POST', body: '{}' }));
+    expect(res.status).toBe(401);
+  });
+  it.each([null, {}, { displayName: 7 }, { displayName: 'x'.repeat(41) }])('rejects an invalid profile payload: %j', async (body) => {
+    const res = await SELF.fetch(new Request('https://worker/stats/profile', {
+      method: 'POST', headers: { Authorization: `Bearer test:${acct('invalid-profile')}:Player`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it('updates only the authenticated account display name in the D1 player cache', async () => {
+    const mine = acct('profile-mine')
+    const other = acct('profile-other')
+    await seedPlayer(DB(), mine, 'Old Name')
+    await seedPlayer(DB(), other, 'Other Name')
+
+    const res = await SELF.fetch(new Request('https://worker/stats/profile', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer test:${mine}:Old Name`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ displayName: 'New Name' }),
+    }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    const mineRow = await DB().prepare(`SELECT display_name FROM players WHERE account_id = ?`).bind(mine).first<{ display_name: string }>()
+    const otherRow = await DB().prepare(`SELECT display_name FROM players WHERE account_id = ?`).bind(other).first<{ display_name: string }>()
+    expect(mineRow?.display_name).toBe('New Name')
+    expect(otherRow?.display_name).toBe('Other Name')
+  })
+
+  it('rejects a blank display name without mutating the cached name', async () => {
+    const mine = acct('profile-blank')
+    await seedPlayer(DB(), mine, 'Keep Me')
+
+    const res = await SELF.fetch(new Request('https://worker/stats/profile', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer test:${mine}:Keep Me`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ displayName: '   ' }),
+    }))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_display_name' })
+    const row = await DB().prepare(`SELECT display_name FROM players WHERE account_id = ?`).bind(mine).first<{ display_name: string }>()
+    expect(row?.display_name).toBe('Keep Me')
+  })
+})
+
+// =============================================================================
 // getHistory
 // =============================================================================
 
@@ -469,13 +528,13 @@ describe('getHistory', () => {
   it('resolves the opponent\'s display name via a players LEFT JOIN on opponent_account_id', async () => {
     const a = acct('history-with-rival')
     const rival = acct('history-rival')
-    await seedPlayer(DB(), rival, 'Reks')
+    await seedPlayer(DB(), rival, 'Alice')
     await seedMatch(DB(), { accountId: a, opponentAccountId: rival, playerScore: 40, opponentScore: 33, won: true, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows.length).toBe(1)
     expect(rows[0]!.opponentAccountId).toBe(rival)
-    expect(rows[0]!.opponentName).toBe('Reks')
+    expect(rows[0]!.opponentName).toBe('Alice')
   })
 
   it('opponentName is null (never the raw UUID) when the opponent has no players row yet', async () => {

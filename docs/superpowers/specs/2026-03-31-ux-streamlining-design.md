@@ -38,7 +38,7 @@ Transform the initial user experience from a mandatory registration "wall" to a 
 - **Server:** Update `RESTORE_ACCOUNT` and `SYNC_MATCH` handlers to support username/password lookup.
 - **Store:** Update `statsStore.ts` to manage the transition from Guest -> Secured account.
 - **UI:** Implement the Profile Icon, Profile Overlay, and Stats Strip components.
-- **Migration:** Ensure existing users (like `theonenonlyvj`) can set their password to "claim" their existing `VJ-7064` stats.
+- **Migration:** Ensure an existing guest can set a password to claim their existing stats.
 
 ## 6. Security
 Since the data is low-sensitivity (game stats), we will store passwords as plain-text or simple hashes for simplicity in this prototype. The main goal is uniqueness and ease of restoration.

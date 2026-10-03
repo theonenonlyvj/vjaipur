@@ -1,74 +1,54 @@
 # VJaipur Agent Guide
 
-VJaipur is a private TypeScript/React implementation of Jaipur with local play,
-AI opponents, online multiplayer, local stats, and Supabase-backed account and
-leaderboard features.
+VJaipur is a public TypeScript/React implementation of Jaipur with local play,
+AI opponents, server-authoritative online play, stats, and leaderboards.
 
-Follow `/Users/vijayram/Cursor/AGENTS.md` first. These project-local rules add
-more specific guidance for this app.
+Follow any workspace-level `AGENTS.md` discovered in parent directories first.
+These project-local rules add the app-specific constraints below.
 
 ## Project Boundary
 
-- Work from `/Users/vijayram/Cursor/vjaipur`.
-- Do not run package-manager commands from the umbrella workspace root.
-- Do not add remotes, push, deploy, rotate secrets, or change cloud resources
-  unless Vijay explicitly asks.
-- Do not commit unless Vijay explicitly asks for a commit.
+- Run package-manager commands from this repository root (or `worker/` where a
+  worker command explicitly requires it).
+- Do not add remotes, push, deploy, rotate secrets, or mutate cloud resources
+  without explicit authorization.
+- Do not commit unless explicitly asked.
+- Keep public files free of personal data, secrets, machine-specific paths,
+  private operational records, and tool or model attribution.
 
-## Privacy And Secrets
+## Protected Code
 
-- Never print, copy, or commit Supabase service-role keys, Render secrets, or
-  account recovery values.
-- `.env.local` and other `.env*` files are local-only. Use `.env.example` for
-  documented variable names.
-- The app may store user account and match data. Treat production account data
-  as private operational data.
-- If a screenshot or log reveals a service-role key, assume it is compromised
-  and document that it must be rotated.
+`src/engine/**` is certified and locked. It is shared by the browser client and
+the Cloudflare Worker. Do not edit it without explicit engine-change approval.
+Keep the fairness and redaction tests green when changing AI or online play.
 
-> ⚠️ **STALE — HISTORICAL ONLY (pre-2026-07-18).** The priority ordering below
-> describes an old stabilization phase. Since then: online play was REBUILT
-> server-authoritative on vjaipur's own Cloudflare Worker + Durable Object +
-> D1 (no more Socket.IO relay); accounts moved to VGames Identity; Hard
-> II/III and an ISMCTS eval pass have shipped. The living chronicle is
-> [`docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md`](docs/superpowers/notes/2026-07-20-post-launch-fixes-and-backlog.md)
-> — read that (and its 07-18 sibling) for what's actually current; treat this
-> section as historical only, same as the "Historical Docs" note below
-> already asks for `docs/superpowers/`. *(Banner added 2026-08-03.)*
+## Architecture
 
-## Current Work Priority
+- `src/`: Vite/React client, local play, AI, and Worker API client.
+- `worker/`: Cloudflare Worker, Durable Object game authority, and D1-backed
+  stats/archive APIs.
+- Identity is provided by the separately deployed VGames Identity Worker.
+- Render hosts the static client and same-origin API proxy routes.
 
-Before Hard II polish, prioritize stabilization:
+The updated client uses the Worker for profile changes. The Node/Socket.IO
+server, its dependencies, tests, Supabase integration, and Render definition
+remain available for older deployed clients. Repository inspection alone does
+not prove production traffic has stopped using them. Retire them only after
+Worker-first deployment, client smoke tests, and observed legacy traffic and
+dependency checks. Keep the Render static site.
 
-1. Account/security integrity without blocking anonymous play.
-2. Online multiplayer redesign, because the current socket relay has unreliable
-   reconnect/forfeit behavior.
-3. Red test cleanup and a reliable verification gate.
-4. Deployment, admin, asset, and release documentation.
+## Verification
 
-## Testing
+```bash
+npm run test
+npm run build
+npm run test:all
+```
 
-- Client/engine/UI tests: `npm run test`
-- Server tests: `npm run test:server`
-- Combined gate: `npm run test:all`
-- Build: `npm run build`
-
-Known audit findings are tracked in `docs/status.md` and
-`docs/superpowers/plans/2026-07-09-vjaipur-stabilization.md`.
-After a context reset, read `docs/handoff.md` first after this file.
-
-## Historical Docs
-
-`docs/superpowers/` contains older specs and plans. Many unchecked boxes are
-historical, not live work. Treat a task as pending only if it is corroborated by
-current code, tests, or `docs/status.md`.
+`npm run test:all` runs the root suite followed by the Worker suite. Start at
+`docs/handoff/START_HERE.md` after a context reset.
 
 ## Generated And Local Files
 
-Do not stage or preserve generated/local artifacts unless Vijay asks:
-
-- `dist/`
-- `node_modules/`
-- `.superpowers/` session state
-- `.DS_Store`
-- extracted/reference zips unless explicitly being curated
+Do not stage generated or local artifacts unless the task explicitly requires
+them, including `dist/`, `node_modules/`, `.superpowers/`, and `.DS_Store`.

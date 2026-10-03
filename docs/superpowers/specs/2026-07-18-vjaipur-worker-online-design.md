@@ -1,7 +1,7 @@
 # vjaipur-worker: server-authoritative online — design spec
 
 **Status: LOCKED for tonight's build (2026-07-18), after red-team council.**
-Author: Claude. Owner decisions (Vijay 2026-07-18): own worker + own D1; cut over
+Owner decisions: own worker + own D1; cut over
 tonight if green; keep per-tier stats across the cutover.
 
 This is a PORT of viota's proven production architecture
@@ -311,8 +311,8 @@ Supabase `players` (id, vgames_account_id, display_name) + `matches` via REST
 `d1-matches.sql` INSERT ... ON CONFLICT DO NOTHING + a count report. Apply via
 `wrangler d1 execute vjaipur --remote --file`. Rows whose player has no
 vgames_account_id are skipped + reported. `source='client_reported'`,
-`ai_covered=0`. Verify: D1 count == emitted count; spot-check Vijay's totals
-match his current in-app stats. Supabase is left UNTOUCHED (rollback = ignore
+`ai_covered=0`. Verify: D1 count == emitted count; spot-check aggregate totals
+against current in-app stats. Supabase is left UNTOUCHED (rollback = ignore
 D1 matches).
 
 ## 9. Deploy / cutover / rollback

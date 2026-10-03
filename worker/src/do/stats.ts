@@ -245,6 +245,40 @@ export function isValidOpponentTypeFilter(id: string): boolean {
 // floor the ranking above uses, without hand-duplicating the constant.
 export { MIN_GAMES_FOR_RANK }
 
+// ---- profile ------------------------------------------------------------------
+
+export type UpdateProfileResult = { ok: true } | { error: 'invalid_display_name' }
+
+/**
+ * Updates the authenticated account's display name in the D1 player cache.
+ * The caller's account id is resolved from its Bearer token by the router;
+ * it is never accepted from the request body. This replaces the legacy
+ * Socket.IO -> Supabase profile mirror and keeps leaderboard/history names
+ * on the same worker-owned data path as the rest of the live stats system.
+ */
+export async function updatePlayerProfile(
+  db: D1Database,
+  accountId: string,
+  displayName: unknown,
+): Promise<UpdateProfileResult> {
+  if (typeof displayName !== 'string') return { error: 'invalid_display_name' }
+  const normalized = displayName.trim()
+  if (normalized.length === 0 || normalized.length > 40) return { error: 'invalid_display_name' }
+
+  await db
+    .prepare(
+      `INSERT INTO players (account_id, display_name, last_seen_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET
+         display_name = excluded.display_name,
+         last_seen_at = excluded.last_seen_at`,
+    )
+    .bind(accountId, normalized, Date.now())
+    .run()
+
+  return { ok: true }
+}
+
 // ---- history ------------------------------------------------------------------
 
 export type MatchHistoryRow = {

@@ -18,7 +18,7 @@ import {
 
 // ---------------------------------------------------------------------------
 // Tiny inline fixture: 2 fake games for a single account ('acct1') against
-// the 'ismcts' tier — one Vijay-style win, one loss — hand-computed expected
+// the 'ismcts' tier — one reference-player win, one loss — hand-computed expected
 // values below each block. Mirrors the real match_logs/matches shapes (see
 // src/store/aiGameLog.ts) closely enough to exercise the exact same code
 // paths the real dump goes through (JSON-string `log`, wrangler --json
@@ -291,16 +291,16 @@ describe('computeScoreTrajectoryPhases', () => {
 })
 
 describe('resolveAccountId', () => {
-  const players = new Map([['acct1', 'theonenonlyvj']])
+  const players = new Map([['acct1', 'Alice']])
 
   it('returns the input unchanged when it is already a known account id', () => {
     expect(resolveAccountId('acct1', players)).toBe('acct1')
   })
   it('resolves a case-insensitive display_name match', () => {
-    expect(resolveAccountId('TheOneNonlyVJ', players)).toBe('acct1')
+    expect(resolveAccountId('ALICE', players)).toBe('acct1')
   })
   it('resolves a case-insensitive substring match', () => {
-    expect(resolveAccountId('nonlyvj', players)).toBe('acct1')
+    expect(resolveAccountId('lic', players)).toBe('acct1')
   })
   it('falls back to treating unknown input as a raw account id', () => {
     expect(resolveAccountId('some-other-id', players)).toBe('some-other-id')

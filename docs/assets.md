@@ -27,8 +27,8 @@ normalized to about -6 dBFS with 2-5ms edge fades on every file to avoid
 clicks. `src/audio/soundService.ts` now points at `.wav` instead of `.mp3`;
 per-sound volumes and mute logic are unchanged.
 
-Generator script (kept outside the repo, not checked in):
-`/private/tmp/claude-501/-Users-vijayram-Cursor/0bdd49e6-6adf-4739-8cee-e98ecabe2c00/scratchpad/gen-sounds.mjs`
+The one-off generator script was not retained. The checked-in WAV files are
+the source artifacts; their synthesis parameters are documented below.
 
 Current sound files:
 

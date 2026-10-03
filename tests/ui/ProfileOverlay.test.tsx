@@ -1,16 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ProfileOverlay } from '../../src/components/ProfileOverlay'
 import { useStatsStore } from '../../src/store/statsStore'
-
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connect: vi.fn(),
-    secureAccount: vi.fn(),
-    restoreAccount: vi.fn(),
-    pullHistory: vi.fn(),
-  },
-}))
 
 describe('ProfileOverlay', () => {
   it('renders correctly for a guest', () => {

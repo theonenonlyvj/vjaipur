@@ -1,6 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { archiveGameCreate, archiveMatchEnd, archiveSeats, archiveTick } from '../src/do/archive'
+import { updatePlayerProfile } from '../src/do/stats'
 import { GameRepository, type MoveRow, type SqlLike } from '../src/do/storage'
 import { applyD1Schema, baseMeta, baseSeat } from './helpers'
 
@@ -76,6 +77,22 @@ describe('archiveGameCreate', () => {
     const playerRow = await DB().prepare(`SELECT * FROM players WHERE account_id = ?`).bind('acct-create-alice').first<any>()
     expect(playerRow?.display_name).toBe('Alice')
   })
+
+  it('preserves an explicitly saved profile name through room creation and seat archival', async () => {
+    const accountId = 'acct-renamed-profile';
+    await updatePlayerProfile(DB(), accountId, 'Chosen Name');
+    await runInDurableObject(stubFor('renamed-profile'), async (_instance, state) => {
+      const repo = new GameRepository(state.storage.sql as unknown as SqlLike);
+      const code = `PN${crypto.randomUUID().slice(0, 4)}`;
+      repo.putMeta(baseMeta({ code, status: 'waiting' }));
+      repo.putSeat(baseSeat({ seat_index: 0, owner_account_id: accountId, display_name: 'Old Identity Name' }));
+      repo.putSeat(baseSeat({ seat_index: 1, owner_type: 'open', owner_account_id: null, display_name: null }));
+      await archiveGameCreate(DB(), repo, Date.now(), code);
+      await archiveSeats(DB(), repo, Date.now());
+    });
+    const row = await DB().prepare('SELECT display_name FROM players WHERE account_id = ?').bind(accountId).first<{display_name: string}>();
+    expect(row?.display_name).toBe('Chosen Name');
+  });
 
   it('is idempotent: a re-create ON CONFLICT DOes NOTHING to the games row (no throw, no duplicate)', async () => {
     const stub = stubFor('archive-create-idem')

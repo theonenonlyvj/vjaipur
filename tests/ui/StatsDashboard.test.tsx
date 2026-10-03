@@ -5,19 +5,8 @@ import { useStatsStore } from '../../src/store/statsStore'
 import type { LeaderboardResponse, MyStyleResponse, RivalryResponse } from '../../src/net/online'
 import * as onlineApi from '../../src/net/online'
 
-// Mock socket service as it's used transitively by statsStore (mirrors
-// StatsStrip.test.tsx / ProfileOverlay.test.tsx's pattern).
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connect: vi.fn(),
-    connected: false,
-    setAuthToken: vi.fn(),
-    updateProfile: vi.fn(),
-  },
-}))
-
-// The state after the 2026-07-21 tier-family REASSIGNMENT (Vijay's
-// data-backed call, do not revert): the two retired Classic tiers ('hard' =
+// The state after the data-backed tier-family REASSIGNMENT (do not revert):
+// the two retired Classic tiers ('hard' =
 // Classic MCTS, 'fair' = FairBot) moved from `family: 'hard'` to
 // `family: 'medium'` — each benchmarked only ~70%/73% vs Medium, nowhere
 // near the ~100% the real hard family (hard2/ismcts) runs. 'medium' itself
@@ -320,7 +309,7 @@ describe('StatsDashboard global leaderboard — "Hard" family drill-down', () =>
     fireEvent.click(screen.getByRole('button', { name: 'Hard' }))
     await waitFor(() => expect(screen.getByText('Grace')).toBeInTheDocument())
 
-    // Post-rename (Vijay 2026-07-21): hard2's member chip is "Hard (αβ)",
+    // Post-rename (the product decision): hard2's member chip is "Hard (αβ)",
     // distinct from the family umbrella chip "Hard" (FAMILY_LABELS) — so
     // exactly ONE button each, no shared-name ambiguity anymore.
     expect(screen.getAllByRole('button', { name: 'Hard' })).toHaveLength(1)
@@ -544,14 +533,14 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not
   it('renders the rival\'s display name instead of their account_id', () => {
     useStatsStore.setState({
       matches: [
-        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Reks', player_score: 40, opponent_score: 30, won: true, timestamp: 1 },
-        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Reks', player_score: 20, opponent_score: 35, won: false, timestamp: 2 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Alice', player_score: 40, opponent_score: 30, won: true, timestamp: 1 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Alice', player_score: 20, opponent_score: 35, won: false, timestamp: 2 },
       ],
     })
 
     render(<StatsDashboard onClose={() => {}} />)
 
-    expect(screen.getByText('Reks')).toBeInTheDocument()
+    expect(screen.getByText('Alice')).toBeInTheDocument()
     expect(screen.queryByText('acct-rival-uuid-1234')).not.toBeInTheDocument()
   })
 
@@ -594,15 +583,15 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS games-primary + matches-se
     useStatsStore.setState({
       matches: [
         // A synced 3-game match win, 2 games to 1.
-        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Reks', player_score: 150, opponent_score: 110, won: true, timestamp: 1, games_won: 2, games_lost: 1 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Alice', player_score: 150, opponent_score: 110, won: true, timestamp: 1, games_won: 2, games_lost: 1 },
         // A second synced match, also won, 2-0.
-        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Reks', player_score: 90, opponent_score: 40, won: true, timestamp: 2, games_won: 2, games_lost: 0 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-games', opponent_name: 'Alice', player_score: 90, opponent_score: 40, won: true, timestamp: 2, games_won: 2, games_lost: 0 },
       ],
     })
 
     render(<StatsDashboard onClose={() => {}} />)
 
-    const row = screen.getByText('Reks').closest('tr')!
+    const row = screen.getByText('Alice').closest('tr')!
     // Primary: GAMES — 2+2=4 won, 1+0=1 lost.
     expect(within(row).getByText('4')).toBeInTheDocument()
     expect(within(row).getByText('1')).toBeInTheDocument()
@@ -977,11 +966,11 @@ describe('StatsDashboard MY STYLE — hard-bot reassurance line', () => {
 // =============================================================================
 
 const RIVAL_MATCHES = [
-  { opponent_type: 'online' as const, opponent_id: 'acct-rival-reks', opponent_name: 'Reks', player_score: 74, opponent_score: 67, won: true, timestamp: 1 },
+  { opponent_type: 'online' as const, opponent_id: 'acct-rival-Alice', opponent_name: 'Alice', player_score: 74, opponent_score: 67, won: true, timestamp: 1 },
 ]
 
 const RIVALRY_RESPONSE_ELIGIBLE: RivalryResponse = {
-  opponentName: 'Reks',
+  opponentName: 'Alice',
   record: {
     games: { wins: 3, losses: 1, currentStreak: { who: 'me', n: 2 } },
     matches: { wins: 2, losses: 0 },
@@ -992,18 +981,18 @@ const RIVALRY_RESPONSE_ELIGIBLE: RivalryResponse = {
     gamesWon: [3, 1],
     camelMajorityGames: [3, 1],
   },
-  biggestGame: { myScore: 85, theirScore: 64, matchCode: '6DRHAJ', gameNumber: 3 },
+  biggestGame: { myScore: 85, theirScore: 64, matchCode: 'TEST99', gameNumber: 3 },
   perGame: [
-    { matchCode: '6DRHAJ', gameNumberInMatch: 1, myScore: 70, theirScore: 60, won: true, endedAt: 5000 },
-    { matchCode: '6DRHAJ', gameNumberInMatch: 2, myScore: 55, theirScore: 70, won: false, endedAt: 5000 },
-    { matchCode: '6DRHAJ', gameNumberInMatch: 3, myScore: 85, theirScore: 64, won: true, endedAt: 5000 },
+    { matchCode: 'TEST99', gameNumberInMatch: 1, myScore: 70, theirScore: 60, won: true, endedAt: 5000 },
+    { matchCode: 'TEST99', gameNumberInMatch: 2, myScore: 55, theirScore: 70, won: false, endedAt: 5000 },
+    { matchCode: 'TEST99', gameNumberInMatch: 3, myScore: 85, theirScore: 64, won: true, endedAt: 5000 },
     { matchCode: 'AAAA11', gameNumberInMatch: 1, myScore: 90, theirScore: 56, won: true, endedAt: 3000 },
   ],
   craft: {
     tokensPerCard: { mine: 3.71, theirs: 3.35, myCards: 40, theirCards: 38, eligible: true },
     bonusSales: { mine3: 5, mine4: 2, mine5: 1, theirs3: 3, theirs4: 6, theirs5: 1, eligible: true },
   },
-  edgeFinder: 'Edge finder: Reks converts more 3+ sales into 4s (6 vs your 2) — hold a beat longer.',
+  edgeFinder: 'Edge finder: Alice converts more 3+ sales into 4s (6 vs your 2) — hold a beat longer.',
 }
 
 const RIVALRY_RESPONSE_INELIGIBLE_CRAFT: RivalryResponse = {
@@ -1018,7 +1007,7 @@ const RIVALRY_RESPONSE_INELIGIBLE_CRAFT: RivalryResponse = {
 async function openRivalsTab() {
   useStatsStore.setState({ matches: RIVAL_MATCHES })
   render(<StatsDashboard onClose={() => {}} />)
-  expect(screen.getByText('Reks')).toBeInTheDocument()
+  expect(screen.getByText('Alice')).toBeInTheDocument()
 }
 
 describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
@@ -1036,8 +1025,8 @@ describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
 
-    fireEvent.click(screen.getByText('Reks'))
-    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledWith('acct-rival-reks'))
+    fireEvent.click(screen.getByText('Alice'))
+    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledWith('acct-rival-Alice'))
     expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
   })
 
@@ -1045,11 +1034,11 @@ describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
 
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
     await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledTimes(1))
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
     // Give any errant effect a tick to fire before asserting it didn't re-fetch.
     await new Promise((r) => setTimeout(r, 0))
     expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
@@ -1064,9 +1053,9 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('renders the games-primary record, streak, matches-secondary line, totals, and biggest-game callout', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
-    await waitFor(() => expect(screen.getByText('YOU vs REKS')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('YOU vs ALICE')).toBeInTheDocument())
     // Games record is the hero (DELTA A: games primary, matches secondary).
     expect(screen.getByText(/3–1/)).toBeInTheDocument()
     expect(screen.getByText('in games')).toBeInTheDocument()
@@ -1074,7 +1063,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
     expect(screen.getByText(/across 2 matches \(2–0\)/)).toBeInTheDocument()
 
     // Biggest game — renamed from biggestRound, signed (not absolute-valued).
-    expect(screen.getByText('Your 85–64 — game 3 of 6DRHAJ')).toBeInTheDocument()
+    expect(screen.getByText('Your 85–64 — game 3 of TEST99')).toBeInTheDocument()
 
     // The edgeFinder line (DELTA B) renders verbatim from the payload.
     expect(screen.getByText(RIVALRY_RESPONSE_ELIGIBLE.edgeFinder)).toBeInTheDocument()
@@ -1083,7 +1072,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('renders eligible craft rows (tokens per card, bonus sales) as tug-of-war rows with real numbers', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
     await waitFor(() => expect(screen.getByText('Tokens per card')).toBeInTheDocument())
     expect(screen.getByText('3-card bonus sales')).toBeInTheDocument()
@@ -1095,7 +1084,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('shows the "not enough sells yet" fallback line for ineligible craft rows instead of a tug-of-war row', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_INELIGIBLE_CRAFT)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
     await waitFor(() => expect(screen.getAllByText('not enough sells yet to compare craft')).toHaveLength(2))
     expect(screen.queryByText('Tokens per card')).not.toBeInTheDocument()
@@ -1105,38 +1094,38 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     useStatsStore.setState({ matches: RIVAL_MATCHES })
     const { container } = render(<StatsDashboard onClose={() => {}} />)
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
-    await waitFor(() => expect(screen.getByText(/MATCH 6DRHAJ/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/MATCH TEST99/)).toBeInTheDocument())
     expect(screen.getByText(/MATCH AAAA11/)).toBeInTheDocument()
-    // "Game 1" appears once per match group (6DRHAJ's game 1, AAAA11's game
-    // 1) — only games 2/3 are unique to the 6DRHAJ group.
+    // "Game 1" appears once per match group (TEST99's game 1, AAAA11's game
+    // 1) — only games 2/3 are unique to the TEST99 group.
     expect(screen.getAllByText('Game 1')).toHaveLength(2)
     expect(screen.getByText('Game 2')).toBeInTheDocument()
     expect(screen.getByText('Game 3')).toBeInTheDocument()
 
-    // Newest match (6DRHAJ, endedAt=5000) appears before the older one
+    // Newest match (TEST99, endedAt=5000) appears before the older one
     // (AAAA11, endedAt=3000) — same ordering convention as the coaching-
     // card-order test above (container.textContent index comparison).
     const text = container.textContent ?? ''
-    expect(text.indexOf('6DRHAJ')).toBeLessThan(text.indexOf('AAAA11'))
+    expect(text.indexOf('TEST99')).toBeLessThan(text.indexOf('AAAA11'))
   })
 
   it('shows a loading state while the fetch is in flight', async () => {
     let resolveFetch: (v: RivalryResponse) => void = () => {}
     vi.spyOn(onlineApi, 'rivalry').mockReturnValue(new Promise((resolve) => { resolveFetch = resolve }))
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
     expect(await screen.findByText(/Loading head-to-head/i)).toBeInTheDocument()
     resolveFetch(RIVALRY_RESPONSE_ELIGIBLE)
-    await waitFor(() => expect(screen.getByText('YOU vs REKS')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('YOU vs ALICE')).toBeInTheDocument())
   })
 
   it('shows a friendly error state on fetch failure', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockRejectedValue(new Error('http_404'))
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Reks'))
+    fireEvent.click(screen.getByText('Alice'))
 
     await waitFor(() => expect(screen.getByText(/Could not load head-to-head/i)).toBeInTheDocument())
   })

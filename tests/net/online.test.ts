@@ -19,6 +19,16 @@ beforeEach(() => {
 })
 
 describe('net/online typed calls', () => {
+  it('updateProfile POSTs the display name to the authenticated worker profile route', async () => {
+    workerFetch.mockResolvedValueOnce({ ok: true })
+
+    await onlineApi.updateProfile('New Name')
+
+    expect(workerFetch).toHaveBeenCalledWith('/stats/profile', {
+      method: 'POST', body: { displayName: 'New Name' }, token: 'tok-abc',
+    })
+  })
+
   it('createGame POSTs /games with matchLength and the current token', async () => {
     workerFetch.mockResolvedValueOnce({ gameId: 'ABC123', code: 'ABC123', view: { status: 'waiting' } })
     const result = await onlineApi.createGame(3)
@@ -34,9 +44,9 @@ describe('net/online typed calls', () => {
 
   it('join POSTs /games/:id/join with displayName + token', async () => {
     workerFetch.mockResolvedValueOnce({ seatIndex: 1, status: 'active', view: {} })
-    await onlineApi.join('ABC123', 'Vijay')
+    await onlineApi.join('ABC123', 'Alice')
     expect(workerFetch).toHaveBeenCalledWith('/games/ABC123/join', {
-      method: 'POST', body: { displayName: 'Vijay' }, token: 'tok-abc',
+      method: 'POST', body: { displayName: 'Alice' }, token: 'tok-abc',
     })
   })
 

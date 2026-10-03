@@ -486,7 +486,7 @@ describe('onNudge', () => {
     expect(useGameStore.getState().lastMoveDescription).toBe('RIVAL: took a gold')
   })
 
-  // BUG 2 fix (2026-07-27): confirmed from the D1 archive — Reks closed
+  // BUG 2 fix: confirmed from an archived match where a player closed
   // both R1 and R2 by selling 3 silver, and at the START of the NEXT round
   // her phone still showed "YOU: sold 3 silver" as the banner. Root cause:
   // a nudge delivered only the bare round_start move for the new round (its

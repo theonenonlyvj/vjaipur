@@ -275,7 +275,7 @@ export function StatsDashboard({ onClose }: StatsDashboardProps) {
   // Drain the on-device pending-report queue ON DEMAND. Before this existed,
   // queued games only retried at app boot (retryPendingReports in main.tsx) —
   // invisible and never firing for a long-lived mobile tab, which is exactly
-  // how 19 finished ISMCTS games sat unsynced on Vijay's phone (2026-07-21).
+  // how finished ISMCTS games could sit unsynced on a long-lived mobile tab.
   async function handleSyncNow() {
     setSyncing(true)
     try {

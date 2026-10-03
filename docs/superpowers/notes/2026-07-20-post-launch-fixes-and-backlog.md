@@ -9,8 +9,8 @@
 > - **Current state** → [`../../STATE.md`](../../STATE.md)
 > - **Live backlog** → [`../../BACKLOG.md`](../../BACKLOG.md)
 
-Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
-(Chandy, Reks/reks) playing; fixes driven by their reports.
+Continuation after the online rebuild went live. Playtesting reports drove the
+fixes recorded below.
 
 ## SHIPPED & LIVE today
 - **BONUS! overlay stuck all game** — it only dismissed on an 'exit' animation
@@ -41,20 +41,13 @@ Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
   vs `fetch('/',{cache:'no-store'})` on foreground/visibility/focus; offers
   Reload (user-initiated). Beats iOS Safari's stale-tab caching that caused the
   repeated create-room/stats failures.
-- **Deck count** moved next to the MARKET label; **home footer** ("Have
-  feedback? See my other projects" → personal-site); clearer online error copy.
+- **Deck count** moved next to the MARKET label; clearer online error copy.
 - **render.yaml** no-cache headers on index.html — pushed but **needs a
   one-time Render Blueprint sync in the dashboard to apply** (the update banner
   supersedes it either way).
 
-## Identified players (behavioral inference; no geo on old accounts)
-- Vijay = **theonenonlyvj**. Chandy = **Guest_9752** (confirmed by a 10:11am
-  4/2 game he IDed). reks = **Reks** (claimed July). Other guests = a mix of
-  friends + Vijay's early guest sessions. After Chandy, 2nd-most is a tie:
-  Guest_3334 (5g) / Guest_8471 (5g) — candidates for Reks's old sessions.
-
-## BACKLOG (not done — needs a real focused run or Vijay's call)
-1. **HARDER FAIR BOT (the big one).** Vijay wants a fair (no-peeking) bot
+## BACKLOG (not done — needs a real focused run or the reference player's call)
+1. **HARDER FAIR BOT (the big one).** the reference player wants a fair (no-peeking) bot
    strong enough to beat him. An automated eval-overhaul + 3s-budget + deeper
    search attempt **REGRESSED** — it lost to the current Hard **2W-6L (25%)**
    while thinking 2× longer (classic eval/search backfire), so it was REVERTED
@@ -62,20 +55,20 @@ Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
    benchmark-per-change eval tuning (slow, uncertain payoff), or (b) a proper
    **ISMCTS** rewrite (state-of-the-art for hidden-info card games — most likely
    to actually work, but a real project). Benchmarking is SLOW (3s/move → ~100s
-   per self-play game). Fairness proof test must stay green. **Awaiting Vijay's
+   per self-play game). Fairness proof test must stay green. **Awaiting the reference player's
    pick of direction.**
 2. **Omniscient bot is "readable"** — it telegraphs the deck (if it *waits*,
    good cards are coming, because it sees them). Add unpredictability so it
    stops leaking deck info. Fast-follow.
-3. **Decommission old Render Node backend + Supabase** — ON HOLD for Vijay's
+3. **Decommission old Render Node backend + Supabase** — ON HOLD for the reference player's
    explicit go once he's fully confident. Rollback anchor:
    `checkpoint-2026-07-18-pre-online-worker`.
-4. **Render Blueprint sync** so the no-cache header applies (Vijay dashboard).
-5. Existing stale tabs (Reks's/others' phones) need ONE full reload to pick up
+4. **Render Blueprint sync** so the no-cache header applies (the reference player dashboard).
+5. Existing stale tabs (another player's/others' phones) need ONE full reload to pick up
    the update-banner build; after that it self-heals.
 
 ## Status: everything actionable + validated is shipped. The harder-fair-bot is
-## backlogged pending direction; a few items await Vijay's dashboard actions.
+## backlogged pending direction; a few items await the reference player's dashboard actions.
 
 ## UPDATE 2026-07-21 — Backlog item 1 RESOLVED: "Hard (ISMCTS)" shipped (c0c04f4)
 Fable-directed rebuild with a genuinely different architecture (single-observer
@@ -84,15 +77,15 @@ truncated ε-greedy rollouts, exchange pruning, 3s budget). GATE RESULTS:
 **90% (36-4) vs the current Hard · 10-0 vs Medium · 40% (4-6) vs the Omniscient
 cheater · worst move 3.0s · 0 illegal moves · provably fair** (identical-move-
 under-hidden-swap proof test, pinned iterations). Shipped as its own tier
-"Hard (ISMCTS)" ALONGSIDE the untouched Hard so Vijay can A/B and decide which
+"Hard (ISMCTS)" ALONGSIDE the untouched Hard so the reference player can A/B and decide which
 survives. (The earlier eval-overhaul attempt that regressed stays reverted.)
 Remaining backlog: Omniscient readability; decommission (held); Blueprint sync.
 
 ## UPDATE 2026-07-23 — the sync saga, resolved + session-UX council shipped (a8277e5)
-Vijay's 25 vs-AI games (20 ISMCTS) weren't reaching the server: his claimed
+the reference player's 25 vs-AI games (20 ISMCTS) weren't reaching the server: his claimed
 account's token expired, silent quick-reauth failed on his device, failures
 queued invisibly, and every surface said something cryptic ('unauthorized',
-'Failed to create room' for Reks) instead of "log back in" — which was the
+'Failed to create room' for another player) instead of "log back in" — which was the
 whole fix. Shipped along the way: pending-sync banner + Sync now + error
 surfacing + enriched 401 diagnostics. Then a 4-lens council review produced 5
 fixes, all shipped: sessionExpired store signal + refuse silent claimed→ghost
@@ -105,7 +98,7 @@ Root-cause note: WHY his device's quick-reauth was rejected remains unpinned
 — but the UX now surfaces and recovers it in one tap, and login rebinds the
 device. Watch for recurrence via the new signals.
 
-## BACKLOG ADD 2026-07-26 — "Bonus Race" variant (parked, Vijay's idea)
+## BACKLOG ADD 2026-07-26 — "Bonus Race" variant (parked, the reference player's idea)
 Ordered 3/4/5 bonus piles (highest first — reward whoever sells big FIRST),
 consistent with the goods tokens' descending order. Decision: keep official
 random draw as DEFAULT (preserves round-end reveal suspense, protects casual
@@ -117,7 +110,7 @@ ripples: certified-engine care + tests, bot evals assume random draws
 humans), and redaction (opp bonus values become inferable when ordered).
 
 ## UPDATE 2026-07-26 — selection-staleness fix + persistent login (all SHIPPED, main=5098ffe)
-1. **Selection follows the CARD, not the slot (`a71b820`).** Vijay: pre-selecting
+1. **Selection follows the CARD, not the slot (`a71b820`).** the reference player: pre-selecting
    during the opponent's turn sometimes fired a move he never chose; and
    camels-selected + hand-click didn't switch intent. Council (4 lenses) isolated
    both: (A) index-keyed selection re-pointed when the market compacted/refilled
@@ -143,18 +136,18 @@ humans), and redaction (opp bonus values become inferable when ordered).
    vgames-iss login tokens (its client only uses quick tokens — latent, not live).
    +29 tests (621).
 3. **Rules check by execution: sell 4 into a 3-token pile still earns the
-   FOUR-tier bonus** (tier = cards sold). Regression test added; Vijay caught
+   FOUR-tier bonus** (tier = cards sold). Regression test added; the reference player caught
    the fixture using an unreachable pile ([5,3,3]→[2,1,1], `5098ffe`). 622 tests.
-4. Next session: per-game verifier runs (Vijay dispatching each game's agents);
+4. Next session: per-game verifier runs (the reference player dispatching each game's agents);
    decommission still HELD ("will retire later").
 
 ## UPDATE 2026-07-27 — first match_logs harvest: ISMCTS health check + early stop (430c2ac)
-Corpus: 87 real Vijay-vs-ISMCTS games (07-25→27), 1729 human + 1681 bot moves,
-1645 with root-candidate diagnostics. Record vs ISMCTS overall: Vijay 44W-66L.
+Corpus: 87 real the reference player-vs-ISMCTS games (07-25→27), 1729 human + 1681 bot moves,
+1645 with root-candidate diagnostics. Record vs ISMCTS overall: the reference player 44W-66L.
 **Search verdict: HEALTHY, no strength tuning warranted** (median 60,612
 iters/move, top1 share 0.84, 10% near-ties, q well-calibrated +0.43/-0.16 in
 eventual wins/losses). Deliberately did NOT touch strength knobs (c, budget,
-rollouts) — the bot wins 60% fairly, which is exactly what Vijay asked for.
+rollouts) — the bot wins 60% fairly, which is exactly what the reference player asked for.
 **Shipped: unconditional-winner early stop** (65% of moves ended settled at
 >=3x visit gap — the bot was thinking long after the move was decided).
 Stops when the visit lead exceeds 1.25x the iterations the remaining budget
@@ -162,7 +155,7 @@ could run; max-visits pick provably unchanged. Gate: 0/69 fired stops changed
 a move; ~30% avg think-time cut at 3000ms. Wall-clock mode only — pinned-
 iteration fairness proofs untouched (both green). earlyStopped now in debug
 info -> future match_logs can report fire rate in the wild.
-Style notes for Vijay delivered in-session (token/card 3.79 vs bot 3.44; the
+Style notes for the reference player delivered in-session (token/card 3.79 vs bot 3.44; the
 4-bonus gap 38 vs 56 is the main margin; loss trajectory = small compounding
 deficits, win trajectory = late surge).
 
@@ -183,17 +176,16 @@ in the app itself, instead of only via `tools/mlogs/analyze.mjs` on demand.
 Needs either a worker aggregate endpoint (`GET /my-style` or similar,
 computing over that account's match_logs server-side) or a client-side
 compute pass over already-fetched match data. **NOT started — awaiting
-Vijay's call** on whether this is worth a tab (vs. staying a run-when-curious
+the reference player's call** on whether this is worth a tab (vs. staying a run-when-curious
 CLI tool) and, if so, endpoint vs. client-compute.
 
 ## UPDATE 2026-07-27 night — live-match bug sweep (5a465c2, worker deployed)
-Vijay+Reks played WEFFFT (1-0) + 6DRHAJ (3-0, rounds 74-67/74-68/85-64 =
-233-199 — totals VERIFIED correct against the archive; his "scoring stats
-are off" was the fake breakdown). Three fixes shipped:
+Two players completed live matches whose totals were verified against the
+archive. Three fixes shipped:
 1. lastRoundReveal: real opponent GOODS tokens + bonus SUMS at round_end/
    match_over only (bonus VALUES still never leave the DO); fuzz-redaction
    extended, reveal verified null mid-round live post-deploy.
-2. Stale final-move banner cleared at round_start (Reks genuinely closed
+2. Stale final-move banner cleared at round_start (another player genuinely closed
    R1 AND R2 selling 3 silver — right attribution, wrong timing).
 3. Online Rivals: display names via getHistory LEFT JOIN players (fallback
    Player <id8>).
@@ -202,7 +194,7 @@ block (disproven by their play minutes later). /api proxy fallback stays as
 inert resilience; render.yaml route not active (auto-deploy takes builds,
 not routes config) and that's fine.
 
-## CORRECTION 2026-07-27 (Vijay caught it) — bonus-reveal rationale
+## CORRECTION 2026-07-27 (the reference player caught it) — bonus-reveal rationale
 Bonus piles are FULLY RESHUFFLED every round (setupRound -> initialBonusPiles(rng);
 matches official Jaipur's per-round re-setup), so "revealing individual bonus
 values at round end would let you count the pool between rounds" was WRONG.
@@ -211,14 +203,14 @@ secrecy: opponent bonus values mid-round would expose their running score
 (deliberately hidden for round-end suspense) and shift same-round bonus-draw
 EV. Round-END individual values are provably safe to reveal; the shipped
 sum-only display is UI minimalism, not security. Open offer: show the
-opponent's actual bonus tokens on the round-end screen if Vijay wants it.
+opponent's actual bonus tokens on the round-end screen if the reference player wants it.
 
 ## UPDATE 2026-07-28 — MY STYLE tab SHIPPED (a834bab; client 718 / worker 255 tests)
 Per-player "You vs the Bot" style read as a third Hall of Records tab.
-Pipeline: mockup (docs/mockups/you-vs-bot-panel.html) -> Vijay picked
+Pipeline: mockup (docs/mockups/you-vs-bot-panel.html) -> the reference player picked
 Variant A (tug-of-war) -> 4-lens design council (data-viz / Jaipur strategy /
 statistics / product-UX) -> 5 blockers + ~20 accepted deltas ALL applied ->
-shipped. Answers to Vijay's questions recorded: online matches can feed style
+shipped. Answers to the reference player's questions recorded: online matches can feed style
 stats later from the public moves archive (full-info logging is client-side,
 vs-AI only — full-info only matters for bot TUNING); panel covers ANY bot
 tier (ismcts just has extra search diagnostics).
@@ -244,7 +236,7 @@ population to pool yet; per-row gates already prevent the harm.
 1. **RIVALRY modal**: click an Online Rival -> "YOU vs <name>" — games record
    + streak ("4-0 in games · across 2 matches"), lifetime points,
    camel-majority games, biggest game, per-game history grouped by match,
-   craft rows (volume-gated), and the EDGE FINDER (Vijay overruled my
+   craft rows (volume-gated), and the EDGE FINDER (the reference player overruled my
    no-coaching rule: "why not coaching?" — each viewer privately sees their
    largest opponent-favored gap as banter; leads-everywhere and
    not-enough-data fallbacks). Computed ON DEMAND from the public archive via
@@ -253,7 +245,7 @@ population to pool yet; per-row gates already prevent the harm.
    by fixture (seats differ per match). 404 no_shared_games; first smoke's
    404-for-everything was edge propagation lag, not a bug.
 2. **Deck count warning**: amber #f09030 at <=6, red #e05050 at <=3.
-3. **GAMES-first units everywhere** (Vijay's ruling; matches the home
+3. **GAMES-first units everywhere** (the reference player's ruling; matches the home
    screen's own "1 GAME / 3 GAMES" vocabulary): GLOBAL leaderboard (ranking
    comparator unchanged, fed games), MY RECORDS, home RECORD strip,
    ProfileOverlay CAREER STATS. Split resolution: online EXACT via archive
@@ -265,12 +257,12 @@ Suites: client 747 / worker 287. Known wall-clock contention flake
 (hardAi2-class) appeared once per full run, green in isolation each time.
 
 ## UPDATE 2026-08-02 — ISMCTS deep dive + EVAL V2 shipped (df8b9ac, GATE PASS 60%)
-Vijay: winning 66%+ ("88% last session"), "leaves precious jewels", "how
+the reference player: winning 66%+ ("88% last session"), "leaves precious jewels", "how
 intentional is its end game?" — all three CONFIRMED by a 4-miner evidence
 sweep over 71 recent games + code mechanism map. First: exonerated the 07-27
 early stop (search signature identical pre/post deploy — his phone barely
 fires it; phones run ~35k iters vs ~60k desktop, so the mobile bot is
-inherently shallower). The winrate jump = Vijay applying the 07-27 coaching
+inherently shallower). The winrate jump = the reference player applying the 07-27 coaching
 (his 5-sales 4x'd) + farming eval blind spots.
 Flaw inventory (all staticEval; generation + terminal-move choice CLEARED):
 precious pass-ups ~14.6 tokens/game gifted (worst on front-loaded gold/
@@ -286,24 +278,24 @@ sells up, 0 illegal; vs Medium 10-0; 747 tests. Terminal seal cliff (+-0.9)
 deliberately UNTOUCHED — it encodes the true objective (only the seal
 matters); miner verdict: endgame problem was upstream horizon-blindness.
 Method note kept for the future: subagent miners for EVIDENCE, Fable designs
-the tuning (Vijay's Fable-only rule); numbers gate everything.
+the tuning (the reference player's Fable-only rule); numbers gate everything.
 
 ## UPDATE 2026-08-02 late — throttle discovery + ITERATION FLOOR (f7e78b2, LIVE with eval v2)
-Vijay: "does the bot play poorly if im offline?" -> logs showed his phone
+the reference player: "does the bot play poorly if im offline?" -> logs showed his phone
 under Low Power Mode ran the bot at 6-12k iterations/move vs 35-48k at full
 power. Winrate split by bot depth: throttled 3-0 (100%), degraded 5-1 (83%),
 FULL-POWER 38-31 (55%) — his "66-88%" streak was partly vs a lobotomized
 bot; true skill vs the real bot = 55% (still a genuine jump from 40%).
 Lesson recorded: wall-clock AI budgets make device state set the difficulty;
 control for search depth before trusting any winrate trend.
-FIX (Vijay: "i'm open to slightly slower on shitty device"): minIterations
+FIX (the reference player: "i'm open to slightly slower on shitty device"): minIterations
 floor 25,000 (HARD_CAP_MS 8000; early stop can't fire below floor; pinned
 mode untouched; benchmarks pass 0). Bridge timeout 5s->10s. 750 tests.
 Verified live: the deployed worker chunk carries the floor constant —
 eval v2 + floor shipped together in bundle index-CDTnwAIV.
 
 ## UPDATE 2026-08-03 — estate-recon items + FULL STANDING-BUGS AUDIT (7683081, a6602cc + cleanup; worker deployed)
-Vijay: "agents closed out their work... take a strong look at this repo and
+the reference player: "agents closed out their work... take a strong look at this repo and
 clean it up. make sure we don't have any standing bugs."
 1. Estate-recon directed items (vgames-platform docs): identity-URL defaults
    flipped viota-worker -> vgames-identity (ORDERING HAZARD CLEARED — viota
@@ -322,11 +314,11 @@ clean it up. make sure we don't have any standing bugs."
    back CLEAN.
 4. Cleanup: junk untracked, gitignore gaps, README/AGENTS banners,
    .env.example completed, testing.md live-pointer. server/ + socketService
-   left for Vijay's held decommission.
+   left for the reference player's held decommission.
 Client 776 / worker 292 tests. Repo state: main=a6602cc + cleanup commit.
 
 ## UPDATE 2026-08-04/05 — v2 field verdict + coaching + two UI polish items (2f777f2, 259c738)
-1. **Eval v2 field data (34 depth-controlled games, the WATCH item): Vijay
+1. **Eval v2 field data (34 depth-controlled games, the WATCH item): the reference player
    10W-24L (29%) vs v2** — the bot overshot its 60% gate prediction against
    the only opponent that matters. Iteration floor working (median 41.7k
    visits, no throttled asterisks). Loss anatomy: avg margin +1.6 but MEDIAN

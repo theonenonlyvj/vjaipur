@@ -21,8 +21,8 @@ export interface GameScreenProps {
 }
 
 /** Deck-count warning (a round ends the instant the deck empties, so a
- *  shrinking deck is a real "wrap it up" signal). Vijay 2026-08-05: escalate
- *  earlier and GROW the text, "slight when <10 then more <5" — so: a slight
+ *  shrinking deck is a real "wrap it up" signal). Escalate earlier and grow
+ *  the text: a slight
  *  amber bump under 10 remaining, a bigger red alarm under 5. em-based so it
  *  scales with the label's own size. */
 function deckCountStyle(remaining: number): CSSProperties {

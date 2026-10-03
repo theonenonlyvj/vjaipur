@@ -10,21 +10,6 @@ vi.mock('../../src/net/session', () => ({
   save: vi.fn(), load: vi.fn(() => null), clear: vi.fn(),
   startHeartbeat: vi.fn(), stopHeartbeat: vi.fn(),
 }))
-// ProfileOverlay (opened via ProfileIcon, and auto-opened on a 401 — see
-// below) transitively pulls in socketService — same mock as ProfileOverlay.
-// test.tsx/StatsDashboard.test.tsx, so it never attempts a real connection.
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connect: vi.fn(),
-    connected: false,
-    setAuthToken: vi.fn(),
-    updateProfile: vi.fn(),
-    secureAccount: vi.fn(),
-    restoreAccount: vi.fn(),
-    pullHistory: vi.fn(),
-  },
-}))
-
 import { LobbyScreen } from '../../src/screens/LobbyScreen'
 import { useGameStore } from '../../src/store/gameStore'
 import { useStatsStore } from '../../src/store/statsStore'
@@ -103,7 +88,11 @@ describe('LobbyScreen', () => {
 
 describe('LobbyScreen -> gameStore -> net wiring', () => {
   beforeEach(() => {
-    useStatsStore.setState({ vgamesToken: 'test-token', vgamesAccountId: 'test-account' })
+    useStatsStore.setState({
+      vgamesToken: 'test-token',
+      vgamesAccountId: 'test-account',
+      vgamesTokenExp: Math.floor(Date.now() / 1000) + 3600,
+    })
   })
 
   it('Create Room drives the store into the waiting room with the returned code', async () => {

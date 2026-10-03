@@ -8,10 +8,7 @@ import { useGameStore } from './store/gameStore'
 import { startTokenRefreshWatchers } from './net/tokenRefresh'
 
 // Boot side effects — all fire-and-forget (the UI renders immediately and
-// updates reactively as each lands). The old eager `socketService.connect()`
-// (which woke the Render Socket.IO server and carried a persisted token) is
-// GONE: nothing on the online path uses that server anymore (Phase 2C —
-// online play now talks HTTP/WS to the Cloudflare worker instead).
+// updates reactively as each lands). Online play and stats use the worker.
 
 // Cross-device history restore, if already signed in (persisted VGames token).
 if (useStatsStore.getState().vgamesToken) {

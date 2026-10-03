@@ -13,7 +13,7 @@ import {
  * query logic, no `Response` construction (index.ts's job) — same layering
  * convention as `do/stats.ts`.
  *
- * HARD CONSTRAINT (Vijay-approved): ZERO compute for a player who never
+ * HARD CONSTRAINT: ZERO compute for a player who never
  * opens the tab. This module is invoked from exactly ONE place — index.ts's
  * `/stats/my-style` route, on an authed GET — and nowhere else. In
  * particular, `do/stats.ts#reportMatch` (the match-end write path) never

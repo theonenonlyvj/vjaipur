@@ -247,13 +247,13 @@ function staticEval(state: GameState, observerIndex: 0 | 1): number {
       // heldDecay (v2): held value fades as the deck-clock runs out — the
       // corpus showed the bot stranding sellable stacks (a full precious
       // pair unsold at round end in 30% of games) and showing ZERO sell-rate
-      // shift at deck<=4 while Vijay's jumped +15pp. Realized tokens (2.0x)
+      // shift at deck<=4 while the reference player's jumped +15pp. Realized tokens (2.0x)
       // don't decay, so cashing out dominates late. Round-end reachability
       // is otherwise invisible to a mid-round eval (no terminal in horizon).
       score += sumTopN(pile, myCount) * (precious ? 1.3 : 1.0) * heldDecay
       // Option value of the bonus tier this stack could ALREADY bank
       // (2026-08-02: bot cashed quick 3s ~6x more often than 4s+5s combined
-      // while Vijay farmed 4/5-bonuses — held stacks were valued ONLY by
+      // while the reference player farmed 4/5-bonuses — held stacks were valued ONLY by
       // goods tokens, so the "wait for the 4th card" line washed out under
       // per-iteration determinization). 0.8x of the bankable tier (missing
       // 0.2 = tempo/risk), scaled by the clock: building needs time, and a
@@ -269,7 +269,7 @@ function staticEval(state: GameState, observerIndex: 0 | 1): number {
       // above. Credit part of the SECOND pile token (the pair's completion
       // payoff): front-loaded piles (diamond 7,7 / gold 6,6) automatically
       // make this urgent where urgency is real — the corpus gap was gold
-      // (-20.5pp take-rate vs Vijay, z=-4.6) and diamond (-13.1pp), while
+      // (-20.5pp take-rate vs the reference player, z=-4.6) and diamond (-13.1pp), while
       // flat-piled silver showed NO gap. Clock-scaled: no pair-chasing at
       // round end.
       if (EVAL_V2 && precious) {
@@ -285,7 +285,7 @@ function staticEval(state: GameState, observerIndex: 0 | 1): number {
     // public info only — revealedHands (cards they took face-up, which the
     // bot legitimately saw) plus uniform random fill that averages out
     // across iterations. The corpus showed a 73% denial miss rate, and
-    // Vijay's un-denied stacks became his biggest payoffs.
+    // the reference player's un-denied stacks became their biggest payoffs.
     if (EVAL_V2) {
       const oppCount = goodCount(opp.hand, good)
       if (oppCount >= minSell) {
@@ -463,13 +463,12 @@ export interface IsmctsOptions {
   /**
    * MINIMUM iterations regardless of wall-clock (default 25,000; wall-clock
    * mode only — pinned maxIterations ignores it). 2026-08-02 finding: the
-   * bot's strength is iterations-completed, and Vijay's phone under Low
-   * Power Mode ran moves at 6-12k iterations vs 35-48k at full power — he
-   * went 8-1 vs the throttled bot vs 55% vs the real one. "Hard" should be
+   * bot's strength is iterations-completed, and a test phone under Low
+   * Power Mode ran moves at 6-12k iterations vs 35-48k at full power.
+   * "Hard" should be
    * the same opponent on a dying phone as on a desktop, so the search now
    * runs until BOTH the time budget is spent AND this floor is reached,
-   * bounded by HARD_CAP_MS (Vijay: "i'm open to slightly slower on shitty
-   * device"). Benchmarks/tests pass 0 to keep pure-time semantics.
+   * bounded by HARD_CAP_MS. Benchmarks/tests pass 0 to keep pure-time semantics.
    */
   minIterations?: number
   /**

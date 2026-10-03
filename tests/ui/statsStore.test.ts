@@ -21,19 +21,6 @@ const localStorageMock = {
 
 vi.stubGlobal('localStorage', localStorageMock)
 
-vi.mock('../../src/socket/socketService', () => ({
-  socketService: {
-    connected: true,
-    connect: vi.fn(),
-    syncMatch: vi.fn(),
-    restoreAccount: vi.fn(),
-    secureAccount: vi.fn(),
-    updateProfile: vi.fn(),
-    setAuthToken: vi.fn(),
-    pullHistory: vi.fn(),
-  },
-}))
-
 vi.mock('../../src/auth/vgamesClient', () => ({
   vgamesQuick: vi.fn(),
   vgamesSetCredentials: vi.fn(),
@@ -43,13 +30,13 @@ vi.mock('../../src/auth/vgamesClient', () => ({
 vi.mock('../../src/net/online', () => ({
   reportMatch: vi.fn(),
   history: vi.fn(),
+  updateProfile: vi.fn(),
 }))
 
 // NOW import the store + mocked collaborators
 import { useStatsStore } from '../../src/store/statsStore'
-import { socketService } from '../../src/socket/socketService'
 import { vgamesQuick, vgamesSetCredentials, vgamesLogin } from '../../src/auth/vgamesClient'
-import { reportMatch, history } from '../../src/net/online'
+import { reportMatch, history, updateProfile } from '../../src/net/online'
 import { WorkerError } from '../../src/net/http'
 
 // Builds a syntactically-real (unsigned) JWT whose payload carries only
@@ -568,30 +555,24 @@ describe('statsStore', () => {
   })
 
   describe('setDisplayName', () => {
-    it('mints/reuses a VGames token and updates the profile by token — no plaintext secret round-trip', async () => {
+    it('mints/reuses a VGames token and updates the worker profile for that authenticated account', async () => {
       useStatsStore.getState().ensureAccount()
       vi.mocked(vgamesQuick).mockResolvedValueOnce({ token: 'vg-tok-6', accountId: 'vg-acc-6' })
 
       await useStatsStore.getState().setDisplayName('NewName')
 
       expect(useStatsStore.getState().displayName).toBe('NewName')
-      expect(socketService.updateProfile).toHaveBeenCalledWith({
-        vgamesToken: 'vg-tok-6',
-        displayName: 'NewName',
-      })
-      const payload = vi.mocked(socketService.updateProfile).mock.calls[0][0] as any
-      expect(payload.friendCode).toBeUndefined()
-      expect(payload.secretKey).toBeUndefined()
+      expect(updateProfile).toHaveBeenCalledWith('NewName')
     })
 
-    it('does not call updateProfile if minting a VGames account fails (fail-closed)', async () => {
+    it('does not call the worker profile route if minting a VGames account fails (fail-closed)', async () => {
       useStatsStore.getState().ensureAccount()
       vi.mocked(vgamesQuick).mockRejectedValueOnce(new Error('network down'))
 
       await useStatsStore.getState().setDisplayName('NewName')
 
       expect(useStatsStore.getState().displayName).toBe('NewName') // local state still updates
-      expect(socketService.updateProfile).not.toHaveBeenCalled()
+      expect(updateProfile).not.toHaveBeenCalled()
     })
   })
 
@@ -784,7 +765,7 @@ describe('statsStore', () => {
       vi.mocked(history).mockResolvedValueOnce({
         matches: [
           {
-            id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Reks', playerScore: 20, opponentScore: 25,
+            id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Alice', playerScore: 20, opponentScore: 25,
             won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-2', timestamp: 1_700_000_001_000,
             gamesWon: 0, gamesLost: 1,
           },
@@ -793,7 +774,7 @@ describe('statsStore', () => {
 
       await useStatsStore.getState().pullVGamesHistory()
 
-      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_id: 'acct-rival-2', opponent_name: 'Reks' })
+      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_id: 'acct-rival-2', opponent_name: 'Alice' })
     })
 
     it('a null opponentName (unresolved opponent) maps to a null opponent_name, not undefined/omitted', async () => {

@@ -6,8 +6,8 @@ produces different numbers, the script drifted (bug), not the baseline.
 
 ## Corpus
 
-- 87 games, Vijay (`theonenonlyvj`, account `c02875a7-0470-5ef3-b87a-38abcbdcd952`)
-  vs the **ismcts** tier ("Hard (ISMCTS)"), played 2026-07-25 → 07-27.
+- 87 games from one anonymized player vs the **ismcts** tier
+  ("Hard (ISMCTS)"), played over the baseline collection window.
 - Every logged game in this corpus is single-round (`round: 1` only) — the
   per-move logger evidently hadn't captured multi-round matches yet at this
   point. This is a genuine property of the data, not a script bug — see the
@@ -43,7 +43,7 @@ the per-move logger predates the early-stop feature. Fire-rate in the wild
 can't be computed from match_logs until the logger is extended to record it.
 Noted, not blocking.
 
-## Vijay (theonenonlyvj) style vs ismcts
+## Reference-player style vs ismcts
 
 - **Action mix** (per-move %): human `SELL:39 TAKE_EXCHANGE:24 TAKE_SINGLE:20
   TAKE_CAMELS:17`  vs  ai `SELL:39 TAKE_EXCHANGE:24 TAKE_CAMELS:21
@@ -58,7 +58,7 @@ Noted, not blocking.
 - **Precious-at-2** (diamond/gold/silver sold in pairs, of all precious
   sells): human `184 of 278 (66%)`  vs  ai `164 of 215 (76%)`
 - **Tokens-per-card** (mean of per-sale got/quantity, from pile state at the
-  moment of sale): human **3.79**  vs  ai **3.44** — Vijay sells into
+  moment of sale): human **3.79**  vs  ai **3.44** — the reference player sells into
   fuller/higher-value piles on average.
 - **Camels**: both `TAKE_CAMELS` median herd-before = **1** (human n=299, ai
   n=357 — the bot takes camels noticeably more often, consistent with the
@@ -66,7 +66,7 @@ Noted, not blocking.
 - **Score trajectory** (human minus bot, mean per-move score delta by game
   quartile P0-P3):
   - **WINS**: `P0:-1.8  P1:+1.9  P2:+7.2  P3:+12.9` — wins are a **late
-    surge**: Vijay is usually slightly behind early, pulls ahead by the
+    surge**: the reference player is usually slightly behind early, pulls ahead by the
     midgame, and the lead compounds hard in the endgame.
   - **LOSSES**: `P0:-0.7  P1:-1.6  P2:-2.0  P3:-5.1` — losses are **small,
     compounding deficits**, not one big blunder: the gap widens steadily
@@ -98,7 +98,7 @@ weaker.** When comparing a future run against this baseline:
 ## Re-run instructions
 
 ```bash
-cd /Users/vijayram/Cursor/vjaipur
+cd "$(git rev-parse --show-toplevel)"
 
 # 1. Pull a fresh dump from remote D1 (requires wrangler auth; run from repo
 #    root — the script itself cd's into worker/ for the wrangler calls).
@@ -109,7 +109,7 @@ node tools/mlogs/analyze.mjs --tier ismcts
 
 # Optional: scope to one account (id or a case-insensitive substring of
 # their display_name).
-node tools/mlogs/analyze.mjs --account theonenonlyvj --tier ismcts
+node tools/mlogs/analyze.mjs --account '<display-name-or-account-id>' --tier ismcts
 
 node tools/mlogs/analyze.mjs --help   # full usage
 ```
@@ -136,21 +136,21 @@ silently drifting.
 
 ## What to watch in 3 months (once more players' data accumulates)
 
-- **Per-player 4-bonus gap.** Vijay's is 38 vs the bot's 56 today — does
+- **Per-player 4-bonus gap.** The reference player's is 38 vs the bot's 56 — does
   everyone underconvert to 4-bonuses relative to the bot, or is this
-  Vijay-specific? A wide per-player spread would suggest coachable technique
+  player-specific? A wide per-player spread would suggest coachable technique
   ("hold for the 4th card") rather than an inherent bot advantage.
-- **Tokens-per-card vs the bot's.** Vijay sells into higher-value piles
+- **Tokens-per-card vs the bot's.** The reference player sells into higher-value piles
   (3.79 vs 3.44) — is that skill (patience) or just variance from a small
   sample? Worth re-checking once n is larger, and per-player once there's
   more than one account.
-- **Whether Vijay's win% moves off ~40%** (44-66 overall, 34-53 logged) as
+- **Whether the reference player's win% moves off ~40%** (44-66 overall, 34-53 logged) as
   more games accumulate — the bot health block above says the search itself
   is healthy and untouched, so a shift here is signal about play technique
   (his or future patches to himself), not the bot drifting.
 - **Whether other players show the same win-trajectory shape** (late surge
   in wins, compounding small deficits in losses) or something different —
-  right now this is n=1 (Vijay only); the per-player report is built
+  right now this is n=1; the per-player report is built
   specifically so this generalizes the moment a second account has ≥5
   logged games.
 - **Multi-round logs.** Today's corpus is 100% single-round — once matches

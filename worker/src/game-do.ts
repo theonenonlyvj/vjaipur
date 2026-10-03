@@ -274,7 +274,7 @@ export class GameDO extends DurableObject<Env> {
    * safety-re-drive any AI-covered seat and re-arm both absence covers
    * (`driveIfAI`/`armDisconnectCoverIfAbsent`/`armRoundWaitIfAbsent`) every
    * tick while a human watched. That machinery drove/armed COVER FROM
-   * ABSENCE specifically — the thing Vijay explicitly no longer wants: an
+   * ABSENCE specifically — forbidden by the product rule: an
    * absent player's turn now simply PAUSES (see `CLAIM_GRACE_MS`'s
    * docstring), never auto-covers, never auto-advances. Those three calls
    * are removed here; the functions themselves stay defined (still
@@ -483,7 +483,7 @@ export class GameDO extends DurableObject<Env> {
 
   /**
    * POST /leave — graceful "step away, resume later" (NOT a resign, NOT a
-   * forfeit, and — since Vijay's 2026-07-18 no-AI-takeover ruling — NO AI
+   * forfeit, and — under the no-AI-takeover rule — NO AI
    * cover). The match keeps going, the seat stays OWNED, and the game persists
    * (the whole point of the DO: reopen it from "Your games" anytime). We simply
    * mark this seat away NOW (set `disconnected_at`, stale `last_seen_at`) so the

@@ -3,7 +3,7 @@ import { json, generateCode } from './shared'
 import { ABANDON_MS, WAITING_ABANDON_MS } from './do/constants'
 import { authenticateToken, extractBearerToken, requireAuth } from './do/authctx'
 import { handlePreflight, withCors } from './do/cors'
-import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, touchPlayerLastSeen, type ReportMatchBody } from './do/stats'
+import { getHistory, getLeaderboard, getRollup, isValidOpponentTypeFilter, reportMatch, touchPlayerLastSeen, updatePlayerProfile, type ReportMatchBody } from './do/stats'
 import { getMyStyle } from './do/style'
 import { getRivalry } from './do/rivalry'
 
@@ -275,6 +275,19 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     const auth = await requireAuth(request, env)
     if (auth instanceof Response) return auth
     return json({ matches: await getHistory(env.DB, auth.accountId) })
+  }
+  if (request.method === 'POST' && path === '/stats/profile') {
+    const auth = await requireAuth(request, env)
+    if (auth instanceof Response) return auth
+    let body: { displayName?: unknown }
+    try {
+      body = (await request.json()) as typeof body
+    } catch {
+      return json({ error: 'bad_json' }, 400)
+    }
+    const result = await updatePlayerProfile(env.DB, auth.accountId, body?.displayName)
+    if ('error' in result) return json(result, 400)
+    return json(result)
   }
   if (request.method === 'POST' && path === '/stats/report') {
     const auth = await requireAuth(request, env)

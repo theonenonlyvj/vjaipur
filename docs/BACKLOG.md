@@ -6,7 +6,7 @@ and deduped against later entries that resolved or superseded it — if
 something isn't here, either it shipped (check the chronicle) or it was never
 opened. Each item is tagged:
 
-- **HELD** — deliberately not doing this until Vijay gives an explicit go.
+- **FOLLOW-UP** — repository work is complete; an external action remains.
 - **PARKED** — designed/scoped, deliberately not building yet.
 - **WATCH** — nothing to build; a signal to keep an eye on.
 - **IDEA** — raised, not scoped, not committed to.
@@ -16,22 +16,13 @@ For current architecture/state, read `docs/STATE.md` first.
 
 ---
 
-## HELD — Decommission the legacy Render Node backend + Supabase
+## FOLLOW-UP — Retire superseded external services
 
-`server/` (Node/Express + Socket.IO relay) and its Supabase-backed account/
-leaderboard storage were superseded by the Cloudflare Worker + D1 rebuild on
-2026-07-18, but are still deployed on Render (service `vjaipur-server`) and
-still present in the repo. Explicitly **HELD for Vijay's go** once he's fully
-confident in the new stack — most recently reaffirmed 2026-07-26 ("will
-retire later") and again in the 2026-08-03 cleanup pass, which deliberately
-left `server/` + `socketService` wiring untouched.
-
-- **Rollback anchor**: tag `checkpoint-2026-07-18-pre-online-worker`.
-- **Scoped out of any decommission pass until then**: `server/`, its
-  Supabase client/schema, `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` env vars,
-  `docs/operations/supabase-schema.md` / `admin-runbook.md` /
-  `render-deployment.md` (these describe the live-but-HELD system accurately
-  today — don't touch them as part of a docs pass either).
+The updated client sends profile changes to the Worker. The legacy server,
+its tests and dependencies, and the Render service declaration remain intact
+for older clients. Deployment order is Worker first, then client. Retirement
+of Render's legacy web service and Supabase requires live traffic/dependency
+evidence in addition to successful smoke tests. Keep the static site.
 
 ## Omniscient bot telegraphs the deck
 
@@ -46,7 +37,7 @@ the original lineup shipped (2026-07-20); still open.
 
 ## PARKED — "Bonus Race" variant
 
-Vijay's idea (2026-07-26): ordered 3/4/5 bonus piles (highest-value first,
+Recorded idea: ordered 3/4/5 bonus piles (highest-value first,
 rewarding whoever sells big *first*), consistent with the goods tokens'
 existing descending order. Decision: keep the official random draw as
 **default** (preserves round-end reveal suspense, protects casual players,
@@ -62,14 +53,14 @@ ISMCTS stronger vs. humans), and redaction changes character (opponent bonus
 *values* become inferable once the order is known, where today only counts
 are public).
 
-## WATCH — Vijay's next ~30 games vs. ISMCTS eval v2
+## WATCH — Next ~30 games vs. ISMCTS eval v2
 
 Eval v2 (`df8b9ac`) gated at 60% (36-24) vs. the pre-v2 eval and shipped
 2026-08-02, alongside the 25,000-iteration floor (`f7e78b2`) that closed the
 throttled-phone loophole discovered the same day (a device in Low Power Mode
 was running the bot at 6-12k iterations/move vs. 35-48k at full power — a
 materially easier opponent without anyone intending it). Open question: does
-eval v2's real-world winrate hold up over Vijay's next ~30 games against
+eval v2's real-world winrate hold up over the next ~30 games against
 **depth-controlled** data — i.e. compare like-for-like on search depth/
 iteration count, not raw winrate, since the iteration floor already changed
 what "the bot" means mid-stream. Use `tools/mlogs/analyze.mjs` (see

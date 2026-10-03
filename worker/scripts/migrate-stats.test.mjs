@@ -11,14 +11,14 @@ import { transformMatches, emitSql, sqlEscape, renderReport } from './migrate-st
 // ── Fixtures ────────────────────────────────────────────────────────────
 
 const players = [
-  { id: 'p-vijay', friend_code: 'VJ-1234', display_name: 'Vijay', vgames_account_id: 'acct-vijay' },
+  { id: 'p-alice', friend_code: 'VJ-1234', display_name: 'Alice', vgames_account_id: 'acct-alice' },
   { id: 'p-noaccount', friend_code: 'VJ-9999', display_name: "O'Brien", vgames_account_id: null },
 ]
 
 const baseMatches = [
   // 1. Normal online match — friend_code opponent_id, must be dropped/NULLed.
   {
-    player_id: 'p-vijay',
+    player_id: 'p-alice',
     opponent_type: 'online',
     opponent_id: 'VJ-5678',
     player_score: 42,
@@ -28,7 +28,7 @@ const baseMatches = [
   },
   // 2. vs-AI match — tier id must be preserved verbatim.
   {
-    player_id: 'p-vijay',
+    player_id: 'p-alice',
     opponent_type: 'hard3',
     opponent_id: null,
     player_score: 40,
@@ -48,7 +48,7 @@ const baseMatches = [
   },
   // 4. Bad/unparseable timestamp — must be skipped + counted.
   {
-    player_id: 'p-vijay',
+    player_id: 'p-alice',
     opponent_type: 'easy',
     opponent_id: null,
     player_score: 40,
@@ -62,7 +62,7 @@ test('normal online match: opponent_account_id NULL, timestamp epoch-ms, source 
   const { inserts, report } = transformMatches(players, [baseMatches[0]])
   assert.equal(inserts.length, 1)
   const row = inserts[0]
-  assert.equal(row.account_id, 'acct-vijay')
+  assert.equal(row.account_id, 'acct-alice')
   assert.equal(row.opponent_type, 'online')
   assert.equal(row.opponent_account_id, null) // ADDENDUM U — never joined
   assert.equal(row.player_score, 42)
@@ -142,7 +142,7 @@ test('emitSql emits a NULL literal for opponent_account_id and game_uuid', () =>
   const { inserts } = transformMatches(players, [baseMatches[0]])
   const sql = emitSql(inserts)
   // account_id, opponent_type NOT NULL columns; opponent_account_id + game_uuid are NULL.
-  assert.match(sql, /VALUES \('acct-vijay', 'online', NULL, 42, 30, 1, 'client_reported', 0, NULL, \d+, \d+\)/)
+  assert.match(sql, /VALUES \('acct-alice', 'online', NULL, 42, 30, 1, 'client_reported', 0, NULL, \d+, \d+\)/)
 })
 
 test('emitSql on an empty insert list returns an empty string', () => {
