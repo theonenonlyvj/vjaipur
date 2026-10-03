@@ -10,7 +10,7 @@
 > - **Live backlog** → [`../../BACKLOG.md`](../../BACKLOG.md)
 
 Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
-(Chandy, Sureka/reks) playing; fixes driven by their reports.
+(Chandy, Reks/reks) playing; fixes driven by their reports.
 
 ## SHIPPED & LIVE today
 - **BONUS! overlay stuck all game** — it only dismissed on an 'exit' animation
@@ -49,9 +49,9 @@ Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
 
 ## Identified players (behavioral inference; no geo on old accounts)
 - Vijay = **theonenonlyvj**. Chandy = **Guest_9752** (confirmed by a 10:11am
-  4/2 game he IDed). reks = **Sureka** (claimed July). Other guests = a mix of
+  4/2 game he IDed). reks = **Reks** (claimed July). Other guests = a mix of
   friends + Vijay's early guest sessions. After Chandy, 2nd-most is a tie:
-  Guest_3334 (5g) / Guest_8471 (5g) — candidates for Sureka's old sessions.
+  Guest_3334 (5g) / Guest_8471 (5g) — candidates for Reks's old sessions.
 
 ## BACKLOG (not done — needs a real focused run or Vijay's call)
 1. **HARDER FAIR BOT (the big one).** Vijay wants a fair (no-peeking) bot
@@ -71,7 +71,7 @@ Continuation after the 2026-07-18 online rebuild went live. Vijay + friends
    explicit go once he's fully confident. Rollback anchor:
    `checkpoint-2026-07-18-pre-online-worker`.
 4. **Render Blueprint sync** so the no-cache header applies (Vijay dashboard).
-5. Existing stale tabs (Sureka's/others' phones) need ONE full reload to pick up
+5. Existing stale tabs (Reks's/others' phones) need ONE full reload to pick up
    the update-banner build; after that it self-heals.
 
 ## Status: everything actionable + validated is shipped. The harder-fair-bot is
@@ -92,7 +92,7 @@ Remaining backlog: Omniscient readability; decommission (held); Blueprint sync.
 Vijay's 25 vs-AI games (20 ISMCTS) weren't reaching the server: his claimed
 account's token expired, silent quick-reauth failed on his device, failures
 queued invisibly, and every surface said something cryptic ('unauthorized',
-'Failed to create room' for Sureka) instead of "log back in" — which was the
+'Failed to create room' for Reks) instead of "log back in" — which was the
 whole fix. Shipped along the way: pending-sync banner + Sync now + error
 surfacing + enriched 401 diagnostics. Then a 4-lens council review produced 5
 fixes, all shipped: sessionExpired store signal + refuse silent claimed→ghost
@@ -187,13 +187,13 @@ Vijay's call** on whether this is worth a tab (vs. staying a run-when-curious
 CLI tool) and, if so, endpoint vs. client-compute.
 
 ## UPDATE 2026-07-27 night — live-match bug sweep (5a465c2, worker deployed)
-Vijay+Sureka played WEFFFT (1-0) + 6DRHAJ (3-0, rounds 74-67/74-68/85-64 =
+Vijay+Reks played WEFFFT (1-0) + 6DRHAJ (3-0, rounds 74-67/74-68/85-64 =
 233-199 — totals VERIFIED correct against the archive; his "scoring stats
 are off" was the fake breakdown). Three fixes shipped:
 1. lastRoundReveal: real opponent GOODS tokens + bonus SUMS at round_end/
    match_over only (bonus VALUES still never leave the DO); fuzz-redaction
    extended, reveal verified null mid-round live post-deploy.
-2. Stale final-move banner cleared at round_start (Sureka genuinely closed
+2. Stale final-move banner cleared at round_start (Reks genuinely closed
    R1 AND R2 selling 3 silver — right attribution, wrong timing).
 3. Online Rivals: display names via getHistory LEFT JOIN players (fallback
    Player <id8>).

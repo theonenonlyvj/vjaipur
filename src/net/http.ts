@@ -54,7 +54,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// Same-origin proxy fallback (2026-07-27, "Sureka's phone" failure class) —
+// Same-origin proxy fallback (2026-07-27, "Reks's phone" failure class) —
 // the shared mechanics (sticky flag, direct-then-proxy-on-throw, JSON
 // validation, rethrow-original-on-HTML) live in src/net/proxyFallback.ts
 // (factored out 2026-08-03, BUG 1, so src/auth/vgamesClient.ts's identity

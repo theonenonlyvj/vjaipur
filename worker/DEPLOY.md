@@ -29,7 +29,7 @@ Deploying the worker does NOT touch live users — the live client still talks t
 the old Render relay until step C.
 
 ## B. Stats migration (Supabase → the new D1) — needs Vijay's Supabase key
-Old match history (~39 rows incl. Vijay + Sureka) lives in Supabase. The new
+Old match history (~39 rows incl. Vijay + Reks) lives in Supabase. The new
 client reads history/leaderboard from the worker's D1, which starts EMPTY. Port
 it so cross-device history isn't blank on cutover:
 1. `SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node worker/scripts/migrate-stats.mjs --live`
@@ -37,7 +37,7 @@ it so cross-device history isn't blank on cutover:
    (opponent_account_id NULL for all; ISO→epoch-ms; source=client_reported).
 2. Review the report (count, per-tier tally, skipped rows).
 3. `npx wrangler d1 execute vjaipur --remote --file=worker/scripts/out/d1-matches.sql`
-4. Spot-check: Vijay's + Sureka's totals in D1 match their in-app stats.
+4. Spot-check: Vijay's + Reks's totals in D1 match their in-app stats.
    (Supabase is left UNTOUCHED — rollback = ignore the D1 rows.)
 
 ## C. Client cutover — GATED (needs the Render dashboard, then a push)

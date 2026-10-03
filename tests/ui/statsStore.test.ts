@@ -784,7 +784,7 @@ describe('statsStore', () => {
       vi.mocked(history).mockResolvedValueOnce({
         matches: [
           {
-            id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Sureka', playerScore: 20, opponentScore: 25,
+            id: 3, opponentType: 'online', opponentAccountId: 'acct-rival-2', opponentName: 'Reks', playerScore: 20, opponentScore: 25,
             won: false, source: 'online_authoritative', aiCovered: false, gameUuid: 'game-uuid-2', timestamp: 1_700_000_001_000,
             gamesWon: 0, gamesLost: 1,
           },
@@ -793,7 +793,7 @@ describe('statsStore', () => {
 
       await useStatsStore.getState().pullVGamesHistory()
 
-      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_id: 'acct-rival-2', opponent_name: 'Sureka' })
+      expect(useStatsStore.getState().matches[0]).toMatchObject({ opponent_id: 'acct-rival-2', opponent_name: 'Reks' })
     })
 
     it('a null opponentName (unresolved opponent) maps to a null opponent_name, not undefined/omitted', async () => {

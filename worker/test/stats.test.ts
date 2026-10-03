@@ -469,13 +469,13 @@ describe('getHistory', () => {
   it('resolves the opponent\'s display name via a players LEFT JOIN on opponent_account_id', async () => {
     const a = acct('history-with-rival')
     const rival = acct('history-rival')
-    await seedPlayer(DB(), rival, 'Sureka')
+    await seedPlayer(DB(), rival, 'Reks')
     await seedMatch(DB(), { accountId: a, opponentAccountId: rival, playerScore: 40, opponentScore: 33, won: true, timestamp: Date.now() })
 
     const rows = await getHistory(DB(), a)
     expect(rows.length).toBe(1)
     expect(rows[0]!.opponentAccountId).toBe(rival)
-    expect(rows[0]!.opponentName).toBe('Sureka')
+    expect(rows[0]!.opponentName).toBe('Reks')
   })
 
   it('opponentName is null (never the raw UUID) when the opponent has no players row yet', async () => {

@@ -165,5 +165,5 @@ friend's name is weird. His idea: "claim win OR resume later."
   presence probe all pass on prod. D1 cleaned (77 migrated matches + real names
   kept). Tests: worker 207 / client 465 / server 48.
 - **Follow-up:** /my-games returns no opponent name → resume list shows code/status
-  not "vs Sureka" (small worker join to add it). **STILL HOLDING** the old Render
+  not "vs Reks" (small worker join to add it). **STILL HOLDING** the old Render
   Node backend + Supabase decommission until Vijay plays + confirms.

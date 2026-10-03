@@ -544,14 +544,14 @@ describe('StatsDashboard MY RECORDS — ONLINE RIVALS shows a resolved name, not
   it('renders the rival\'s display name instead of their account_id', () => {
     useStatsStore.setState({
       matches: [
-        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Sureka', player_score: 40, opponent_score: 30, won: true, timestamp: 1 },
-        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Sureka', player_score: 20, opponent_score: 35, won: false, timestamp: 2 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Reks', player_score: 40, opponent_score: 30, won: true, timestamp: 1 },
+        { opponent_type: 'online', opponent_id: 'acct-rival-uuid-1234', opponent_name: 'Reks', player_score: 20, opponent_score: 35, won: false, timestamp: 2 },
       ],
     })
 
     render(<StatsDashboard onClose={() => {}} />)
 
-    expect(screen.getByText('Sureka')).toBeInTheDocument()
+    expect(screen.getByText('Reks')).toBeInTheDocument()
     expect(screen.queryByText('acct-rival-uuid-1234')).not.toBeInTheDocument()
   })
 
@@ -977,11 +977,11 @@ describe('StatsDashboard MY STYLE — hard-bot reassurance line', () => {
 // =============================================================================
 
 const RIVAL_MATCHES = [
-  { opponent_type: 'online' as const, opponent_id: 'acct-rival-sureka', opponent_name: 'Sureka', player_score: 74, opponent_score: 67, won: true, timestamp: 1 },
+  { opponent_type: 'online' as const, opponent_id: 'acct-rival-reks', opponent_name: 'Reks', player_score: 74, opponent_score: 67, won: true, timestamp: 1 },
 ]
 
 const RIVALRY_RESPONSE_ELIGIBLE: RivalryResponse = {
-  opponentName: 'Sureka',
+  opponentName: 'Reks',
   record: {
     games: { wins: 3, losses: 1, currentStreak: { who: 'me', n: 2 } },
     matches: { wins: 2, losses: 0 },
@@ -1003,7 +1003,7 @@ const RIVALRY_RESPONSE_ELIGIBLE: RivalryResponse = {
     tokensPerCard: { mine: 3.71, theirs: 3.35, myCards: 40, theirCards: 38, eligible: true },
     bonusSales: { mine3: 5, mine4: 2, mine5: 1, theirs3: 3, theirs4: 6, theirs5: 1, eligible: true },
   },
-  edgeFinder: 'Edge finder: Sureka converts more 3+ sales into 4s (6 vs your 2) — hold a beat longer.',
+  edgeFinder: 'Edge finder: Reks converts more 3+ sales into 4s (6 vs your 2) — hold a beat longer.',
 }
 
 const RIVALRY_RESPONSE_INELIGIBLE_CRAFT: RivalryResponse = {
@@ -1018,7 +1018,7 @@ const RIVALRY_RESPONSE_INELIGIBLE_CRAFT: RivalryResponse = {
 async function openRivalsTab() {
   useStatsStore.setState({ matches: RIVAL_MATCHES })
   render(<StatsDashboard onClose={() => {}} />)
-  expect(screen.getByText('Sureka')).toBeInTheDocument()
+  expect(screen.getByText('Reks')).toBeInTheDocument()
 }
 
 describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
@@ -1036,8 +1036,8 @@ describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
 
-    fireEvent.click(screen.getByText('Sureka'))
-    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledWith('acct-rival-sureka'))
+    fireEvent.click(screen.getByText('Reks'))
+    await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledWith('acct-rival-reks'))
     expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
   })
 
@@ -1045,11 +1045,11 @@ describe('StatsDashboard RIVALRY modal — lazy fetch + session cache', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
 
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
     await waitFor(() => expect(onlineApi.rivalry).toHaveBeenCalledTimes(1))
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
     // Give any errant effect a tick to fire before asserting it didn't re-fetch.
     await new Promise((r) => setTimeout(r, 0))
     expect(onlineApi.rivalry).toHaveBeenCalledTimes(1)
@@ -1064,9 +1064,9 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('renders the games-primary record, streak, matches-secondary line, totals, and biggest-game callout', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
-    await waitFor(() => expect(screen.getByText('YOU vs SUREKA')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('YOU vs REKS')).toBeInTheDocument())
     // Games record is the hero (DELTA A: games primary, matches secondary).
     expect(screen.getByText(/3–1/)).toBeInTheDocument()
     expect(screen.getByText('in games')).toBeInTheDocument()
@@ -1083,7 +1083,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('renders eligible craft rows (tokens per card, bonus sales) as tug-of-war rows with real numbers', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
     await waitFor(() => expect(screen.getByText('Tokens per card')).toBeInTheDocument())
     expect(screen.getByText('3-card bonus sales')).toBeInTheDocument()
@@ -1095,7 +1095,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
   it('shows the "not enough sells yet" fallback line for ineligible craft rows instead of a tug-of-war row', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_INELIGIBLE_CRAFT)
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
     await waitFor(() => expect(screen.getAllByText('not enough sells yet to compare craft')).toHaveLength(2))
     expect(screen.queryByText('Tokens per card')).not.toBeInTheDocument()
@@ -1105,7 +1105,7 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
     vi.spyOn(onlineApi, 'rivalry').mockResolvedValue(RIVALRY_RESPONSE_ELIGIBLE)
     useStatsStore.setState({ matches: RIVAL_MATCHES })
     const { container } = render(<StatsDashboard onClose={() => {}} />)
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
     await waitFor(() => expect(screen.getByText(/MATCH 6DRHAJ/)).toBeInTheDocument())
     expect(screen.getByText(/MATCH AAAA11/)).toBeInTheDocument()
@@ -1126,17 +1126,17 @@ describe('StatsDashboard RIVALRY modal — rendering', () => {
     let resolveFetch: (v: RivalryResponse) => void = () => {}
     vi.spyOn(onlineApi, 'rivalry').mockReturnValue(new Promise((resolve) => { resolveFetch = resolve }))
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
     expect(await screen.findByText(/Loading head-to-head/i)).toBeInTheDocument()
     resolveFetch(RIVALRY_RESPONSE_ELIGIBLE)
-    await waitFor(() => expect(screen.getByText('YOU vs SUREKA')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('YOU vs REKS')).toBeInTheDocument())
   })
 
   it('shows a friendly error state on fetch failure', async () => {
     vi.spyOn(onlineApi, 'rivalry').mockRejectedValue(new Error('http_404'))
     await openRivalsTab()
-    fireEvent.click(screen.getByText('Sureka'))
+    fireEvent.click(screen.getByText('Reks'))
 
     await waitFor(() => expect(screen.getByText(/Could not load head-to-head/i)).toBeInTheDocument())
   })

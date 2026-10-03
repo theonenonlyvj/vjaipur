@@ -18,7 +18,7 @@ VJaipur is Vijay's private TypeScript/React implementation of the board game
 Jaipur: local pass-and-play, six AI difficulty tiers, and server-authoritative
 online play between real people, with accounts, stats, leaderboards, and a
 per-player "style" analysis feature layered on top. It's played by Vijay,
-Sureka, and a handful of friends (~10-user scale) — not a public product.
+Reks, and a handful of friends (~10-user scale) — not a public product.
 
 ## Architecture map
 
